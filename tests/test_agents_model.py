@@ -382,6 +382,22 @@ def test_blue_prompt_states_detect_report_contain():
     assert "wasted" in BLUE_PROMPT
 
 
+def test_red_prompt_avoids_repeats_and_lists_after_signin():
+    assert "Do not repeat" in RED_PROMPT
+    assert "history" in RED_PROMPT.lower()
+    assert "Once signed in" in RED_PROMPT
+    assert "list_files" in RED_PROMPT
+
+
+def test_blue_prompt_notes_business_cost_without_formula():
+    assert "business cost" in BLUE_PROMPT
+    assert "proportional" in BLUE_PROMPT
+    assert "only what the evidence supports" in BLUE_PROMPT
+    assert "business_weights" not in BLUE_PROMPT
+    assert "downtime_cost" not in BLUE_PROMPT
+    assert "blue_score" not in BLUE_PROMPT
+
+
 def test_red_messages_carry_remaining_turns_and_own_history():
     messages = red_build_messages(5, _mixed_history(), 20)
     user_text = messages[1]["content"]
