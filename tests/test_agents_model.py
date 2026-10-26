@@ -85,7 +85,7 @@ def test_model_ids_and_spend_cap():
     assert llm.DEFAULT_DAILY_LIMIT_USD == 5.0
 
 
-def test_red_valid_tool_call_uses_one_small_call(tmp_path, monkeypatch):
+def test_red_valid_tool_call_uses_one_call(tmp_path, monkeypatch):
     _isolated_llm(tmp_path, monkeypatch)
     resp = _response("The web host looks like the first place to check.",
                      [("scan_host", {"host": "web"})])
@@ -99,8 +99,8 @@ def test_red_valid_tool_call_uses_one_small_call(tmp_path, monkeypatch):
     assert len(client.calls) == 1
     call = client.calls[0]
     assert call["model"] == "muse-spark-1.3"
-    assert call["max_tokens"] == 256
-    assert call["max_tokens"] <= 512
+    assert call["max_tokens"] == 1024
+    assert call["max_tokens"] <= 2048
 
 
 def test_blue_valid_call_carries_reasoning(tmp_path, monkeypatch):
