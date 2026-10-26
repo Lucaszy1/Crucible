@@ -10,10 +10,13 @@ from types import SimpleNamespace
 
 from crucible import llm, orchestrator
 from crucible.agents import ModelBlue, ModelRed
+from crucible.agents import _common
 from crucible.agents.blue import SYSTEM_PROMPT as BLUE_PROMPT
 from crucible.agents.blue import TOOL_SCHEMAS as BLUE_SCHEMAS
+from crucible.agents.blue import _build_messages as blue_build_messages
 from crucible.agents.red import SYSTEM_PROMPT as RED_PROMPT
 from crucible.agents.red import TOOL_SCHEMAS as RED_SCHEMAS
+from crucible.agents.red import _build_messages as red_build_messages
 
 
 def _response(content, tool_calls, finish_reason="stop"):
@@ -328,6 +331,94 @@ def test_cache_applies_to_repeat_turn(tmp_path, monkeypatch):
     assert first["tool"] == second["tool"] == "scan_host"
     assert len(client.calls) == 1
     assert llm.spent_today() > 0
+
+
+def _mixed_history():
+    return [
+        {
+            "id": "evt-0001", "timestamp": "2026-01-01T00:00:00+00:00",
+            "actor": "red", "tool": "scan_host", "args": {"host": "web"},
+            "result": {"ok": True, "host": "web", "reachable": True,
+                       "ports": [8000]},
+            "reasoning_summary": "probe web", "evidence_refs": [],
+        },
+        {
+            "id": "evt-0002", "timestamp": "2026-01-01T00:00:01+00:00",
+            "actor": "blue", "tool": "read_logs", "args": {"host": "web"},
+            "result": {"ok": True, "host": "web", "lines": [
+                {"id": "web:0", "line": "webapp listening on 8000"},
+                {"id": "web:1", "line": "request from=1.2.3.4 GET /admin"},
+            ]},
+            "reasoning_summary": "inspect", "evidence_refs": [],
+        },
+    ]
+
+
+def _own_section(user_text):
+    after = user_text.split("Your previous moves:")[1]
+    return after.split("Recent exercise moves:")[0]
+
+
+def test_red_prompt_states_objective_and_pacing():
+    assert "exercise secret" in RED_PROMPT
+    assert "db" in RED_PROMPT
+    assert "admin" in RED_PROMPT
+    assert "default sign-in" in RED_PROMPT
+    assert "quickly" in RED_PROMPT
+
+
+def test_blue_prompt_states_detect_report_contain():
+    assert "report_finding" in BLUE_PROMPT
+    assert "evidence_refs" in BLUE_PROMPT
+    assert "isolate_host" in BLUE_PROMPT
+    assert "patch_service" in BLUE_PROMPT
+    assert "before the secret" in BLUE_PROMPT
+    assert "wasted" in BLUE_PROMPT
+
+
+def test_red_messages_carry_remaining_turns_and_own_history():
+    messages = red_build_messages(5, _mixed_history(), 20)
+    user_text = messages[1]["content"]
+    assert "turn 5 of 20" in user_text.lower()
+    assert "Turns remaining (including this one): 16" in user_text
+    own = _own_section(user_text)
+    assert "scan_host" in own
+    assert "read_logs" not in own
+
+
+def test_blue_messages_carry_remaining_turns_and_own_history():
+    messages = blue_build_messages(6, _mixed_history(), 20)
+    user_text = messages[1]["content"]
+    assert "turn 6 of 20" in user_text.lower()
+    assert "Turns remaining (including this one): 15" in user_text
+    own = _own_section(user_text)
+    assert "read_logs" in own
+    assert "web:1" in own
+    assert "scan_host" not in own
+
+
+def test_own_history_empty_when_no_moves():
+    assert _common.summarize_own_history([], "red") == "No moves yet."
+    assert _common.summarize_own_history(_mixed_history(), "green") == "No moves yet."
+
+
+def test_orchestrator_passes_turn_cap_to_agents(tmp_path, monkeypatch):
+    seen = {}
+
+    class _Recording:
+        actor = "red"
+
+        def next_action(self, turn, history, max_turns=None):
+            seen.setdefault("caps", []).append(max_turns)
+            return None
+
+    class _RecordingBlue(_Recording):
+        actor = "blue"
+
+    monkeypatch.setattr(orchestrator, "run_tool", lambda name, args: {"ok": True})
+    orchestrator.run_exercise(_Recording(), _RecordingBlue(), max_turns=8,
+                              run_path=tmp_path / "caps.jsonl")
+    assert seen["caps"] == [8, 8]
 
 
 def test_exercise_turn_cap(tmp_path, monkeypatch):

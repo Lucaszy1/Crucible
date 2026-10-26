@@ -22,14 +22,19 @@ MAX_TOKENS = _common.MAX_TOKENS
 
 SYSTEM_PROMPT = (
     "You are the blue team in a defensive validation exercise inside an "
-    "isolated sandbox. Detect odd activity and contain it. Rules: call "
-    "exactly one tool per turn, only target hosts web, db, and workstation, "
-    "and put a one or two sentence reasoning summary in your reply text. "
-    "When you report a finding or take a containment action (block_ip, "
-    "isolate_host, patch_service, restore_host), cite log line ids such as "
-    "web:3 in an evidence_refs argument and in your reasoning text. Your only "
-    "tools are read_logs, list_processes, wait, block_ip, isolate_host, "
-    "patch_service, restore_host, and report_finding."
+    "isolated sandbox. Objective: detect suspicious activity fast, call "
+    "report_finding citing log line ids as evidence_refs as soon as logs "
+    "show probing, then contain with isolate_host or patch_service before "
+    "the secret is read. Logs only change when something happens, so "
+    "repeating read_logs with no new lines is wasted; call wait when there "
+    "is nothing new to check. Rules: call exactly one tool per turn, only "
+    "target hosts web, db, and workstation, and put a one or two sentence "
+    "reasoning summary in your reply text. When you report a finding or take "
+    "a containment action (block_ip, isolate_host, patch_service, "
+    "restore_host), cite log line ids such as web:3 in an evidence_refs "
+    "argument and in your reasoning text. Your only tools are read_logs, "
+    "list_processes, wait, block_ip, isolate_host, patch_service, "
+    "restore_host, and report_finding."
 )
 
 ALLOWED_TOOLS = (
@@ -132,11 +137,17 @@ TOOL_SCHEMAS = [
 ]
 
 
-def _build_messages(turn: int, history: list) -> list:
+def _build_messages(turn: int, history: list,
+                    max_turns: int = _common.DEFAULT_MAX_TURNS) -> list:
     recent = _common.summarize_history(history)
+    own = _common.summarize_own_history(history, ACTOR)
+    remaining = max(0, int(max_turns) - int(turn) + 1)
     user_text = (
-        f"This is turn {turn}. Call exactly one blue team tool for this turn. "
-        f"Recent moves:\n{recent}\n"
+        f"This is turn {turn} of {max_turns}. "
+        f"Turns remaining (including this one): {remaining}. "
+        f"Call exactly one blue team tool for this turn. "
+        f"Your previous moves:\n{own}\n"
+        f"Recent exercise moves:\n{recent}\n"
         "Reply text must hold a one or two sentence reasoning summary. "
         "Cite log line ids when you report or contain."
     )
@@ -166,12 +177,14 @@ class ModelBlue:
 
     def __init__(self, client=None, exercise_id: str | None = None,
                  max_tokens: int = MAX_TOKENS, temperature: float = 0.0,
-                 reasoning_effort: str | None = None):
+                 reasoning_effort: str | None = None,
+                 max_turns: int = _common.DEFAULT_MAX_TURNS):
         self._client = client
         self._exercise_id = exercise_id
         self._max_tokens = max_tokens
         self._temperature = temperature
         self._reasoning_effort = reasoning_effort
+        self._max_turns = max_turns
         self._fallback = ScriptedBlue()
 
     def _fallback_action(self, turn: int, history: list, note: str) -> dict | None:
@@ -182,12 +195,14 @@ class ModelBlue:
         action["reasoning"] = f"{note} Baseline move: {reason}".strip()
         return action
 
-    def next_action(self, turn: int, history: list) -> dict | None:
+    def next_action(self, turn: int, history: list,
+                    max_turns: int | None = None) -> dict | None:
         """Ask the model for one tool call, else use the baseline move."""
+        total = max_turns if max_turns is not None else self._max_turns
         try:
             response = llm.chat(
                 ROLE,
-                _build_messages(turn, history),
+                _build_messages(turn, history, total),
                 tools=TOOL_SCHEMAS,
                 exercise_id=self._exercise_id,
                 client=self._client,

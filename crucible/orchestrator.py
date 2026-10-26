@@ -8,6 +8,8 @@ stay reproducible from the saved log.
 
 from __future__ import annotations
 
+import inspect
+
 from crucible import events, tools
 from crucible.agents.scripted_blue import ScriptedBlue
 from crucible.agents.scripted_red import ScriptedRed
@@ -29,6 +31,17 @@ _DISPATCH = {
     "patch_service": tools.patch_service,
     "restore_host": tools.restore_host,
 }
+
+
+def _next_action(agent, turn: int, history: list, capped_turns: int):
+    """Ask one agent for its next move, sharing the turn cap it accepts."""
+    try:
+        params = inspect.signature(agent.next_action).parameters
+    except (TypeError, ValueError):
+        return agent.next_action(turn, history)
+    if "max_turns" in params:
+        return agent.next_action(turn, history, capped_turns)
+    return agent.next_action(turn, history)
 
 
 def run_tool(tool_name: str, args: dict) -> dict:
@@ -150,7 +163,7 @@ def run_exercise(
     for slot in range(capped_turns):
         agent = red if slot % 2 == 0 else blue
         try:
-            action = agent.next_action(slot + 1, writer.events)
+            action = _next_action(agent, slot + 1, writer.events, capped_turns)
         except Exception as exc:
             idle_rounds = 0
             turns_used += 1
