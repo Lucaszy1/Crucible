@@ -371,6 +371,9 @@ def test_red_prompt_states_objective_and_pacing():
     assert "root" in RED_PROMPT
     assert "toor" in RED_PROMPT
     assert "hints worth acting on" in RED_PROMPT
+    assert "no sign-in gate" in RED_PROMPT
+    assert "do not try more credentials" in RED_PROMPT
+    assert "act on the host it names" in RED_PROMPT
 
 
 def test_blue_prompt_states_detect_report_contain():
