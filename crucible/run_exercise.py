@@ -42,7 +42,22 @@ def parse_args(argv=None):
         default=None,
         help="Optional jsonl path for the event log",
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit nonzero if any turn fell back to the scripted baseline",
+    )
     return parser.parse_args(argv)
+
+
+def _count_driven_vs_fallback(event_list: list) -> tuple:
+    """Split logged turns into model-driven and baseline fallback counts."""
+    fallback = sum(
+        1
+        for event in (event_list or [])
+        if "using baseline" in str(event.get("reasoning_summary", "")).lower()
+    )
+    return len(event_list or []) - fallback, fallback
 
 
 def _summary(score: dict) -> list:
@@ -96,7 +111,15 @@ def main(argv=None) -> int:
     print(f"Exercise done (agents={args.agents})")
     for line in _summary(result["score"]):
         print(line)
+    model_driven, fallback = _count_driven_vs_fallback(result["events"])
+    print(f"Model-driven turns: {model_driven}, fallback turns: {fallback}")
     print(f"Log: {result['run_path']}")
+    if args.strict and fallback:
+        print(
+            f"Strict mode: {fallback} turn(s) fell back to baseline.",
+            file=sys.stderr,
+        )
+        return 2
     return 0
 
 
