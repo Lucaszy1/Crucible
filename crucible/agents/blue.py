@@ -1,95 +1,213 @@
-"""Scripted blue team agent for baseline exercises.
+"""Model-driven blue team agent for validation exercises.
 
-Follows a fixed response sequence: inspect logs, record a finding with
-log line references, then contain and fix the affected hosts. Uses only
-the shared tools module and makes zero model calls.
+Calls Muse Spark once per turn through crucible.llm and runs the single
+tool call the model returns. Findings and containment actions carry log
+line ids as evidence. On any model failure or invalid tool call, falls
+back to the scripted baseline move so an exercise never hangs.
 """
 
 from __future__ import annotations
 
-from crucible import sandbox
+from crucible import llm
+from crucible.agents import _common
+from crucible.agents.scripted_blue import (  # noqa: F401 (compat re-export)
+    ScriptedBlue,
+    _evidence_from_history,
+)
 
 ACTOR = "blue"
+ROLE = "blue"
+MODEL_ID = "muse-spark-1.3"
+MAX_TOKENS = _common.MAX_TOKENS
+
+SYSTEM_PROMPT = (
+    "You are the blue team in a defensive validation exercise inside an "
+    "isolated sandbox. Detect odd activity and contain it. Rules: call "
+    "exactly one tool per turn, only target hosts web, db, and workstation, "
+    "and put a one or two sentence reasoning summary in your reply text. "
+    "When you report a finding or take a containment action (block_ip, "
+    "isolate_host, patch_service, restore_host), cite log line ids such as "
+    "web:3 in an evidence_refs argument and in your reasoning text. Your only "
+    "tools are read_logs, list_processes, block_ip, isolate_host, "
+    "patch_service, restore_host, and report_finding."
+)
+
+ALLOWED_TOOLS = (
+    "read_logs",
+    "list_processes",
+    "block_ip",
+    "isolate_host",
+    "patch_service",
+    "restore_host",
+    "report_finding",
+)
+
+EVIDENCE_TOOLS = ("report_finding", "block_ip", "isolate_host", "patch_service", "restore_host")
 
 
-def _scenario_services() -> dict:
-    try:
-        scenario = sandbox.load_scenario()
-    except Exception:
-        scenario = {}
-    services = scenario.get("services", {}) or {}
-    secret = scenario.get("secret", {}) or {}
+def _tool(name: str, description: str, properties: dict, required: list) -> dict:
     return {
-        "secret_host": secret.get("host", "db"),
-        "web_service": (services.get("web", {}) or {}).get("service", "webapp"),
-        "db_service": (services.get("db", {}) or {}).get("service", "fakestore"),
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {
+                "type": "object",
+                "properties": properties,
+                "required": required,
+            },
+        },
     }
 
 
-def _evidence_from_history(history: list) -> list:
-    """Collect up to three log line ids from the last blue log read."""
-    for event in reversed(history or []):
-        if event.get("actor") != ACTOR or event.get("tool") != "read_logs":
-            continue
-        lines = (event.get("result", {}) or {}).get("lines", [])
-        refs = []
-        for entry in lines:
-            text = entry.get("line", "")
-            if "request from=" in text or "/admin" in text:
-                refs.append(entry.get("id"))
-        refs = [ref for ref in refs if ref]
-        if refs:
-            return refs[:3]
-        return [entry.get("id") for entry in lines[:2] if entry.get("id")]
-    return []
+TOOL_SCHEMAS = [
+    _tool(
+        "read_logs",
+        "Return recent log lines from one sandbox host with line ids.",
+        {
+            "host": {"type": "string"},
+            "n": {"type": "integer", "description": "Lines to return, 1 to 200."},
+        },
+        ["host"],
+    ),
+    _tool(
+        "list_processes",
+        "List processes running inside one sandbox host.",
+        {"host": {"type": "string"}},
+        ["host"],
+    ),
+    _tool(
+        "block_ip",
+        "Record a block for one IPv4 address.",
+        {
+            "ip": {"type": "string"},
+            "evidence_refs": {"type": "array", "items": {"type": "string"}},
+        },
+        ["ip"],
+    ),
+    _tool(
+        "isolate_host",
+        "Detach one sandbox host from the range network.",
+        {
+            "host": {"type": "string"},
+            "evidence_refs": {"type": "array", "items": {"type": "string"}},
+        },
+        ["host"],
+    ),
+    _tool(
+        "patch_service",
+        "Apply the toy fix for one service on one sandbox host.",
+        {
+            "host": {"type": "string"},
+            "service": {"type": "string"},
+            "evidence_refs": {"type": "array", "items": {"type": "string"}},
+        },
+        ["host", "service"],
+    ),
+    _tool(
+        "restore_host",
+        "Bring one sandbox host back to a clean attached state.",
+        {
+            "host": {"type": "string"},
+            "evidence_refs": {"type": "array", "items": {"type": "string"}},
+        },
+        ["host"],
+    ),
+    _tool(
+        "report_finding",
+        "Record a detection with supporting log lines.",
+        {
+            "text": {"type": "string"},
+            "evidence_refs": {"type": "array", "items": {"type": "string"}},
+        },
+        ["text"],
+    ),
+]
 
 
-class ScriptedBlue:
-    """Fixed blue team plan: inspect, report, contain, then fix."""
+def _build_messages(turn: int, history: list) -> list:
+    recent = _common.summarize_history(history)
+    user_text = (
+        f"This is turn {turn}. Call exactly one blue team tool for this turn. "
+        f"Recent moves:\n{recent}\n"
+        "Reply text must hold a one or two sentence reasoning summary. "
+        "Cite log line ids when you report or contain."
+    )
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_text},
+    ]
+
+
+def _evidence_for(name: str, args: dict, content: str, history: list) -> list:
+    """Collect evidence refs for findings and containment actions."""
+    refs = []
+    claimed = args.get("evidence_refs", [])
+    if isinstance(claimed, list):
+        refs.extend([ref for ref in claimed if isinstance(ref, str)])
+    refs.extend(_common.extract_evidence_ids(content))
+    refs = [ref for ref in dict.fromkeys(refs) if ref]
+    if name in EVIDENCE_TOOLS and not refs:
+        refs = _evidence_from_history(history)
+    return refs[:5]
+
+
+class ModelBlue:
+    """Blue team agent backed by one model call per turn."""
 
     actor = ACTOR
 
-    def __init__(self):
-        self._step = 0
-        self._info = _scenario_services()
+    def __init__(self, client=None, exercise_id: str | None = None,
+                 max_tokens: int = MAX_TOKENS, temperature: float = 0.0):
+        self._client = client
+        self._exercise_id = exercise_id
+        self._max_tokens = max_tokens
+        self._temperature = temperature
+        self._fallback = ScriptedBlue()
+
+    def _fallback_action(self, turn: int, history: list, note: str) -> dict | None:
+        action = self._fallback.next_action(turn, history)
+        if action is None:
+            return None
+        reason = action.get("reasoning", "")
+        action["reasoning"] = f"{note} Baseline move: {reason}".strip()
+        return action
 
     def next_action(self, turn: int, history: list) -> dict | None:
-        """Return the next planned tool call, or None when finished."""
-        step = self._step
-        self._step += 1
-        if step == 0:
-            return {
-                "tool": "read_logs",
-                "args": {"host": "web", "n": 50},
-                "reasoning": "Inspect recent web host logs for odd requests.",
-                "evidence_refs": [],
-            }
-        if step == 1:
-            return {
-                "tool": "report_finding",
-                "args": {"text": "Odd probing seen in web logs, likely admin page checks."},
-                "reasoning": "Record the detection with supporting log lines.",
-                "evidence_refs": _evidence_from_history(history),
-            }
-        if step == 2:
-            return {
-                "tool": "isolate_host",
-                "args": {"host": self._info["secret_host"]},
-                "reasoning": "Detach the data host to stop further access.",
-                "evidence_refs": [],
-            }
-        if step == 3:
-            return {
-                "tool": "patch_service",
-                "args": {"host": self._info["secret_host"], "service": self._info["db_service"]},
-                "reasoning": "Apply the toy fix so the default sign-in stops working.",
-                "evidence_refs": [],
-            }
-        if step == 4:
-            return {
-                "tool": "patch_service",
-                "args": {"host": "web", "service": self._info["web_service"]},
-                "reasoning": "Close the exposed admin page on the web host.",
-                "evidence_refs": [],
-            }
-        return None
+        """Ask the model for one tool call, else use the baseline move."""
+        try:
+            response = llm.chat(
+                ROLE,
+                _build_messages(turn, history),
+                tools=TOOL_SCHEMAS,
+                exercise_id=self._exercise_id,
+                client=self._client,
+                max_tokens=self._max_tokens,
+                temperature=self._temperature,
+            )
+        except Exception as exc:
+            return self._fallback_action(
+                turn, history, f"Model call failed ({exc}), using baseline."
+            )
+        calls = (response or {}).get("tool_calls", []) or []
+        if not calls:
+            return self._fallback_action(
+                turn, history, "Model returned no tool call, using baseline."
+            )
+        first = calls[0]
+        name = first.get("name", "")
+        if name not in ALLOWED_TOOLS:
+            return self._fallback_action(
+                turn, history, f"Model asked for unknown tool {name!r}, using baseline."
+            )
+        try:
+            args = _common.parse_tool_args(first.get("arguments", {}))
+        except ValueError as exc:
+            return self._fallback_action(
+                turn, history, f"Model gave bad arguments ({exc}), using baseline."
+            )
+        content = str((response or {}).get("content", ""))
+        evidence = _evidence_for(name, args, content, history)
+        args.pop("evidence_refs", None)
+        reasoning = _common.clean_reasoning(content, f"Model chose {name}.")
+        return {"tool": name, "args": args, "reasoning": reasoning, "evidence_refs": evidence}
