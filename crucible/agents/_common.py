@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 
-MAX_TOKENS = 1024
+MAX_TOKENS = 1536
 TEMPERATURE = 0.0
 HISTORY_LIMIT = 6
 REASONING_LIMIT = 400

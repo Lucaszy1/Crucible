@@ -270,7 +270,7 @@ def chat(
     use_cache: bool = True,
     max_retries: int = MAX_RETRIES,
     temperature: float = 0.7,
-    max_tokens: int = 1024,
+    max_tokens: int = 1536,
     reasoning_effort: str | None = None,
 ) -> dict:
     """Run one chat completion with guard, cache, and retries.

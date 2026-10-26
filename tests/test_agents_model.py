@@ -104,7 +104,7 @@ def test_red_valid_tool_call_uses_one_call(tmp_path, monkeypatch):
     assert len(client.calls) == 1
     call = client.calls[0]
     assert call["model"] == "muse-spark-1.3"
-    assert call["max_tokens"] == 1024
+    assert call["max_tokens"] == 1536
     assert call["max_tokens"] <= 2048
 
 
