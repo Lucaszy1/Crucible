@@ -37,13 +37,12 @@ MAX_BODY = 8192
 MAX_PATH_LEN = 512
 
 # Interim exercise state. The orchestrator takes ownership of this on day two.
-_state = {"authed": set(), "rotated": set(), "blocked": [], "findings": []}
+_state = {"authed": set(), "blocked": [], "findings": []}
 
 
 def reset_state() -> None:
     """Clear interim exercise state (signed-in hosts, blocks, findings)."""
     _state["authed"].clear()
-    _state["rotated"].clear()
     _state["blocked"].clear()
     _state["findings"].clear()
 
@@ -165,24 +164,31 @@ def http_request(host: str, path: str, method: str = "GET", body: str | None = N
 
 
 def try_credential(host: str, user: str, password: str) -> dict:
-    """Try a toy sign-in against one sandbox host.
+    """Try a toy sign-in against the live gate inside one sandbox host.
 
-    Credentials here are planted defaults from the scenario file, never
-    real secrets. A hit marks the host signed-in for later file reads.
+    The verdict comes from the container itself, which holds the current
+    credential files. The scenario file only documents the shipped default;
+    nothing here compares against it. A hit marks the host signed-in for
+    later file reads.
     """
     sandbox.check_host(host)
     if not user or not isinstance(user, str):
         raise ValueError("user must be a non-empty string")
     if not password or not isinstance(password, str):
         raise ValueError("password must be a non-empty string")
-    if host in _state["rotated"]:
-        return {"ok": True, "host": host, "authenticated": False,
-                "note": "default sign-in was rotated by a patch"}
-    expected = _scenario().get("toy_credentials", {}).get(host)
-    good = bool(expected) and user == expected.get("user") and password == expected.get("pass")
-    if good:
+    if not sandbox.is_running(host):
+        return {"ok": False, "error": f"host {host!r} is not up"}
+    try:
+        done = sandbox.exec(host, ["signin", user, password])
+    except SandboxError as exc:
+        return {"ok": False, "error": str(exc)}
+    if "AUTH_OK" in done["output"]:
         _state["authed"].add(host)
-    return {"ok": True, "host": host, "authenticated": good}
+        return {"ok": True, "host": host, "authenticated": True}
+    if "AUTH_FAIL" in done["output"]:
+        return {"ok": True, "host": host, "authenticated": False}
+    return {"ok": True, "host": host, "authenticated": False,
+            "note": f"no sign-in gate on {host!r}"}
 
 
 def read_file(host: str, path: str) -> dict:
@@ -272,8 +278,8 @@ def patch_service(host: str, service: str) -> dict:
     """Apply the toy fix for one service on one sandbox host.
 
     On the web host this closes the exposed admin page through a flag the
-    toy app honors. Where a default sign-in exists, the patch also rotates
-    it so the planted default stops working.
+    toy app honors. Where a sign-in gate exists, the patch also rotates the
+    live container-side default so the shipped one stops working.
     """
     sandbox.check_host(host)
     expected = (_scenario().get("services", {}).get(host) or {}).get("service")
@@ -288,18 +294,22 @@ def patch_service(host: str, service: str) -> dict:
     if done["exit_code"] != 0:
         return {"ok": False, "error": f"patch on {host!r} did not apply"}
     detail = "patch flag applied"
-    if host in _scenario().get("toy_credentials", {}):
-        _state["rotated"].add(host)
+    try:
+        gate = sandbox.exec(host, ["rotate-signin"])
+    except SandboxError:
+        gate = None
+    if gate is not None and "ROTATED_OK" in gate["output"]:
         _state["authed"].discard(host)
-        detail = "patch flag applied; default sign-in rotated"
+        detail = "patch flag applied; sign-in rotated on the host"
     return {"ok": True, "host": host, "service": service, "detail": detail}
 
 
 def restore_host(host: str) -> dict:
     """Bring one sandbox host back to a clean attached state.
 
-    Reattaches the range network, clears the patch flag, and drops any
-    signed-in session. A rotated sign-in stays rotated.
+    Reattaches the range network, clears the patch flag, drops any
+    signed-in session, and puts a rotated sign-in back to the shipped
+    default so the host matches a fresh one.
     """
     sandbox.check_host(host)
     try:
@@ -307,7 +317,12 @@ def restore_host(host: str) -> dict:
         done = sandbox.exec(host, ["rm", "-f", PATCH_FLAG])
     except SandboxError as exc:
         return {"ok": False, "error": str(exc)}
+    try:
+        gate = sandbox.exec(host, ["reset-signin"])
+        gate_reset = "RESET_OK" in gate["output"]
+    except SandboxError:
+        gate_reset = False
     _state["authed"].discard(host)
     cleaned = done["exit_code"] == 0
     return {"ok": True, "host": host, "reattached": not net.get("isolated", True),
-            "patch_cleared": cleaned}
+            "patch_cleared": cleaned, "sign_in_reset": gate_reset}

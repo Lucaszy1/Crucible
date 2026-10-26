@@ -18,7 +18,8 @@
       "note": "no planted weakness, used for lateral movement"
     }
   },
-  "toy_credentials": {
+  "shipped_defaults": {
+    "note": "documents the factory default baked into the db image; the live value lives in the container and sign-in checks run there, never against this file",
     "db": {"user": "admin", "pass": "changeme"}
   },
   "secret": {"host": "db", "path": "/secret/exercise_secret.txt"},

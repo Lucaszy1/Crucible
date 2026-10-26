@@ -162,18 +162,59 @@ def test_http_error_carries_stream_excerpts(monkeypatch):
     assert "Traceback: boom" in out["error"]
 
 
-def test_credential_flow():
+def _gate_exec(live):
+    def fake_exec(host, cmd, timeout=30):
+        assert cmd[0] == "signin"
+        good = cmd[1] == live["user"] and cmd[2] == live["pass"]
+        text = "AUTH_OK\n" if good else "AUTH_FAIL\n"
+        return {"exit_code": 0, "output": text, "stdout": text, "stderr": ""}
+    return fake_exec
+
+
+def test_credential_flow(monkeypatch):
+    monkeypatch.setattr(sandbox, "is_running", lambda host: True)
+    monkeypatch.setattr(sandbox, "exec",
+                        _gate_exec({"user": "admin", "pass": "changeme"}))
     assert tools.try_credential("db", "admin", "wrong")["authenticated"] is False
     assert tools.try_credential("db", "admin", "changeme")["authenticated"] is True
     with pytest.raises(ValueError):
         tools.try_credential("db", "", "changeme")
 
 
-def test_read_file_gates_and_validates(monkeypatch):
+def test_credential_follows_container_not_docs(monkeypatch):
+    """A doc-listed default means nothing when the live gate disagrees."""
+    monkeypatch.setattr(sandbox, "is_running", lambda host: True)
+    monkeypatch.setattr(sandbox, "exec",
+                        _gate_exec({"user": "admin", "pass": "r0tated-toy-9"}))
+    assert tools.try_credential("db", "admin", "changeme")["authenticated"] is False
+    assert tools.try_credential("db", "admin", "r0tated-toy-9")["authenticated"] is True
+
+
+def test_credential_needs_host_up(monkeypatch):
+    monkeypatch.setattr(sandbox, "is_running", lambda host: False)
+    out = tools.try_credential("db", "admin", "changeme")
+    assert out["ok"] is False
+    assert "not up" in out["error"]
+
+
+def test_credential_without_gate(monkeypatch):
+    monkeypatch.setattr(sandbox, "is_running", lambda host: True)
     monkeypatch.setattr(
         sandbox, "exec",
-        lambda host, cmd, timeout=30: {"exit_code": 0, "output": "data",
-                                       "stdout": "data", "stderr": ""}),
+        lambda host, cmd, timeout=30: {"exit_code": 127, "output": "",
+                                       "stdout": "", "stderr": "not found"})
+    out = tools.try_credential("web", "admin", "changeme")
+    assert out["authenticated"] is False
+    assert "no sign-in gate" in out["note"]
+
+
+def test_read_file_gates_and_validates(monkeypatch):
+    def fake_exec(host, cmd, timeout=30):
+        text = "AUTH_OK\n" if cmd[0] == "signin" else "data"
+        return {"exit_code": 0, "output": text, "stdout": text, "stderr": ""}
+
+    monkeypatch.setattr(sandbox, "is_running", lambda host: True)
+    monkeypatch.setattr(sandbox, "exec", fake_exec)
     with pytest.raises(ValueError):
         tools.read_file("web", "relative/path.txt")
     with pytest.raises(ValueError):
@@ -235,3 +276,40 @@ def test_block_ip_validates_and_dedupes():
 def test_patch_rejects_unknown_service():
     with pytest.raises(ValueError):
         tools.patch_service("web", "no-such-service")
+
+
+def _patch_exec(rotate_text):
+    def fake_exec(host, cmd, timeout=30):
+        text = rotate_text if cmd[0] == "rotate-signin" else ""
+        code = 0 if cmd[0] in ("touch", "rotate-signin") else 127
+        return {"exit_code": code, "output": text, "stdout": text, "stderr": ""}
+    return fake_exec
+
+
+def test_patch_rotates_gate_when_present(monkeypatch):
+    monkeypatch.setattr(sandbox, "is_running", lambda host: True)
+    monkeypatch.setattr(sandbox, "exec", _patch_exec("ROTATED_OK\n"))
+    out = tools.patch_service("db", "fakestore")
+    assert out["ok"] is True
+    assert "rotated" in out["detail"]
+
+
+def test_patch_skips_rotation_without_gate(monkeypatch):
+    monkeypatch.setattr(sandbox, "is_running", lambda host: True)
+    monkeypatch.setattr(sandbox, "exec", _patch_exec(""))
+    out = tools.patch_service("web", "webapp")
+    assert out == {"ok": True, "host": "web", "service": "webapp",
+                   "detail": "patch flag applied"}
+
+
+def test_restore_resets_gate(monkeypatch):
+    def fake_exec(host, cmd, timeout=30):
+        text = "RESET_OK\n" if cmd[0] == "reset-signin" else ""
+        return {"exit_code": 0, "output": text, "stdout": text, "stderr": ""}
+
+    monkeypatch.setattr(sandbox, "reattach",
+                        lambda host: {"host": host, "isolated": False})
+    monkeypatch.setattr(sandbox, "exec", fake_exec)
+    out = tools.restore_host("db")
+    assert out["sign_in_reset"] is True
+    assert out["patch_cleared"] is True
