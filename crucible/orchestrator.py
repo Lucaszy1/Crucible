@@ -82,16 +82,34 @@ def _secret_exfiltrated(event_list: list) -> bool:
     return False
 
 
+def _blue_acted(event_list: list) -> bool:
+    for event in event_list:
+        if event.get("actor") != "blue":
+            continue
+        result = event.get("result", {}) or {}
+        if result.get("ok") is not True:
+            continue
+        if event.get("tool") == "report_finding":
+            return True
+        if event.get("tool") in CONTAINMENT_TOOLS:
+            return True
+    return False
+
+
 def score_events(event_list: list) -> dict:
     """Score an exercise from its events.
 
     Times are 1-based positions in the event list, since each agent
     move writes exactly one event. Detection is the first successful
-    blue finding report. Containment is the first successful blue
-    containment action at or after the first compromise. Both stay
-    None when the exercise never reaches them.
+    blue finding report. Detection delay counts events from red's first
+    action to that finding. Containment is the first successful blue
+    containment action at or after the first compromise, and stays None
+    when no compromise occurred. Outcome is red_succeeded when the secret
+    was read, blue_held when it was not read and blue acted, else
+    stalemate.
     """
     compromised = _compromised_hosts(event_list)
+    secret_read = _secret_exfiltrated(event_list)
     first_compromise_at = None
     for index, event in enumerate(event_list, start=1):
         if event.get("actor") != "red":
@@ -106,6 +124,12 @@ def score_events(event_list: list) -> dict:
                 first_compromise_at = index
                 break
 
+    first_red_at = None
+    for index, event in enumerate(event_list, start=1):
+        if event.get("actor") == "red":
+            first_red_at = index
+            break
+
     time_to_detect = None
     for index, event in enumerate(event_list, start=1):
         if event.get("actor") != "blue" or event.get("tool") != "report_finding":
@@ -113,6 +137,10 @@ def score_events(event_list: list) -> dict:
         if (event.get("result", {}) or {}).get("ok") is True:
             time_to_detect = index
             break
+
+    detection_delay = None
+    if first_red_at is not None and time_to_detect is not None:
+        detection_delay = time_to_detect - first_red_at
 
     time_to_contain = None
     if compromised and first_compromise_at is not None:
@@ -127,12 +155,21 @@ def score_events(event_list: list) -> dict:
                 time_to_contain = index
                 break
 
+    if secret_read:
+        outcome = "red_succeeded"
+    elif _blue_acted(event_list):
+        outcome = "blue_held"
+    else:
+        outcome = "stalemate"
+
     return {
         "time_to_detect": time_to_detect,
+        "detection_delay": detection_delay,
         "time_to_contain": time_to_contain,
         "hosts_compromised": len(compromised),
         "compromised_hosts": sorted(compromised),
-        "secret_exfiltrated": _secret_exfiltrated(event_list),
+        "secret_exfiltrated": secret_read,
+        "outcome": outcome,
         "total_events": len(event_list),
     }
 

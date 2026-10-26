@@ -88,6 +88,64 @@ def test_score_stays_empty_without_progress():
     assert score["secret_exfiltrated"] is False
 
 
+def test_score_red_succeeded_when_secret_read():
+    history = [
+        _event("red", "scan_host", {"ok": True}, 1),
+        _event("blue", "read_logs", {"ok": True}, 2),
+        _event("red", "try_credential",
+               {"ok": True, "host": "db", "authenticated": True}, 3),
+        _event("blue", "report_finding", {"ok": True, "id": "finding-1"}, 4),
+        _event("red", "read_file",
+               {"ok": True, "host": "db", "path": "/secret/exercise_secret.txt"}, 5),
+        _event("blue", "isolate_host", {"ok": True, "host": "db"}, 6),
+    ]
+    score = orchestrator.score_events(history)
+    assert score["outcome"] == "red_succeeded"
+    assert score["secret_exfiltrated"] is True
+    assert score["detection_delay"] == 3
+    assert score["time_to_contain"] == 6
+
+
+def test_score_blue_held_without_secret_read():
+    history = [
+        _event("red", "scan_host", {"ok": True}, 1),
+        _event("blue", "read_logs", {"ok": True}, 2),
+        _event("red", "http_request", {"ok": True}, 3),
+        _event("blue", "report_finding", {"ok": True, "id": "finding-1"}, 4),
+    ]
+    score = orchestrator.score_events(history)
+    assert score["outcome"] == "blue_held"
+    assert score["secret_exfiltrated"] is False
+    assert score["time_to_detect"] == 4
+    assert score["detection_delay"] == 3
+    assert score["time_to_contain"] is None
+
+
+def test_score_contain_stays_null_without_compromise():
+    history = [
+        _event("red", "scan_host", {"ok": True}, 1),
+        _event("blue", "isolate_host", {"ok": True, "host": "web"}, 2),
+    ]
+    score = orchestrator.score_events(history)
+    assert score["hosts_compromised"] == 0
+    assert score["time_to_contain"] is None
+    assert score["outcome"] == "blue_held"
+
+
+def test_score_stalemate_when_blue_idle():
+    history = [
+        _event("red", "scan_host", {"ok": True}, 1),
+        _event("blue", "read_logs", {"ok": True}, 2),
+        _event("red", "scan_host", {"ok": True}, 3),
+        _event("blue", "wait", {"ok": True, "waited": True}, 4),
+    ]
+    score = orchestrator.score_events(history)
+    assert score["outcome"] == "stalemate"
+    assert score["secret_exfiltrated"] is False
+    assert score["detection_delay"] is None
+    assert score["time_to_contain"] is None
+
+
 def test_run_tool_maps_unknown_and_bad_calls():
     assert orchestrator.run_tool("no-such-tool", {})["ok"] is False
     out = orchestrator.run_tool("scan_host", {"host": "off-range.example"})

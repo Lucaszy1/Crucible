@@ -67,11 +67,14 @@ def _count_driven_vs_fallback(event_list: list) -> tuple:
 
 def _summary(score: dict) -> list:
     detect = score.get("time_to_detect")
+    delay = score.get("detection_delay")
     contain = score.get("time_to_contain")
     hosts = ", ".join(score.get("compromised_hosts", [])) or "none"
     return [
         f"Turns used: {score.get('turns_used')} of {score.get('total_events')} events",
+        f"Outcome: {score.get('outcome', 'unknown')}",
         f"Detected at event: {detect if detect is not None else 'no'}",
+        f"Detection delay: {delay if delay is not None else 'no'} events",
         f"Contained at event: {contain if contain is not None else 'no'}",
         f"Hosts compromised: {score.get('hosts_compromised')} ({hosts})",
         f"Secret exfiltrated: {'yes' if score.get('secret_exfiltrated') else 'no'}",

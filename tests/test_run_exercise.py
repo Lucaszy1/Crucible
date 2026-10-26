@@ -21,8 +21,9 @@ def _stubbed_run(monkeypatch, tmp_path):
         return {
             "events": [],
             "score": {"turns_used": 2, "total_events": 2, "time_to_detect": 2,
-                      "time_to_contain": None, "hosts_compromised": 0,
-                      "compromised_hosts": [], "secret_exfiltrated": False},
+                      "detection_delay": 1, "time_to_contain": None,
+                      "hosts_compromised": 0, "compromised_hosts": [],
+                      "secret_exfiltrated": False, "outcome": "blue_held"},
             "run_path": path,
         }
 
@@ -67,9 +68,10 @@ def _stubbed_run_with_events(monkeypatch, tmp_path, events_list):
             "events": events_list,
             "score": {"turns_used": len(events_list),
                       "total_events": len(events_list),
-                      "time_to_detect": None, "time_to_contain": None,
-                      "hosts_compromised": 0, "compromised_hosts": [],
-                      "secret_exfiltrated": False},
+                      "time_to_detect": None, "detection_delay": None,
+                      "time_to_contain": None, "hosts_compromised": 0,
+                      "compromised_hosts": [], "secret_exfiltrated": False,
+                      "outcome": "stalemate"},
             "run_path": path,
         }
 
@@ -133,3 +135,11 @@ def test_runner_no_cache_disables_agent_cache(tmp_path, monkeypatch):
     assert run_exercise.main(["--agents", "model", "--no-cache"]) == 0
     assert seen["red_use_cache"] is False
     assert seen["blue_use_cache"] is False
+
+
+def test_runner_summary_prints_outcome_and_delay(tmp_path, monkeypatch, capsys):
+    _stubbed_run(monkeypatch, tmp_path)
+    assert run_exercise.main(["--agents", "scripted"]) == 0
+    out = capsys.readouterr().out
+    assert "Outcome: blue_held" in out
+    assert "Detection delay: 1 events" in out
