@@ -44,7 +44,7 @@ PRICE_PER_1K_USD = {
 }
 DEFAULT_PRICE_PER_1K_USD = (0.002, 0.006)
 
-DEFAULT_DAILY_LIMIT_USD = 10.0
+DEFAULT_DAILY_LIMIT_USD = 5.0
 MAX_RETRIES = 4
 
 # Exception names that are worth another attempt after a short wait.
