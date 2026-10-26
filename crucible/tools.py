@@ -38,6 +38,11 @@ PATCH_FLAG = "/tmp/patched"
 MAX_BODY = 8192
 MAX_PATH_LEN = 512
 
+# Source label the container log lines carry for exec-triggered events.
+# Tool calls reach containers through the docker API rather than the range
+# network, so there is no peer IP to log; this names the harness honestly.
+LOG_SOURCE = "controller"
+
 # Interim exercise state. The orchestrator takes ownership of this on day two.
 _state = {"authed": set(), "blocked": [], "findings": []}
 
@@ -185,7 +190,8 @@ def try_credential(host: str, user: str, password: str) -> dict:
     The verdict comes from the container itself, which holds the current
     credential files. The scenario file only documents the shipped default;
     nothing here compares against it. A hit marks the host signed-in for
-    later file reads.
+    later file reads. The gate logs every attempt (user and source,
+    never the password) to the container log blue reads.
     """
     sandbox.check_host(host)
     if not user or not isinstance(user, str):
@@ -195,7 +201,7 @@ def try_credential(host: str, user: str, password: str) -> dict:
     if not sandbox.is_running(host):
         return {"ok": False, "error": f"host {host!r} is not up"}
     try:
-        done = sandbox.exec(host, ["signin", user, password])
+        done = sandbox.exec(host, ["signin", user, password, LOG_SOURCE])
     except SandboxError as exc:
         return {"ok": False, "error": str(exc)}
     if "AUTH_OK" in done["output"]:
@@ -203,6 +209,9 @@ def try_credential(host: str, user: str, password: str) -> dict:
         return {"ok": True, "host": host, "authenticated": True}
     if "AUTH_FAIL" in done["output"]:
         return {"ok": True, "host": host, "authenticated": False}
+    if "NO_GATE" in done["output"]:
+        return {"ok": True, "host": host, "authenticated": False,
+                "note": f"no sign-in gate on {host!r}"}
     return {"ok": True, "host": host, "authenticated": False,
             "note": f"no sign-in gate on {host!r}"}
 
@@ -340,7 +349,7 @@ def patch_service(host: str, service: str) -> dict:
         return {"ok": False, "error": f"patch on {host!r} did not apply"}
     detail = "patch flag applied"
     try:
-        gate = sandbox.exec(host, ["rotate-signin"])
+        gate = sandbox.exec(host, ["rotate-signin", LOG_SOURCE])
     except SandboxError:
         gate = None
     if gate is not None and "ROTATED_OK" in gate["output"]:
@@ -363,7 +372,7 @@ def restore_host(host: str) -> dict:
     except SandboxError as exc:
         return {"ok": False, "error": str(exc)}
     try:
-        gate = sandbox.exec(host, ["reset-signin"])
+        gate = sandbox.exec(host, ["reset-signin", LOG_SOURCE])
         gate_reset = "RESET_OK" in gate["output"]
     except SandboxError:
         gate_reset = False
