@@ -9,10 +9,11 @@ stay reproducible from the saved log.
 from __future__ import annotations
 
 from crucible import events, tools
-from crucible.agents.blue import ScriptedBlue
-from crucible.agents.red import ScriptedRed
+from crucible.agents.scripted_blue import ScriptedBlue
+from crucible.agents.scripted_red import ScriptedRed
 
 CONTAINMENT_TOOLS = ("isolate_host", "patch_service", "restore_host", "block_ip")
+MAX_TURNS = 12
 
 _DISPATCH = {
     "scan_host": tools.scan_host,
@@ -124,7 +125,7 @@ def score_events(event_list: list) -> dict:
 def run_exercise(
     red_agent=None,
     blue_agent=None,
-    max_turns: int = 10,
+    max_turns: int = MAX_TURNS,
     run_path=None,
     exercise_id: str | None = None,
 ) -> dict:
@@ -133,6 +134,9 @@ def run_exercise(
     Each turn gives one agent a single tool call, starting with red.
     Agents that return None sit out their turn. The loop ends when
     both agents are finished or max_turns moves have been attempted.
+    Turns are capped at twelve so model exercises stay bounded.
+    Agent errors are logged as events and the loop moves on, so an
+    exercise never hangs on one bad turn.
     """
     red = red_agent if red_agent is not None else ScriptedRed()
     blue = blue_agent if blue_agent is not None else ScriptedBlue()
@@ -141,9 +145,23 @@ def run_exercise(
 
     turns_used = 0
     idle_rounds = 0
-    for slot in range(max(1, max_turns)):
+    capped_turns = max(1, min(int(max_turns), MAX_TURNS))
+    for slot in range(capped_turns):
         agent = red if slot % 2 == 0 else blue
-        action = agent.next_action(slot + 1, writer.events)
+        try:
+            action = agent.next_action(slot + 1, writer.events)
+        except Exception as exc:
+            idle_rounds = 0
+            turns_used += 1
+            writer.log(
+                actor=getattr(agent, "actor", "unknown"),
+                tool="agent_error",
+                args={},
+                result={"ok": False, "error": str(exc)[:300]},
+                reasoning_summary=f"Agent turn failed ({exc}), moving on.",
+                evidence_refs=[],
+            )
+            continue
         if action is None:
             idle_rounds += 1
             if idle_rounds >= 2:
