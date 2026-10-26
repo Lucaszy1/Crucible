@@ -66,9 +66,21 @@ def _compose(*args: str, timeout: int) -> str:
 
 
 def start() -> dict:
-    """Build the images and bring the three hosts up."""
+    """Build the images and bring the three hosts up.
+
+    Raises SandboxError with the missing host names when any host is
+    still down after compose reports success, instead of handing back
+    a silent all-False map.
+    """
     _compose("up", "-d", "--build", timeout=300)
-    return status()
+    state = status()
+    missing = [host for host, up in state.items() if not up]
+    if missing:
+        raise SandboxError(
+            f"sandbox failed to start: {', '.join(missing)} not running "
+            "after compose up; check the docker daemon and image build output"
+        )
+    return state
 
 
 def stop() -> dict:
