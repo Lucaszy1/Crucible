@@ -1,0 +1,27 @@
+{
+  "hosts": ["web", "db", "workstation"],
+  "ports": {"web": 8000},
+  "services": {
+    "web": {
+      "service": "webapp",
+      "version": "0.9-fake",
+      "note": "admin page left open at /admin"
+    },
+    "db": {
+      "service": "fakestore",
+      "version": "1.2-fake",
+      "note": "ships with a default sign-in"
+    },
+    "workstation": {
+      "service": "desktop",
+      "version": "3.1-fake",
+      "note": "no planted weakness, used for lateral movement"
+    }
+  },
+  "toy_credentials": {
+    "db": {"user": "admin", "pass": "changeme"}
+  },
+  "secret": {"host": "db", "path": "/secret/exercise_secret.txt"},
+  "readable_roots": ["/secret/", "/srv/data/", "/srv/state/"],
+  "admin_endpoint": {"host": "web", "path": "/admin"}
+}
