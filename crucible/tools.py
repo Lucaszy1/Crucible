@@ -272,18 +272,24 @@ def report_finding(text: str) -> dict:
 
 
 def read_logs(host: str, n: int = 50) -> dict:
-    """Return recent log lines from one sandbox host with line ids."""
+    """Return recent log lines from one sandbox host with stable line ids.
+
+    Ids count from the first line the host ever logged, so db:3 names the
+    same line on later reads even after more lines arrive.
+    """
     sandbox.check_host(host)
     if isinstance(n, bool) or not isinstance(n, int):
         raise ValueError("n must be an integer")
     n = max(1, min(200, n))
     try:
-        lines = sandbox.container_logs(host, tail=n)
+        all_lines = sandbox.container_logs(host, tail=None)
     except SandboxError as exc:
         return {"ok": False, "error": str(exc)}
+    window = all_lines[-n:]
+    start = len(all_lines) - len(window)
     return {"ok": True, "host": host,
-            "lines": [{"id": f"{host}:{i}", "line": line}
-                      for i, line in enumerate(lines)]}
+            "lines": [{"id": f"{host}:{start + i}", "line": line}
+                      for i, line in enumerate(window)]}
 
 
 def list_processes(host: str) -> dict:

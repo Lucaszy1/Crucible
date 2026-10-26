@@ -283,6 +283,24 @@ def test_read_logs_shapes_lines(monkeypatch):
         tools.read_logs("web", True)
 
 
+def test_read_logs_ids_count_from_first_line(monkeypatch):
+    seen = {}
+    stored = ["a", "b", "c", "d"]
+
+    def fake_logs(host, tail=100):
+        seen["tail"] = tail
+        return list(stored)
+
+    monkeypatch.setattr(sandbox, "container_logs", fake_logs)
+    out = tools.read_logs("db", 2)
+    assert out["lines"] == [{"id": "db:2", "line": "c"},
+                            {"id": "db:3", "line": "d"}]
+    assert seen["tail"] is None
+    stored.append("e")
+    again = tools.read_logs("db", 3)
+    assert [entry["id"] for entry in again["lines"]] == ["db:2", "db:3", "db:4"]
+
+
 def test_backend_failures_return_errors(monkeypatch):
     def boom(*args, **kwargs):
         raise sandbox.SandboxError("daemon away")

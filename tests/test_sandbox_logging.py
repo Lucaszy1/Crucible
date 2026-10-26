@@ -207,6 +207,23 @@ def test_list_files_wrapper_skips_log_on_missing_dir(tmp_path):
     assert not log_file.exists()
 
 
+def test_container_logs_none_returns_everything(monkeypatch):
+    seen = {}
+
+    class FakeContainer:
+        def logs(self, **kwargs):
+            seen.update(kwargs)
+            seen["calls"] = seen.get("calls", 0) + 1
+            return b"a\n\nb\n"
+
+    monkeypatch.setattr(sandbox, "_container",
+                        lambda host, client=None: FakeContainer())
+    assert sandbox.container_logs("db", tail=None) == ["a", "b"]
+    assert "tail" not in seen
+    assert sandbox.container_logs("db", tail=1) == ["a", "b"]
+    assert seen["tail"] == 1
+
+
 def test_credential_passes_log_source(monkeypatch):
     seen = {}
 

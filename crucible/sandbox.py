@@ -162,12 +162,19 @@ def exec(host: str, cmd: list, timeout: int = 30) -> dict:
             "stderr": stderr}
 
 
-def container_logs(host: str, tail: int = 100) -> list:
-    """Return recent stdout lines from one sandbox host."""
+def container_logs(host: str, tail: int | None = 100) -> list:
+    """Return stdout lines from one sandbox host.
+
+    tail=None returns every line. read_logs uses that to number ids from
+    the first line logged, so ids stay stable as logs grow.
+    """
     check_host(host)
     container = _container(host)
     try:
-        raw = container.logs(tail=max(1, tail))
+        if tail is None:
+            raw = container.logs()
+        else:
+            raw = container.logs(tail=max(1, tail))
     except Exception as exc:
         raise SandboxError(f"logs for {host!r} failed: {exc}") from exc
     if isinstance(raw, bytes):
