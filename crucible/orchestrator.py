@@ -13,7 +13,7 @@ from crucible.agents.scripted_blue import ScriptedBlue
 from crucible.agents.scripted_red import ScriptedRed
 
 CONTAINMENT_TOOLS = ("isolate_host", "patch_service", "restore_host", "block_ip")
-MAX_TURNS = 12
+MAX_TURNS = 20
 
 _DISPATCH = {
     "scan_host": tools.scan_host,
@@ -134,7 +134,7 @@ def run_exercise(
     Each turn gives one agent a single tool call, starting with red.
     Agents that return None sit out their turn. The loop ends when
     both agents are finished or max_turns moves have been attempted.
-    Turns are capped at twelve so model exercises stay bounded.
+    Turns are capped at twenty so model exercises stay bounded.
     Agent errors are logged as events and the loop moves on, so an
     exercise never hangs on one bad turn.
     """
