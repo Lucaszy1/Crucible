@@ -144,11 +144,13 @@ def _build_messages(turn: int, history: list,
                     max_turns: int = _common.DEFAULT_MAX_TURNS) -> list:
     recent = _common.summarize_history(history)
     own = _common.summarize_own_history(history, ACTOR)
+    last_result = _common.format_last_result(history, ACTOR)
     remaining = max(0, int(max_turns) - int(turn) + 1)
     user_text = (
         f"This is turn {turn} of {max_turns}. "
         f"Turns remaining (including this one): {remaining}. "
         f"Call exactly one blue team tool for this turn. "
+        f"Your most recent tool result:\n{last_result}\n"
         f"Your previous moves:\n{own}\n"
         f"Recent exercise moves:\n{recent}\n"
         "Reply text must hold a one or two sentence reasoning summary. "

@@ -14,6 +14,8 @@ TEMPERATURE = 0.0
 HISTORY_LIMIT = 6
 REASONING_LIMIT = 400
 DEFAULT_MAX_TURNS = 30
+COMPACT_DETAIL_LIMIT = 200
+LAST_RESULT_LIMIT = 1500
 
 _EVIDENCE_RE = re.compile(r"\b(web|db|workstation):\d+\b")
 
@@ -38,6 +40,11 @@ def summarize_history(history: list, limit: int = HISTORY_LIMIT) -> str:
     return "\n".join(lines)
 
 
+def _squash(text: str) -> str:
+    """Collapse whitespace so a note stays on one line."""
+    return " ".join(str(text or "").split())
+
+
 def _summarize_result(tool: str, result: dict) -> str:
     """Render one tool result as a compact single-line note."""
     ok = (result or {}).get("ok", "?")
@@ -46,18 +53,28 @@ def _summarize_result(tool: str, result: dict) -> str:
         ids = [entry.get("id") for entry in lines if entry.get("id")]
         return f"ok lines={len(lines)} last={ids[-3:]}"
     if tool == "http_request":
-        return f"ok={ok} status={(result or {}).get('status', '?')}"
+        note = f"ok={ok} status={(result or {}).get('status', '?')}"
+        body = (result or {}).get("body")
+        if body:
+            note += f" body={_squash(body)[:COMPACT_DETAIL_LIMIT]}"
+        error = (result or {}).get("error")
+        if error:
+            note += f" error={_squash(error)[:COMPACT_DETAIL_LIMIT]}"
+        return note
     if tool == "try_credential":
         return f"ok={ok} authenticated={(result or {}).get('authenticated', '?')}"
     if tool == "read_file":
         if (result or {}).get("ok") is True:
             content = str((result or {}).get("content", ""))
-            return f"ok path={(result or {}).get('path', '?')} bytes={len(content)}"
+            path = str((result or {}).get("path", "?"))[:COMPACT_DETAIL_LIMIT]
+            return f"ok path={path} bytes={len(content)}"
         return f"ok=False error={str((result or {}).get('error', ''))[:80]}"
     if tool == "list_files":
         if (result or {}).get("ok") is True:
             files = (result or {}).get("files", []) or []
-            return f"ok path={(result or {}).get('path', '?')} files={len(files)}"
+            names = ", ".join(str(name) for name in files)[:COMPACT_DETAIL_LIMIT]
+            path = str((result or {}).get("path", "?"))[:COMPACT_DETAIL_LIMIT]
+            return f"ok path={path} files={len(files)} names={names}"
         return f"ok=False error={str((result or {}).get('error', ''))[:80]}"
     if tool == "scan_host":
         return (f"ok={ok} reachable={(result or {}).get('reachable', '?')} "
@@ -84,6 +101,52 @@ def summarize_own_history(history: list, actor: str, limit: int = HISTORY_LIMIT)
         result_text = _summarize_result(tool, event.get("result", {}) or {})
         lines.append(f"{tool} {args_text} -> {result_text}")
     return "\n".join(lines)
+
+
+def format_last_result(history: list, actor: str,
+                       limit: int = LAST_RESULT_LIMIT) -> str:
+    """Render the actor's most recent tool result as full text."""
+    for event in reversed(history or []):
+        if event.get("actor") != actor:
+            continue
+        try:
+            text = json.dumps(event.get("result", {}), sort_keys=True)
+        except (TypeError, ValueError):
+            text = str(event.get("result", ""))
+        rendered = f"{event.get('tool', '?')} -> {text}"
+        if len(rendered) > limit:
+            rendered = rendered[:limit].rstrip() + "..."
+        return rendered
+    return "No prior tool result."
+
+
+def red_known_state(history: list) -> str:
+    """Render a short checklist of what red already learned."""
+    scanned: list = []
+    no_gate: list = []
+    authed: list = []
+    for event in history or []:
+        if event.get("actor") != "red":
+            continue
+        args = event.get("args", {}) or {}
+        result = event.get("result", {}) or {}
+        host = args.get("host") or result.get("host")
+        if not host:
+            continue
+        if event.get("tool") == "scan_host" and host not in scanned:
+            scanned.append(host)
+        if event.get("tool") == "try_credential":
+            if result.get("authenticated") is True and host not in authed:
+                authed.append(host)
+            if "no sign-in gate" in str(result.get("note", "")) and host not in no_gate:
+                no_gate.append(host)
+    def _fmt(hosts: list) -> str:
+        return ", ".join(sorted(hosts)) if hosts else "none"
+    return (
+        f"hosts scanned: {_fmt(scanned)}; "
+        f"hosts with no sign-in gate: {_fmt(no_gate)}; "
+        f"hosts authenticated: {_fmt(authed)}"
+    )
 
 
 def parse_tool_args(arguments) -> dict:

@@ -472,3 +472,106 @@ def test_default_turn_cap_is_thirty():
     assert _common.DEFAULT_MAX_TURNS == 30
     messages = red_build_messages(1, [])
     assert "turn 1 of 30" in messages[1]["content"].lower()
+
+
+def _red_event(tool, args, result, index=1):
+    return {
+        "id": f"evt-{index:04d}", "timestamp": "2026-01-01T00:00:00+00:00",
+        "actor": "red", "tool": tool, "args": args, "result": result,
+        "reasoning_summary": "probe", "evidence_refs": [],
+    }
+
+
+def _blue_event(tool, args, result, index=2):
+    event = _red_event(tool, args, result, index)
+    event["actor"] = "blue"
+    return event
+
+
+def test_own_history_keeps_listed_file_names():
+    history = [_red_event("list_files", {"host": "db", "path": "/secret/"},
+                          {"ok": True, "host": "db", "path": "/secret",
+                           "files": ["exercise_secret.txt"]})]
+    assert "exercise_secret.txt" in _common.summarize_own_history(history, "red")
+
+
+def test_listed_file_name_reaches_later_red_prompt():
+    history = [
+        _red_event("list_files", {"host": "db", "path": "/secret/"},
+                   {"ok": True, "host": "db", "path": "/secret",
+                    "files": ["exercise_secret.txt"]}, 1),
+        _blue_event("read_logs", {"host": "web"},
+                    {"ok": True, "host": "web", "lines": []}, 2),
+    ]
+    user_text = red_build_messages(3, history)[1]["content"]
+    assert "exercise_secret.txt" in user_text
+
+
+def test_last_tool_result_reaches_blue_prompt():
+    history = [_blue_event("read_logs", {"host": "web"},
+                           {"ok": True, "host": "web", "lines": [
+                               {"id": "web:0",
+                                "line": "unique-probe-marker GET /admin"},
+                           ]})]
+    user_text = blue_build_messages(2, history)[1]["content"]
+    assert "unique-probe-marker" in user_text
+
+
+def test_own_history_keeps_http_hint_text():
+    history = [_red_event("http_request", {"host": "web", "path": "/admin"},
+                          {"ok": True, "host": "web", "status": 200,
+                           "body": "admin page, data host db uses admin"})]
+    assert "data host db" in _common.summarize_own_history(history, "red")
+
+
+def test_own_history_keeps_read_file_path():
+    history = [_red_event("read_file", {"host": "db", "path": "/secret/a.txt"},
+                          {"ok": True, "host": "db", "path": "/secret/a.txt",
+                           "content": "words"})]
+    assert "/secret/a.txt" in _common.summarize_own_history(history, "red")
+
+
+def test_compact_http_hint_truncated_to_200_chars():
+    body = "HINT-" + "x" * 500
+    history = [_red_event("http_request", {"host": "web", "path": "/admin"},
+                          {"ok": True, "host": "web", "status": 200,
+                           "body": body})]
+    summary = _common.summarize_own_history(history, "red")
+    assert body[:200] in summary
+    assert body not in summary
+    assert "x" * 201 not in summary
+
+
+def test_last_result_truncated_to_1500_chars():
+    history = [_red_event("read_file", {"host": "db", "path": "/secret/a.txt"},
+                          {"ok": True, "host": "db", "path": "/secret/a.txt",
+                           "content": "C" * 3000})]
+    user_text = red_build_messages(2, history)[1]["content"]
+    assert "C" * 100 in user_text
+    assert "C" * 1501 not in user_text
+
+
+def test_red_prompt_shows_known_state_checklist():
+    history = [
+        _red_event("scan_host", {"host": "web"},
+                   {"ok": True, "host": "web", "reachable": True,
+                    "ports": [8000]}, 1),
+        _red_event("try_credential",
+                   {"host": "web", "user": "admin", "password": "changeme"},
+                   {"ok": True, "host": "web", "authenticated": False,
+                    "note": "no sign-in gate on 'web'"}, 2),
+        _red_event("try_credential",
+                   {"host": "db", "user": "admin", "password": "changeme"},
+                   {"ok": True, "host": "db", "authenticated": True}, 3),
+    ]
+    user_text = red_build_messages(4, history)[1]["content"]
+    assert "hosts scanned: web" in user_text
+    assert "hosts with no sign-in gate: web" in user_text
+    assert "hosts authenticated: db" in user_text
+
+
+def test_red_checklist_reports_none_when_empty():
+    user_text = red_build_messages(1, [])[1]["content"]
+    assert "hosts scanned: none" in user_text
+    assert "hosts with no sign-in gate: none" in user_text
+    assert "hosts authenticated: none" in user_text
