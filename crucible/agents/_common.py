@@ -179,7 +179,17 @@ def fallback_note_for_empty_reply(response: dict) -> str:
             "(finish_reason=length), using baseline."
         )
     if not str(content or "").strip():
+        if finish_reason:
+            return (
+                "Model returned an empty reply "
+                f"(finish_reason={finish_reason}), using baseline."
+            )
         return "Model returned an empty reply, using baseline."
+    if finish_reason:
+        return (
+            "Model returned no tool call "
+            f"(finish_reason={finish_reason}), using baseline."
+        )
     return "Model returned no tool call, using baseline."
 
 
