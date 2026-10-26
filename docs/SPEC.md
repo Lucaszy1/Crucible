@@ -129,10 +129,11 @@ Per exercise: time to detect, time to contain, hosts compromised, secret exfiltr
 
 ## 13. Checklist
 
-- [ ] Repo skeleton and .gitignore
-- [ ] llm.py with spend guard
-- [ ] Sandbox containers and allowlist
-- [ ] tools.py and event schema
+- [x] Repo skeleton and .gitignore
+- [x] llm.py with spend guard
+- [x] Sandbox containers and allowlist
+- [x] tools.py with allowlist
+- [ ] Event schema (events.py, lands with day two loop)
 - [ ] Orchestrator loop
 - [ ] Red and blue agents
 - [ ] Auditor agent
