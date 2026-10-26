@@ -47,6 +47,11 @@ def parse_args(argv=None):
         action="store_true",
         help="Exit nonzero if any turn fell back to the scripted baseline",
     )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Skip the on-disk model response cache for this run",
+    )
     return parser.parse_args(argv)
 
 
@@ -76,8 +81,8 @@ def _summary(score: dict) -> list:
 def main(argv=None) -> int:
     args = parse_args(argv)
     if args.agents == "model":
-        red = ModelRed(exercise_id=args.exercise_id)
-        blue = ModelBlue(exercise_id=args.exercise_id)
+        red = ModelRed(exercise_id=args.exercise_id, use_cache=not args.no_cache)
+        blue = ModelBlue(exercise_id=args.exercise_id, use_cache=not args.no_cache)
     else:
         red = ScriptedRed()
         blue = ScriptedBlue()

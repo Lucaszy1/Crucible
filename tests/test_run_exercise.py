@@ -107,3 +107,29 @@ def test_runner_strict_passes_without_fallback(tmp_path, monkeypatch, capsys):
     _stubbed_run_with_events(monkeypatch, tmp_path,
                              [_evt("Probing the web host first.")])
     assert run_exercise.main(["--agents", "model", "--strict"]) == 0
+
+
+def test_no_cache_flag_parses():
+    assert run_exercise.parse_args(["--agents", "model"]).no_cache is False
+    assert run_exercise.parse_args(["--agents", "model", "--no-cache"]).no_cache is True
+
+
+def test_runner_no_cache_disables_agent_cache(tmp_path, monkeypatch):
+    seen = {}
+    _stubbed_run(monkeypatch, tmp_path)
+
+    class _RecordingRed(ModelRed):
+        def __init__(self, *args, **kwargs):
+            seen["red_use_cache"] = kwargs.get("use_cache", True)
+            super().__init__(*args, **kwargs)
+
+    class _RecordingBlue(ModelBlue):
+        def __init__(self, *args, **kwargs):
+            seen["blue_use_cache"] = kwargs.get("use_cache", True)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(run_exercise, "ModelRed", _RecordingRed)
+    monkeypatch.setattr(run_exercise, "ModelBlue", _RecordingBlue)
+    assert run_exercise.main(["--agents", "model", "--no-cache"]) == 0
+    assert seen["red_use_cache"] is False
+    assert seen["blue_use_cache"] is False

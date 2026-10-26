@@ -178,13 +178,15 @@ class ModelBlue:
     def __init__(self, client=None, exercise_id: str | None = None,
                  max_tokens: int = MAX_TOKENS, temperature: float = 0.0,
                  reasoning_effort: str | None = None,
-                 max_turns: int = _common.DEFAULT_MAX_TURNS):
+                 max_turns: int = _common.DEFAULT_MAX_TURNS,
+                 use_cache: bool = True):
         self._client = client
         self._exercise_id = exercise_id
         self._max_tokens = max_tokens
         self._temperature = temperature
         self._reasoning_effort = reasoning_effort
         self._max_turns = max_turns
+        self._use_cache = use_cache
         self._fallback = ScriptedBlue()
 
     def _fallback_action(self, turn: int, history: list, note: str) -> dict | None:
@@ -206,6 +208,7 @@ class ModelBlue:
                 tools=TOOL_SCHEMAS,
                 exercise_id=self._exercise_id,
                 client=self._client,
+                use_cache=self._use_cache,
                 max_tokens=self._max_tokens,
                 temperature=self._temperature,
                 reasoning_effort=self._reasoning_effort,

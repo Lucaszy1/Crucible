@@ -161,9 +161,21 @@ def check_spend_guard(extra_estimate: float = 0.0) -> float:
     return total
 
 
-def _cache_key(model: str, messages: list, tools: list | None, extra: dict) -> str:
+def _cache_key(
+    model: str,
+    messages: list,
+    tools: list | None,
+    extra: dict,
+    exercise_id: str | None = None,
+) -> str:
     blob = json.dumps(
-        {"model": model, "messages": messages, "tools": tools, "extra": extra},
+        {
+            "model": model,
+            "messages": messages,
+            "tools": tools,
+            "extra": extra,
+            "exercise_id": exercise_id,
+        },
         sort_keys=True,
         default=str,
     )
@@ -265,7 +277,8 @@ def chat(
 
     Returns a plain dict with content, tool_calls, usage, model, and a
     cached flag. Tests may pass a fake client; production passes none and
-    gets a real Meta Model API client.
+    gets a real Meta Model API client. The cache key includes the
+    exercise id, so identical prompts repeat only within one exercise.
     """
     model = model_for(role)
     effort = (reasoning_effort or "").strip() or reasoning_effort_default()
@@ -274,7 +287,7 @@ def chat(
         "max_tokens": max_tokens,
         "reasoning_effort": effort,
     }
-    key = _cache_key(model, messages, tools, extra)
+    key = _cache_key(model, messages, tools, extra, exercise_id)
 
     if use_cache:
         hit = _read_cache(key)

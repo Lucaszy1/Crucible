@@ -86,6 +86,17 @@ def test_chat_skips_cache_for_new_prompts(isolated_storage):
     assert len(client.calls) == 2
 
 
+def test_chat_cache_isolated_by_exercise_id(isolated_storage):
+    client = _FakeClient()
+    messages = [{"role": "user", "content": "hi"}]
+    llm.chat("dev", messages, client=client, exercise_id="ex1")
+    llm.chat("dev", messages, client=client, exercise_id="ex2")
+    assert len(client.calls) == 2
+    third = llm.chat("dev", messages, client=client, exercise_id="ex1")
+    assert third["cached"] is True
+    assert len(client.calls) == 2
+
+
 def test_tool_calls_normalized(isolated_storage):
     func = SimpleNamespace(name="scan_host", arguments='{"host": "web"}')
     call = SimpleNamespace(id="call_1", function=func)
