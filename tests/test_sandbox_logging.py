@@ -21,6 +21,8 @@ SH = shutil.which("sh") or "/bin/sh"
 
 DB_SCRIPTS = ["signin.sh", "rotate-signin.sh", "reset-signin.sh",
               "read-file.sh", "list-files.sh"]
+WS_SCRIPTS = ["signin.sh", "read-file.sh", "list-files.sh"]
+TWIN_WRAPPERS = ["read-file.sh", "list-files.sh"]
 
 
 def run_script(path, args, env_extra=None):
@@ -40,12 +42,49 @@ def clean_state():
 
 
 def test_gate_scripts_pass_syntax_check():
-    for name in DB_SCRIPTS:
-        done = subprocess.run(
-            [SH, "-n", str(DB / name)],
-            capture_output=True, text=True, timeout=30,
-        )
-        assert done.returncode == 0, (name, done.stderr)
+    for directory, names in ((DB, DB_SCRIPTS), (WS, WS_SCRIPTS)):
+        for name in names:
+            done = subprocess.run(
+                [SH, "-n", str(directory / name)],
+                capture_output=True, text=True, timeout=30,
+            )
+            assert done.returncode == 0, (name, done.stderr)
+
+
+def _without_sync_line(text):
+    return "\n".join(
+        line for line in text.splitlines() if "Keep in sync with" not in line
+    )
+
+
+def test_workstation_wrappers_match_db_twins():
+    for name in TWIN_WRAPPERS:
+        db_text = (DB / name).read_text(encoding="utf-8")
+        ws_text = (WS / name).read_text(encoding="utf-8")
+        assert _without_sync_line(db_text) == _without_sync_line(ws_text), name
+
+
+def test_workstation_signin_logs_attempt_and_reports_no_gate(tmp_path):
+    log_file = tmp_path / "toy.log"
+    env = {"TOY_LOG_FILE": str(log_file)}
+    done = run_script(WS / "signin.sh", ["admin", "changeme", "controller"], env)
+    assert done.stdout.strip() == "NO_GATE"
+    assert log_file.read_text(encoding="utf-8").splitlines() == [
+        "signin fail user=admin from=controller note=no-gate"
+    ]
+
+
+def test_workstation_read_wrapper_logs(tmp_path):
+    data = tmp_path / "notes.txt"
+    data.write_bytes(b"team lunch notes\n")
+    log_file = tmp_path / "toy.log"
+    env = {"TOY_LOG_FILE": str(log_file)}
+    done = run_script(WS / "read-file.sh", [str(data), "controller"], env)
+    assert done.returncode == 0
+    assert done.stdout == "team lunch notes\n"
+    assert log_file.read_text(encoding="utf-8").splitlines() == [
+        f"file read path={data} bytes=17 from=controller"
+    ]
 
 
 def test_db_signin_logs_ok_and_fail_without_password(tmp_path):
