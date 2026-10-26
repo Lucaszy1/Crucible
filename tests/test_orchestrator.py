@@ -40,6 +40,18 @@ def test_event_writer_numbers_and_persists(tmp_path):
         assert set(events.REQUIRED_FIELDS) <= set(entry)
 
 
+def test_log_replaces_em_and_en_dashes(tmp_path):
+    writer = events.EventWriter(tmp_path / "dashes.jsonl")
+    logged = writer.log(actor="red", tool="scan_host", args={"host": "web"},
+                        result={"ok": True},
+                        reasoning_summary="Recon done — now probing – fast.")
+    assert "—" not in logged["reasoning_summary"]
+    assert "–" not in logged["reasoning_summary"]
+    assert logged["reasoning_summary"] == "Recon done, now probing, fast."
+    stored = events.read_events(tmp_path / "dashes.jsonl")[0]
+    assert stored["reasoning_summary"] == logged["reasoning_summary"]
+
+
 def test_append_rejects_incomplete_event(tmp_path):
     with pytest.raises(ValueError):
         events.append_event(tmp_path / "bad.jsonl", {"id": "evt-1"})

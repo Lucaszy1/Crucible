@@ -32,6 +32,14 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def sanitize_reasoning_summary(text: str) -> str:
+    """Replace em dashes and en dashes with commas for clean logs."""
+    cleaned = str(text or "")
+    cleaned = cleaned.replace(" — ", ", ").replace("—", ",")
+    cleaned = cleaned.replace(" – ", ", ").replace("–", ",")
+    return cleaned
+
+
 def new_event(
     *,
     actor: str,
@@ -51,7 +59,7 @@ def new_event(
         "tool": tool,
         "args": dict(args or {}),
         "result": dict(result or {}),
-        "reasoning_summary": reasoning_summary or "",
+        "reasoning_summary": sanitize_reasoning_summary(reasoning_summary or ""),
         "evidence_refs": list(evidence_refs or []),
     }
 
