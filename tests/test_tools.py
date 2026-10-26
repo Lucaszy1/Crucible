@@ -15,6 +15,7 @@ HOST_TOOLS = [
     lambda h: tools.http_request(h, "/"),
     lambda h: tools.try_credential(h, "admin", "changeme"),
     lambda h: tools.read_file(h, "/srv/data/notes.txt"),
+    lambda h: tools.list_files(h, "/srv/data/"),
     lambda h: tools.read_logs(h),
     lambda h: tools.list_processes(h),
     lambda h: tools.isolate_host(h),
@@ -225,6 +226,42 @@ def test_read_file_gates_and_validates(monkeypatch):
     tools.try_credential("db", "admin", "changeme")
     opened = tools.read_file("db", "/secret/exercise_secret.txt")
     assert opened["ok"] is True
+
+
+def test_list_files_gates_and_validates(monkeypatch):
+    def fake_exec(host, cmd, timeout=30):
+        if cmd[0] == "signin":
+            return {"exit_code": 0, "output": "AUTH_OK\n",
+                    "stdout": "AUTH_OK\n", "stderr": ""}
+        assert cmd[:2] == ["ls", "-1"]
+        return {"exit_code": 0, "output": "a.txt\nb.txt\n",
+                "stdout": "a.txt\nb.txt\n", "stderr": ""}
+
+    monkeypatch.setattr(sandbox, "is_running", lambda host: True)
+    monkeypatch.setattr(sandbox, "exec", fake_exec)
+    with pytest.raises(ValueError):
+        tools.list_files("web", "relative/dir")
+    with pytest.raises(ValueError):
+        tools.list_files("web", "/etc")
+    gated = tools.list_files("db", "/secret/")
+    assert gated["ok"] is False
+    assert "sign-in" in gated["error"]
+    tools.try_credential("db", "admin", "changeme")
+    opened = tools.list_files("db", "/secret/")
+    assert opened == {"ok": True, "host": "db", "path": "/secret",
+                      "files": ["a.txt", "b.txt"]}
+    listed = tools.list_files("web", "/srv/data/")
+    assert listed["ok"] is True
+    assert listed["files"] == ["a.txt", "b.txt"]
+
+
+def test_list_files_backend_failure_returns_error(monkeypatch):
+    def boom(*args, **kwargs):
+        raise sandbox.SandboxError("daemon away")
+
+    monkeypatch.setattr(sandbox, "exec", boom)
+    out = tools.list_files("web", "/srv/data/")
+    assert out["ok"] is False
 
 
 def test_report_finding_ids():

@@ -54,6 +54,11 @@ def _summarize_result(tool: str, result: dict) -> str:
             content = str((result or {}).get("content", ""))
             return f"ok path={(result or {}).get('path', '?')} bytes={len(content)}"
         return f"ok=False error={str((result or {}).get('error', ''))[:80]}"
+    if tool == "list_files":
+        if (result or {}).get("ok") is True:
+            files = (result or {}).get("files", []) or []
+            return f"ok path={(result or {}).get('path', '?')} files={len(files)}"
+        return f"ok=False error={str((result or {}).get('error', ''))[:80]}"
     if tool == "scan_host":
         return (f"ok={ok} reachable={(result or {}).get('reachable', '?')} "
                 f"ports={(result or {}).get('ports', '?')}")

@@ -65,7 +65,8 @@ def _isolated_llm(tmp_path, monkeypatch, limit="5"):
 
 
 def test_prompts_name_only_team_tools():
-    for name in ("scan_host", "http_request", "try_credential", "read_file"):
+    for name in ("scan_host", "http_request", "try_credential", "read_file",
+                 "list_files"):
         assert name in RED_PROMPT
     assert "read_logs" not in RED_PROMPT
     assert "isolate_host" not in RED_PROMPT
@@ -77,7 +78,7 @@ def test_prompts_name_only_team_tools():
     red_names = {entry["function"]["name"] for entry in RED_SCHEMAS}
     blue_names = {entry["function"]["name"] for entry in BLUE_SCHEMAS}
     assert red_names == {"scan_host", "http_request", "try_credential",
-                         "read_file", "report_finding"}
+                         "read_file", "list_files", "report_finding"}
     assert blue_names == {"read_logs", "list_processes", "wait", "block_ip",
                           "isolate_host", "patch_service", "restore_host",
                           "report_finding"}
@@ -365,6 +366,11 @@ def test_red_prompt_states_objective_and_pacing():
     assert "admin" in RED_PROMPT
     assert "default sign-in" in RED_PROMPT
     assert "quickly" in RED_PROMPT
+    assert "changeme" in RED_PROMPT
+    assert "password" in RED_PROMPT
+    assert "root" in RED_PROMPT
+    assert "toor" in RED_PROMPT
+    assert "hints worth acting on" in RED_PROMPT
 
 
 def test_blue_prompt_states_detect_report_contain():

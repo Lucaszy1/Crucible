@@ -22,6 +22,7 @@ _DISPATCH = {
     "http_request": tools.http_request,
     "try_credential": tools.try_credential,
     "read_file": tools.read_file,
+    "list_files": tools.list_files,
     "report_finding": tools.report_finding,
     "read_logs": tools.read_logs,
     "list_processes": tools.list_processes,

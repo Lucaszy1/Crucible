@@ -22,6 +22,7 @@ __all__ = [
     "http_request",
     "try_credential",
     "read_file",
+    "list_files",
     "report_finding",
     "read_logs",
     "list_processes",
@@ -62,6 +63,20 @@ def _valid_path(path: str) -> str:
     if not clean.startswith(roots):
         raise ValueError(f"path {path!r} is outside readable roots {roots}")
     return clean
+
+
+def _valid_dir_path(path: str) -> str:
+    if not isinstance(path, str) or not path.startswith("/"):
+        raise ValueError(f"path must be absolute: {path!r}")
+    if len(path) > MAX_PATH_LEN or any(ch.isspace() for ch in path):
+        raise ValueError(f"path rejected: {path!r}")
+    clean = posixpath.normpath(path)
+    roots = tuple(_scenario().get("readable_roots", ["/"]))
+    for root in roots:
+        bare = root.rstrip("/") or "/"
+        if clean == bare or clean.startswith(root):
+            return clean
+    raise ValueError(f"path {path!r} is outside readable roots {roots}")
 
 
 # Red team tools.
@@ -210,6 +225,27 @@ def read_file(host: str, path: str) -> dict:
         return {"ok": False, "error": f"cannot read {clean} on {host!r}"}
     return {"ok": True, "host": host, "path": clean,
             "content": done["output"][:MAX_BODY]}
+
+
+def list_files(host: str, path: str) -> dict:
+    """List names under a directory inside one sandbox host.
+
+    Paths stay pinned under the scenario's readable roots, including the
+    roots themselves. Secret roots need a prior successful sign-in on that
+    host, the same as read_file. Read-only: runs a plain directory listing.
+    """
+    sandbox.check_host(host)
+    clean = _valid_dir_path(path)
+    if (clean == "/secret" or clean.startswith("/secret/")) and host not in _state["authed"]:
+        return {"ok": False, "error": f"sign-in on {host!r} is required first"}
+    try:
+        done = sandbox.exec(host, ["ls", "-1", clean])
+    except SandboxError as exc:
+        return {"ok": False, "error": str(exc)}
+    if done["exit_code"] != 0:
+        return {"ok": False, "error": f"cannot list {clean} on {host!r}"}
+    files = [line for line in done["output"].splitlines() if line.strip()]
+    return {"ok": True, "host": host, "path": clean, "files": files}
 
 
 def report_finding(text: str) -> dict:
