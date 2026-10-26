@@ -57,6 +57,20 @@ def parse_tool_args(arguments) -> dict:
     return parsed
 
 
+def fallback_note_for_empty_reply(response: dict) -> str:
+    """Explain a model reply that carried no usable tool call."""
+    finish_reason = (response or {}).get("finish_reason") or ""
+    content = (response or {}).get("content", "")
+    if finish_reason == "length":
+        return (
+            "Model reply hit the token limit "
+            "(finish_reason=length), using baseline."
+        )
+    if not str(content or "").strip():
+        return "Model returned an empty reply, using baseline."
+    return "Model returned no tool call, using baseline."
+
+
 def clean_reasoning(content: str, fallback: str) -> str:
     """Return a short reasoning summary from model text."""
     text = " ".join(str(content or "").split())

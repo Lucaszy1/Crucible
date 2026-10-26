@@ -151,7 +151,7 @@ class ModelRed:
         calls = (response or {}).get("tool_calls", []) or []
         if not calls:
             return self._fallback_action(
-                turn, history, "Model returned no tool call, using baseline."
+                turn, history, _common.fallback_note_for_empty_reply(response)
             )
         first = calls[0]
         name = first.get("name", "")

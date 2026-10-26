@@ -1,5 +1,6 @@
 """Unit tests for the model client wrapper. No network calls here."""
 
+import json
 from datetime import date
 from types import SimpleNamespace
 
@@ -125,3 +126,70 @@ def test_chat_reasoning_effort_explicit_wins(isolated_storage, monkeypatch):
     llm.chat("dev", [{"role": "user", "content": "hi"}], client=client,
              reasoning_effort="low")
     assert client.calls[0]["reasoning_effort"] == "low"
+
+
+def _chat_response(content="", tool_calls=(), finish_reason="stop"):
+    calls = []
+    for index, (name, args) in enumerate(tool_calls):
+        if not isinstance(args, str):
+            args = json.dumps(args)
+        func = SimpleNamespace(name=name, arguments=args)
+        calls.append(SimpleNamespace(id=f"call_{index}", function=func))
+    message = SimpleNamespace(content=content, tool_calls=calls)
+    usage = SimpleNamespace(prompt_tokens=10, completion_tokens=5)
+    choice = SimpleNamespace(message=message, finish_reason=finish_reason)
+    return SimpleNamespace(choices=[choice], usage=usage)
+
+
+class _ScriptedClient:
+    def __init__(self, response):
+        self.calls = []
+        self._response = response
+        self.chat = SimpleNamespace(
+            completions=SimpleNamespace(create=self.create)
+        )
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return self._response
+
+
+def _repeat_chat(client, tools=None):
+    messages = [{"role": "user", "content": "act"}]
+    llm.chat("red", messages, client=client, tools=tools)
+    return llm.chat("red", messages, client=client, tools=tools)
+
+
+def test_chat_reports_finish_reason(isolated_storage):
+    out = llm.chat("red", [{"role": "user", "content": "act"}],
+                   client=_ScriptedClient(_chat_response(finish_reason="length")))
+    assert out["finish_reason"] == "length"
+
+
+def test_chat_skips_cache_on_length_finish(isolated_storage):
+    client = _ScriptedClient(_chat_response("cut off", finish_reason="length"))
+    _repeat_chat(client)
+    assert len(client.calls) == 2
+
+
+def test_chat_skips_cache_on_empty_content(isolated_storage):
+    client = _ScriptedClient(_chat_response(""))
+    _repeat_chat(client)
+    assert len(client.calls) == 2
+
+
+def test_chat_skips_cache_when_tool_call_missing(isolated_storage):
+    tools = [{"type": "function", "function": {"name": "scan_host"}}]
+    client = _ScriptedClient(_chat_response("thinking out loud"))
+    _repeat_chat(client, tools=tools)
+    assert len(client.calls) == 2
+
+
+def test_chat_still_caches_valid_tool_call(isolated_storage):
+    tools = [{"type": "function", "function": {"name": "scan_host"}}]
+    resp = _chat_response("Scanning first.",
+                          [("scan_host", {"host": "web"})])
+    client = _ScriptedClient(resp)
+    second = _repeat_chat(client, tools=tools)
+    assert len(client.calls) == 1
+    assert second["cached"] is True

@@ -16,7 +16,7 @@ from crucible.agents.red import SYSTEM_PROMPT as RED_PROMPT
 from crucible.agents.red import TOOL_SCHEMAS as RED_SCHEMAS
 
 
-def _response(content, tool_calls):
+def _response(content, tool_calls, finish_reason="stop"):
     calls = []
     for index, (name, args) in enumerate(tool_calls):
         if isinstance(args, dict):
@@ -27,7 +27,8 @@ def _response(content, tool_calls):
         calls.append(SimpleNamespace(id=f"call_{index}", function=func))
     message = SimpleNamespace(content=content, tool_calls=calls)
     usage = SimpleNamespace(prompt_tokens=10, completion_tokens=5)
-    return SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=usage)
+    choice = SimpleNamespace(message=message, finish_reason=finish_reason)
+    return SimpleNamespace(choices=[choice], usage=usage)
 
 
 class _FakeClient:
@@ -159,7 +160,55 @@ def test_no_tool_call_falls_back(tmp_path, monkeypatch):
     agent = ModelBlue(client=_FakeClient(resp))
     action = agent.next_action(2, [])
     assert action["tool"] == "read_logs"
-    assert "baseline" in action["reasoning"].lower()
+    assert "no tool call" in action["reasoning"].lower()
+
+
+def test_length_finish_logs_exact_cause(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    resp = _response("", [], finish_reason="length")
+    agent = ModelRed(client=_FakeClient(resp))
+    action = agent.next_action(1, [])
+    assert action["tool"] == "scan_host"
+    assert "finish_reason=length" in action["reasoning"]
+    assert "no tool call" not in action["reasoning"].lower()
+
+
+def test_empty_reply_logs_exact_cause(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    resp = _response("   ", [])
+    agent = ModelBlue(client=_FakeClient(resp))
+    action = agent.next_action(2, [])
+    assert action["tool"] == "read_logs"
+    assert "empty reply" in action["reasoning"].lower()
+    assert "no tool call" not in action["reasoning"].lower()
+
+
+def test_length_reply_not_cached_and_cause_logged(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    bad = _response("", [], finish_reason="length")
+    good = _response("Probing the web host first.",
+                     [("scan_host", {"host": "web"})])
+    client = _FakeClient([bad, good])
+    agent = ModelRed(client=client)
+    first = agent.next_action(1, [])
+    second = agent.next_action(1, [])
+    assert len(client.calls) == 2
+    assert "finish_reason=length" in first["reasoning"]
+    assert "baseline" not in second["reasoning"].lower()
+    assert second["reasoning"] == "Probing the web host first."
+
+
+def test_length_cause_lands_in_event_log(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    resp = _response("", [], finish_reason="length")
+    red = ModelRed(client=_FakeClient(resp))
+    blue = ModelBlue(client=_FakeClient(resp))
+    monkeypatch.setattr(orchestrator, "run_tool", lambda name, args: {"ok": True})
+    run_path = tmp_path / "length.jsonl"
+    result = orchestrator.run_exercise(red, blue, max_turns=2, run_path=run_path)
+    assert len(result["events"]) == 2
+    for event in result["events"]:
+        assert "finish_reason=length" in event["reasoning_summary"]
 
 
 def test_api_error_falls_back_and_never_hangs(tmp_path, monkeypatch):

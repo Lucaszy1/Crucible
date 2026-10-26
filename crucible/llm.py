@@ -186,6 +186,22 @@ def _write_cache(key: str, payload: dict) -> None:
     path.write_text(json.dumps(payload, default=str), encoding="utf-8")
 
 
+def _cacheable(*, finish_reason, content: str, tool_calls: list, tools) -> bool:
+    """Decide whether a reply is worth serving again from disk.
+
+    Replies cut off by the token limit, replies with no text, and
+    replies missing a tool call when tools were offered are never
+    cached, so one degenerate response cannot repeat for every turn.
+    """
+    if finish_reason == "length":
+        return False
+    if not str(content or "").strip():
+        return False
+    if tools and not tool_calls:
+        return False
+    return True
+
+
 def _retryable(exc: BaseException) -> bool:
     name = type(exc).__name__
     if name in _RETRYABLE_NAMES:
@@ -294,8 +310,10 @@ def chat(
     else:  # pragma: no cover - loop always breaks or raises
         raise last_exc  # type: ignore[misc]
 
-    message = response.choices[0].message
+    choice = response.choices[0]
+    message = choice.message
     content, tool_calls = _message_to_dict(message)
+    finish_reason = getattr(choice, "finish_reason", None)
     usage_obj = getattr(response, "usage", None)
     input_tokens = int(getattr(usage_obj, "prompt_tokens", 0) or 0)
     output_tokens = int(getattr(usage_obj, "completion_tokens", 0) or 0)
@@ -309,10 +327,16 @@ def chat(
     payload = {
         "content": content,
         "tool_calls": tool_calls,
+        "finish_reason": finish_reason,
         "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
         "model": model,
         "cached": False,
     }
-    if use_cache:
+    if use_cache and _cacheable(
+        finish_reason=finish_reason,
+        content=content,
+        tool_calls=tool_calls,
+        tools=tools,
+    ):
         _write_cache(key, payload)
     return payload
