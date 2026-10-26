@@ -19,10 +19,25 @@ def _stub_common(monkeypatch, tmp_path):
     return seen
 
 
-def _evt(reasoning="note"):
-    return {"actor": "red", "tool": "scan_host", "args": {},
+def _evt(reasoning="note", tool="scan_host", host=None):
+    return {"actor": "red", "tool": tool,
+            "args": {"host": host} if host else {},
             "result": {"ok": True}, "reasoning_summary": reasoning,
             "evidence_refs": []}
+
+
+def test_red_attempts_counts_red_credentials_per_host():
+    events = [
+        _evt("Probing first."),
+        _evt("Trying the data host.", "try_credential", "db"),
+        _evt("Trying the data host again.", "try_credential", "db"),
+        _evt("Trying the web host.", "try_credential", "web"),
+    ]
+    blue_note = _evt("Reading logs.", "read_logs", "web")
+    blue_note["actor"] = "blue"
+    events.append(blue_note)
+    assert batch._red_attempts(events) == "db=2, web=1"
+    assert batch._red_attempts([]) == ""
 
 
 def test_batch_args_parse():
@@ -66,6 +81,9 @@ def test_batch_writes_csv_and_summary(tmp_path, monkeypatch, capsys):
                                                  encoding="utf-8")
         return {
             "events": [_evt("Probing first."),
+                       _evt("Trying the data host.", "try_credential", "db"),
+                       _evt("Trying the data host again.", "try_credential", "db"),
+                       _evt("Trying the web host.", "try_credential", "web"),
                        _evt("Model returned no tool call, using baseline.")],
             "score": {"turns_used": 2, "total_events": 2,
                       "time_to_detect": 2 if delay is not None else None,
@@ -92,8 +110,9 @@ def test_batch_writes_csv_and_summary(tmp_path, monkeypatch, capsys):
     assert rows[0]["detection_delay"] == "3"
     assert rows[0]["downtime_cost"] == "9"
     assert rows[0]["blue_score"] == "11"
-    assert rows[0]["model_turns"] == "1"
+    assert rows[0]["model_turns"] == "4"
     assert rows[0]["fallback_turns"] == "1"
+    assert rows[0]["red_attempts"] == "db=2, web=1"
     assert float(rows[0]["estimated_cost_usd"]) == 0.02
     assert rows[2]["detection_delay"] == ""
     assert rows[2]["time_to_contain"] == ""

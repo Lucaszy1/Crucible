@@ -27,6 +27,7 @@ CSV_FIELDS = (
     "time_to_contain",
     "downtime_cost",
     "blue_score",
+    "red_attempts",
     "model_turns",
     "fallback_turns",
     "estimated_cost_usd",
@@ -74,6 +75,19 @@ def _mean(values: list) -> float | None:
 
 def _csv_path(prefix: str) -> Path:
     return events.RUNS_DIR / f"batch-{prefix}.csv"
+
+
+def _red_attempts(event_list: list) -> str:
+    """Count red try_credential calls per host, like db=2, web=1."""
+    counts: dict = {}
+    for event in event_list or []:
+        if event.get("actor") != "red" or event.get("tool") != "try_credential":
+            continue
+        args = event.get("args", {}) or {}
+        result = event.get("result", {}) or {}
+        host = args.get("host") or result.get("host") or "unknown"
+        counts[host] = counts.get(host, 0) + 1
+    return ", ".join(f"{host}={counts[host]}" for host in sorted(counts))
 
 
 def main(argv=None) -> int:
@@ -124,6 +138,7 @@ def main(argv=None) -> int:
                     "time_to_contain": score.get("time_to_contain"),
                     "downtime_cost": score.get("downtime_cost", 0),
                     "blue_score": score.get("blue_score", 0),
+                    "red_attempts": _red_attempts(result.get("events", [])),
                     "model_turns": model_turns,
                     "fallback_turns": fallback_turns,
                     "estimated_cost_usd": round(cost, 6),
