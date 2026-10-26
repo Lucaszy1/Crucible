@@ -18,7 +18,7 @@ CONTAINMENT_TOOLS = ("isolate_host", "patch_service", "restore_host", "block_ip"
 MAX_TURNS = 30
 
 DEFAULT_BUSINESS_WEIGHTS = {"web": 3, "db": 5, "workstation": 1}
-SECRET_PROTECTED_POINTS = 20
+SECRET_PROTECTED_POINTS = 40
 
 _DISPATCH = {
     "scan_host": tools.scan_host,

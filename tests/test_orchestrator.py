@@ -243,7 +243,7 @@ def test_score_downtime_counts_isolated_turns():
     ]
     score = orchestrator.score_events(history)
     assert score["downtime_cost"] == 9
-    assert score["blue_score"] == 11
+    assert score["blue_score"] == 31
     assert score["outcome"] == "blue_held"
 
 
@@ -257,7 +257,7 @@ def test_score_patch_counts_and_restore_clears():
     ]
     score = orchestrator.score_events(history)
     assert score["downtime_cost"] == 10
-    assert score["blue_score"] == 10
+    assert score["blue_score"] == 30
 
 
 def test_score_patch_service_counts_downtime():
@@ -268,7 +268,7 @@ def test_score_patch_service_counts_downtime():
     ]
     score = orchestrator.score_events(history)
     assert score["downtime_cost"] == 10
-    assert score["blue_score"] == 10
+    assert score["blue_score"] == 30
 
 
 def test_score_downtime_ignores_failed_actions():
@@ -279,7 +279,7 @@ def test_score_downtime_ignores_failed_actions():
     ]
     score = orchestrator.score_events(history)
     assert score["downtime_cost"] == 0
-    assert score["blue_score"] == 20
+    assert score["blue_score"] == 40
 
 
 def test_score_blue_score_zero_when_secret_read():
@@ -312,11 +312,11 @@ def test_score_accepts_weight_override():
     ]
     score = orchestrator.score_events(history, business_weights={"web": 7})
     assert score["downtime_cost"] == 7
-    assert score["blue_score"] == 13
+    assert score["blue_score"] == 33
 
 
 def test_business_weights_match_scenario():
     scenario = sandbox.load_scenario()
     assert scenario["business_weights"] == {"web": 3, "db": 5, "workstation": 1}
     assert orchestrator.DEFAULT_BUSINESS_WEIGHTS == {"web": 3, "db": 5, "workstation": 1}
-    assert orchestrator.SECRET_PROTECTED_POINTS == 20
+    assert orchestrator.SECRET_PROTECTED_POINTS == 40

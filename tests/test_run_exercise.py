@@ -160,7 +160,7 @@ def test_runner_summary_prints_downtime_blue_and_cost(tmp_path, monkeypatch, cap
                       "detection_delay": 1, "time_to_contain": None,
                       "hosts_compromised": 0, "compromised_hosts": [],
                       "secret_exfiltrated": False, "outcome": "blue_held",
-                      "downtime_cost": 9, "blue_score": 11},
+                      "downtime_cost": 9, "blue_score": 31},
             "run_path": path,
         }
 
@@ -169,7 +169,7 @@ def test_runner_summary_prints_downtime_blue_and_cost(tmp_path, monkeypatch, cap
     assert run_exercise.main(["--agents", "scripted"]) == 0
     out = capsys.readouterr().out
     assert "Downtime cost: 9" in out
-    assert "Blue score: 11" in out
+    assert "Blue score: 31" in out
     assert "Estimated cost: $" in out
     assert seen["stopped"] is True
 

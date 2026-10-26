@@ -62,9 +62,9 @@ def test_batch_rejects_zero_count(tmp_path, monkeypatch, capsys):
 def test_batch_writes_csv_and_summary(tmp_path, monkeypatch, capsys):
     seen = _stub_common(monkeypatch, tmp_path)
     plans = {
-        "demo-1": ("blue_held", 3, None, 9, 11, 0.02),
+        "demo-1": ("blue_held", 3, None, 9, 31, 0.02),
         "demo-2": ("red_succeeded", 5, 8, 0, 0, 0.03),
-        "demo-3": ("stalemate", None, None, 0, 20, 0.00),
+        "demo-3": ("stalemate", None, None, 0, 40, 0.00),
     }
 
     def fake_exercise(red, blue, max_turns=30, run_path=None, exercise_id=None):
@@ -109,7 +109,7 @@ def test_batch_writes_csv_and_summary(tmp_path, monkeypatch, capsys):
     assert rows[0]["outcome"] == "blue_held"
     assert rows[0]["detection_delay"] == "3"
     assert rows[0]["downtime_cost"] == "9"
-    assert rows[0]["blue_score"] == "11"
+    assert rows[0]["blue_score"] == "31"
     assert rows[0]["model_turns"] == "4"
     assert rows[0]["fallback_turns"] == "1"
     assert rows[0]["red_attempts"] == "db=2, web=1"
@@ -124,7 +124,7 @@ def test_batch_writes_csv_and_summary(tmp_path, monkeypatch, capsys):
     assert "blue holds: 1" in out.lower()
     assert "stalemates: 1" in out.lower()
     assert "Mean detection delay: 4.00" in out
-    assert "Mean blue_score: 10.33" in out
+    assert "Mean blue_score: 23.67" in out
     assert "Total estimated cost: $0.0500" in out
     assert "CSV:" in out
 
@@ -147,7 +147,7 @@ def test_batch_model_flag_uses_cache_option(tmp_path, monkeypatch):
         return {"events": [], "score": {"outcome": "stalemate",
                                        "detection_delay": None,
                                        "time_to_contain": None,
-                                       "downtime_cost": 0, "blue_score": 20},
+                                       "downtime_cost": 0, "blue_score": 40},
                 "run_path": str(tmp_path / "x.jsonl")}
 
     monkeypatch.setattr(batch, "ModelRed", _RecordingRed)
@@ -167,7 +167,7 @@ def test_batch_mean_handles_no_detections(tmp_path, monkeypatch, capsys):
         return {"events": [],
                 "score": {"outcome": "stalemate", "detection_delay": None,
                           "time_to_contain": None, "downtime_cost": 0,
-                          "blue_score": 20},
+                          "blue_score": 40},
                 "run_path": str(tmp_path / "x.jsonl")}
 
     monkeypatch.setattr(orchestrator, "run_exercise", fake_exercise)
@@ -175,4 +175,4 @@ def test_batch_mean_handles_no_detections(tmp_path, monkeypatch, capsys):
     assert batch.main(["--count", "2", "--prefix", "quiet"]) == 0
     out = capsys.readouterr().out
     assert "Mean detection delay: no detections" in out
-    assert "Mean blue_score: 20.00" in out
+    assert "Mean blue_score: 40.00" in out

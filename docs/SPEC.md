@@ -102,7 +102,7 @@ Per exercise: time to detect, time to contain, hosts compromised, secret exfiltr
 
 Availability cost: each host carries a business weight from sandbox/scenario.json (web 3, db 5, workstation 1). Every turn a host stays isolated or under patch adds its weight to downtime_cost. The down set starts empty. A successful isolate_host or patch_service marks that host down. A successful restore_host clears it. Each event adds the weights of the hosts down after that event, so the isolating or patching turn itself counts. Failed actions change nothing, and a host down for both reasons counts once per turn.
 
-Blue score: SECRET_PROTECTED_POINTS is 20. When the secret was read, blue_score is 0. Otherwise blue_score is max(0, 20 minus downtime_cost). High isolation or long patch windows therefore lower the score even when the secret stays protected.
+Blue score: SECRET_PROTECTED_POINTS is 40. When the secret was read, blue_score is 0. Otherwise blue_score is max(0, 40 minus downtime_cost). High isolation or long patch windows therefore lower the score even when the secret stays protected.
 
 ## 10. Schedule
 
