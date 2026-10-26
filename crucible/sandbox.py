@@ -128,16 +128,26 @@ def status() -> dict:
 
 
 def exec(host: str, cmd: list, timeout: int = 30) -> dict:
-    """Run a command inside one sandbox host and capture the output."""
+    """Run a command inside one sandbox host and capture both streams.
+
+    Returns exit_code plus output, stdout, and stderr as text. Output
+    mirrors stdout so existing callers keep working; stderr stays separate
+    so failures can show what the command actually printed.
+    """
     check_host(host)
     container = _container(host)
     try:
-        exit_code, output = container.exec_run(cmd, demux=False)
+        exit_code, output = container.exec_run(cmd, demux=True)
     except Exception as exc:
         raise SandboxError(f"exec on {host!r} failed: {exc}") from exc
-    if isinstance(output, bytes):
-        output = output.decode("utf-8", errors="replace")
-    return {"exit_code": exit_code, "output": output or ""}
+    if isinstance(output, tuple):
+        out_bytes, err_bytes = output
+    else:  # tolerate clients that ignore demux and merge the streams
+        out_bytes, err_bytes = output, None
+    stdout = out_bytes.decode("utf-8", errors="replace") if out_bytes else ""
+    stderr = err_bytes.decode("utf-8", errors="replace") if err_bytes else ""
+    return {"exit_code": exit_code, "output": stdout, "stdout": stdout,
+            "stderr": stderr}
 
 
 def container_logs(host: str, tail: int = 100) -> list:

@@ -89,21 +89,33 @@ def scan_host(host: str) -> dict:
     }
 
 
-_HTTP_SCRIPT = (
-    "import json,urllib.request,urllib.error;"
-    "req=urllib.request.Request(URL, data=DATA, method=METHOD);"
-    "out={'status':None,'body':'','error':None};"
-    "try:\n"
-    "  r=urllib.request.urlopen(req,timeout=8);"
-    "  out['status']=r.status;"
-    "  out['body']=r.read(4096).decode('utf-8','replace');"
-    "except urllib.error.HTTPError as e:\n"
-    "  out['status']=e.code;"
-    "  out['body']=e.read(4096).decode('utf-8','replace');"
-    "except Exception as e:\n"
-    "  out['error']=str(e)[:300];"
-    "print(json.dumps(out))"
-)
+def _relay_script(url: str, method: str, data_repr: str) -> str:
+    """Build the python snippet the workstation relay runs.
+
+    Kept as real lines, not one semicolon chain: compound statements such
+    as try and except cannot follow a semicolon, and joining them that way
+    made every relay call die with a syntax error.
+    """
+    lines = [
+        f"URL={url!r}",
+        f"METHOD={method!r}",
+        f"DATA={data_repr}",
+        "import json,urllib.request,urllib.error",
+        "req=urllib.request.Request(URL, data=DATA, method=METHOD)",
+        "opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))",
+        "out={'status':None,'body':'','error':None}",
+        "try:",
+        "    r=opener.open(req,timeout=8)",
+        "    out['status']=r.status",
+        "    out['body']=r.read(4096).decode('utf-8','replace')",
+        "except urllib.error.HTTPError as e:",
+        "    out['status']=e.code",
+        "    out['body']=e.read(4096).decode('utf-8','replace')",
+        "except Exception as e:",
+        "    out['error']=str(e)[:300]",
+        "print(json.dumps(out))",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def http_request(host: str, path: str, method: str = "GET", body: str | None = None) -> dict:
@@ -132,15 +144,20 @@ def http_request(host: str, path: str, method: str = "GET", body: str | None = N
         return {"ok": False, "error": "workstation relay is not up"}
     url = f"http://{host}:{port}{path}"
     data_repr = repr(body.encode("utf-8")) if body is not None else "None"
-    script = f"URL={url!r};METHOD={method!r};DATA={data_repr};" + _HTTP_SCRIPT
+    script = _relay_script(url, method, data_repr)
     try:
         done = sandbox.exec("workstation", ["python", "-c", script])
     except SandboxError as exc:
         return {"ok": False, "error": str(exc)}
+    stdout = done["output"]
+    stderr = done["stderr"]
     try:
-        parsed = json.loads(done["output"].strip().splitlines()[-1])
-    except (ValueError, IndexError, KeyError):
-        return {"ok": False, "error": "relay returned an unreadable reply"}
+        parsed = json.loads(stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return {"ok": False, "error": (
+            "relay returned an unreadable reply "
+            f"(exit={done['exit_code']} "
+            f"stdout={stdout[:300]!r} stderr={stderr[:300]!r})")}
     if parsed.get("error") is not None and parsed.get("status") is None:
         return {"ok": False, "error": parsed["error"]}
     return {"ok": True, "host": host, "status": parsed.get("status"),

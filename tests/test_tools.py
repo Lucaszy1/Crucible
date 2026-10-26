@@ -1,5 +1,11 @@
 """Unit tests for agent tools. Hermetic: sandbox backends stay stubbed."""
 
+import json
+import subprocess
+import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
 import pytest
 
 from crucible import sandbox, tools
@@ -85,12 +91,75 @@ def test_http_roundtrip_through_relay(monkeypatch):
     def fake_exec(host, cmd, timeout=30):
         seen["host"] = host
         assert cmd[0] == "python"
-        return {"exit_code": 0, "output": '{"status": 200, "body": "hi"}'}
+        text = '{"status": 200, "body": "hi"}'
+        return {"exit_code": 0, "output": text, "stdout": text, "stderr": ""}
 
     monkeypatch.setattr(sandbox, "exec", fake_exec)
     out = tools.http_request("web", "/admin")
     assert out == {"ok": True, "host": "web", "status": 200, "body": "hi"}
     assert seen["host"] == "workstation"
+
+
+def test_relay_script_compiles():
+    script = tools._relay_script("http://web:8000/admin", "GET", "None")
+    compile(script, "<relay>", "exec")
+
+
+class _ProbeHandler(BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        body = json.dumps({"probe": "up"}).encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def test_relay_script_fetches_real_http():
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _ProbeHandler)
+    except OSError:
+        pytest.skip("this shell forbids binding a local probe port")
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        port = server.server_address[1]
+        script = tools._relay_script(f"http://127.0.0.1:{port}/admin", "GET", "None")
+        done = subprocess.run([sys.executable, "-c", script], capture_output=True,
+                              text=True, timeout=30)
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert done.returncode == 0, done.stderr
+    parsed = json.loads(done.stdout.strip().splitlines()[-1])
+    assert parsed["status"] == 200
+    assert "probe" in parsed["body"]
+
+
+def test_relay_script_reports_connection_errors_as_json():
+    script = tools._relay_script("http://127.0.0.1:1/closed", "GET", "None")
+    done = subprocess.run([sys.executable, "-c", script], capture_output=True,
+                          text=True, timeout=30)
+    assert done.returncode == 0, done.stderr
+    parsed = json.loads(done.stdout.strip().splitlines()[-1])
+    assert parsed["status"] is None
+    assert parsed["error"]
+
+
+def test_http_error_carries_stream_excerpts(monkeypatch):
+    monkeypatch.setattr(sandbox, "is_running", lambda host: True)
+    monkeypatch.setattr(
+        sandbox, "exec",
+        lambda host, cmd, timeout=30: {"exit_code": 1, "output": "junk\n",
+                                       "stdout": "junk\n",
+                                       "stderr": "Traceback: boom\n"})
+    out = tools.http_request("web", "/admin")
+    assert out["ok"] is False
+    assert "exit=1" in out["error"]
+    assert "stdout='junk" in out["error"]
+    assert "Traceback: boom" in out["error"]
 
 
 def test_credential_flow():
@@ -103,7 +172,8 @@ def test_credential_flow():
 def test_read_file_gates_and_validates(monkeypatch):
     monkeypatch.setattr(
         sandbox, "exec",
-        lambda host, cmd, timeout=30: {"exit_code": 0, "output": "data"}),
+        lambda host, cmd, timeout=30: {"exit_code": 0, "output": "data",
+                                       "stdout": "data", "stderr": ""}),
     with pytest.raises(ValueError):
         tools.read_file("web", "relative/path.txt")
     with pytest.raises(ValueError):
