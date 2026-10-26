@@ -233,7 +233,8 @@ def test_list_files_gates_and_validates(monkeypatch):
         if cmd[0] == "signin":
             return {"exit_code": 0, "output": "AUTH_OK\n",
                     "stdout": "AUTH_OK\n", "stderr": ""}
-        assert cmd[:2] == ["ls", "-1"]
+        assert cmd[0] == "list-files"
+        assert cmd[2] == "controller"
         return {"exit_code": 0, "output": "a.txt\nb.txt\n",
                 "stdout": "a.txt\nb.txt\n", "stderr": ""}
 

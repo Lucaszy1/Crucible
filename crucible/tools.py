@@ -220,14 +220,15 @@ def read_file(host: str, path: str) -> dict:
     """Read a file from inside one sandbox host.
 
     Secret roots need a prior successful sign-in on that host. Paths stay
-    pinned under the scenario's readable roots.
+    pinned under the scenario's readable roots. The read runs through the
+    host's logging reader, so blue sees successful reads in its logs.
     """
     sandbox.check_host(host)
     clean = _valid_path(path)
     if clean.startswith("/secret/") and host not in _state["authed"]:
         return {"ok": False, "error": f"sign-in on {host!r} is required first"}
     try:
-        done = sandbox.exec(host, ["cat", clean])
+        done = sandbox.exec(host, ["read-file", clean, LOG_SOURCE])
     except SandboxError as exc:
         return {"ok": False, "error": str(exc)}
     if done["exit_code"] != 0:
@@ -241,14 +242,15 @@ def list_files(host: str, path: str) -> dict:
 
     Paths stay pinned under the scenario's readable roots, including the
     roots themselves. Secret roots need a prior successful sign-in on that
-    host, the same as read_file. Read-only: runs a plain directory listing.
+    host, the same as read_file. Read-only: runs a plain directory listing
+    through the host's logging lister, so blue sees it in its logs.
     """
     sandbox.check_host(host)
     clean = _valid_dir_path(path)
     if (clean == "/secret" or clean.startswith("/secret/")) and host not in _state["authed"]:
         return {"ok": False, "error": f"sign-in on {host!r} is required first"}
     try:
-        done = sandbox.exec(host, ["ls", "-1", clean])
+        done = sandbox.exec(host, ["list-files", clean, LOG_SOURCE])
     except SandboxError as exc:
         return {"ok": False, "error": str(exc)}
     if done["exit_code"] != 0:

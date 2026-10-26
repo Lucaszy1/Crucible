@@ -19,7 +19,8 @@ DB = ROOT / "sandbox" / "db"
 WS = ROOT / "sandbox" / "workstation"
 SH = shutil.which("sh") or "/bin/sh"
 
-DB_SCRIPTS = ["signin.sh", "rotate-signin.sh", "reset-signin.sh"]
+DB_SCRIPTS = ["signin.sh", "rotate-signin.sh", "reset-signin.sh",
+              "read-file.sh", "list-files.sh"]
 
 
 def run_script(path, args, env_extra=None):
@@ -123,6 +124,50 @@ def test_db_rotate_and_reset_without_gate_log_none(tmp_path):
     ]
 
 
+def test_read_file_wrapper_logs_path_and_bytes(tmp_path):
+    data = tmp_path / "report.txt"
+    data.write_bytes(b"quarterly report draft\n")
+    log_file = tmp_path / "toy.log"
+    env = {"TOY_LOG_FILE": str(log_file)}
+    done = run_script(DB / "read-file.sh", [str(data), "controller"], env)
+    assert done.returncode == 0
+    assert done.stdout == "quarterly report draft\n"
+    assert log_file.read_text(encoding="utf-8").splitlines() == [
+        f"file read path={data} bytes=23 from=controller"
+    ]
+
+
+def test_read_file_wrapper_skips_log_on_missing_file(tmp_path):
+    log_file = tmp_path / "toy.log"
+    env = {"TOY_LOG_FILE": str(log_file)}
+    done = run_script(DB / "read-file.sh", [str(tmp_path / "nope.txt"), "controller"], env)
+    assert done.returncode != 0
+    assert not log_file.exists()
+
+
+def test_list_files_wrapper_logs_dir_and_entries(tmp_path):
+    logged_dir = tmp_path / "data"
+    logged_dir.mkdir()
+    (logged_dir / "a.txt").write_text("a", encoding="utf-8")
+    (logged_dir / "b.txt").write_text("b", encoding="utf-8")
+    log_file = tmp_path / "toy.log"
+    env = {"TOY_LOG_FILE": str(log_file)}
+    done = run_script(DB / "list-files.sh", [str(logged_dir), "controller"], env)
+    assert done.returncode == 0
+    assert done.stdout.splitlines() == ["a.txt", "b.txt"]
+    assert log_file.read_text(encoding="utf-8").splitlines() == [
+        f"dir list path={logged_dir} entries=2 from=controller"
+    ]
+
+
+def test_list_files_wrapper_skips_log_on_missing_dir(tmp_path):
+    log_file = tmp_path / "toy.log"
+    env = {"TOY_LOG_FILE": str(log_file)}
+    done = run_script(DB / "list-files.sh", [str(tmp_path / "nope"), "controller"], env)
+    assert done.returncode != 0
+    assert not log_file.exists()
+
+
 def test_credential_passes_log_source(monkeypatch):
     seen = {}
 
@@ -147,6 +192,28 @@ def test_credential_no_gate_verdict_keeps_note(monkeypatch):
     out = tools.try_credential("workstation", "admin", "changeme")
     assert out == {"ok": True, "host": "workstation", "authenticated": False,
                    "note": "no sign-in gate on 'workstation'"}
+
+
+def test_file_tools_use_logging_wrappers(monkeypatch):
+    seen = []
+
+    def fake_exec(host, cmd, timeout=30):
+        seen.append(cmd)
+        if cmd[0] == "signin":
+            text = "AUTH_OK\n"
+        elif cmd[0] == "read-file":
+            text = "secret bytes"
+        else:
+            text = "a.txt\n"
+        return {"exit_code": 0, "output": text, "stdout": text, "stderr": ""}
+
+    monkeypatch.setattr(sandbox, "is_running", lambda host: True)
+    monkeypatch.setattr(sandbox, "exec", fake_exec)
+    tools.try_credential("db", "admin", "changeme")
+    assert tools.read_file("db", "/secret/exercise_secret.txt")["ok"] is True
+    assert tools.list_files("db", "/secret/")["ok"] is True
+    assert ["read-file", "/secret/exercise_secret.txt", "controller"] in seen
+    assert ["list-files", "/secret", "controller"] in seen
 
 
 def test_patch_and_restore_pass_log_source(monkeypatch):
