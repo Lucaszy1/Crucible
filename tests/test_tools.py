@@ -302,6 +302,12 @@ def test_patch_skips_rotation_without_gate(monkeypatch):
                    "detail": "patch flag applied"}
 
 
+def test_wait_is_logged_noop():
+    out = tools.wait()
+    assert out["ok"] is True
+    assert out["waited"] is True
+
+
 def test_restore_resets_gate(monkeypatch):
     def fake_exec(host, cmd, timeout=30):
         text = "RESET_OK\n" if cmd[0] == "reset-signin" else ""

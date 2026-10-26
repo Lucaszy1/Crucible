@@ -23,6 +23,7 @@ _DISPATCH = {
     "report_finding": tools.report_finding,
     "read_logs": tools.read_logs,
     "list_processes": tools.list_processes,
+    "wait": tools.wait,
     "block_ip": tools.block_ip,
     "isolate_host": tools.isolate_host,
     "patch_service": tools.patch_service,

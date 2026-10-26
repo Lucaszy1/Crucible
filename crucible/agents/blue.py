@@ -28,13 +28,14 @@ SYSTEM_PROMPT = (
     "When you report a finding or take a containment action (block_ip, "
     "isolate_host, patch_service, restore_host), cite log line ids such as "
     "web:3 in an evidence_refs argument and in your reasoning text. Your only "
-    "tools are read_logs, list_processes, block_ip, isolate_host, "
+    "tools are read_logs, list_processes, wait, block_ip, isolate_host, "
     "patch_service, restore_host, and report_finding."
 )
 
 ALLOWED_TOOLS = (
     "read_logs",
     "list_processes",
+    "wait",
     "block_ip",
     "isolate_host",
     "patch_service",
@@ -75,6 +76,12 @@ TOOL_SCHEMAS = [
         "List processes running inside one sandbox host.",
         {"host": {"type": "string"}},
         ["host"],
+    ),
+    _tool(
+        "wait",
+        "Do nothing for one turn when there is nothing new to check.",
+        {"reason": {"type": "string"}},
+        [],
     ),
     _tool(
         "block_ip",

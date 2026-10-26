@@ -66,7 +66,7 @@ def test_prompts_name_only_team_tools():
         assert name in RED_PROMPT
     assert "read_logs" not in RED_PROMPT
     assert "isolate_host" not in RED_PROMPT
-    for name in ("read_logs", "list_processes", "block_ip", "isolate_host",
+    for name in ("read_logs", "list_processes", "wait", "block_ip", "isolate_host",
                  "patch_service", "restore_host"):
         assert name in BLUE_PROMPT
     assert "scan_host" not in BLUE_PROMPT
@@ -75,7 +75,7 @@ def test_prompts_name_only_team_tools():
     blue_names = {entry["function"]["name"] for entry in BLUE_SCHEMAS}
     assert red_names == {"scan_host", "http_request", "try_credential",
                          "read_file", "report_finding"}
-    assert blue_names == {"read_logs", "list_processes", "block_ip",
+    assert blue_names == {"read_logs", "list_processes", "wait", "block_ip",
                           "isolate_host", "patch_service", "restore_host",
                           "report_finding"}
 
@@ -102,6 +102,18 @@ def test_red_valid_tool_call_uses_one_call(tmp_path, monkeypatch):
     assert call["model"] == "muse-spark-1.3"
     assert call["max_tokens"] == 1024
     assert call["max_tokens"] <= 2048
+
+
+def test_blue_wait_call_is_allowed(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    resp = _response("No new log lines, waiting this turn.",
+                     [("wait", {})])
+    client = _FakeClient(resp)
+    agent = ModelBlue(client=client, exercise_id="ex-wait")
+    action = agent.next_action(2, [])
+    assert action["tool"] == "wait"
+    assert "baseline" not in action["reasoning"].lower()
+    assert orchestrator.run_tool("wait", {})["ok"] is True
 
 
 def test_blue_valid_call_carries_reasoning(tmp_path, monkeypatch):

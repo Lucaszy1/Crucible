@@ -25,6 +25,7 @@ __all__ = [
     "report_finding",
     "read_logs",
     "list_processes",
+    "wait",
     "block_ip",
     "isolate_host",
     "patch_service",
@@ -247,6 +248,14 @@ def list_processes(host: str) -> dict:
         return {"ok": False, "error": str(exc)}
     return {"ok": True, "host": host,
             "processes": [line for line in done["output"].splitlines() if line.strip()]}
+
+
+def wait(reason: str | None = None, **_ignored) -> dict:
+    """Do nothing for one turn so blue is not forced to poll."""
+    out = {"ok": True, "waited": True}
+    if reason:
+        out["reason"] = str(reason)[:200]
+    return out
 
 
 def block_ip(ip: str) -> dict:
