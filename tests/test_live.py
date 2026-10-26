@@ -91,6 +91,75 @@ def test_logs_show_traffic(live_range):
     assert procs["processes"]
 
 
+def test_db_logs_capture_signin_list_and_read(live_range):
+    tools.restore_host("db")
+    default = _shipped_default()
+    wrong = tools.try_credential("db", default["user"], "not-the-pass")
+    assert wrong["authenticated"] is False, wrong
+    right = tools.try_credential("db", default["user"], default["pass"])
+    assert right["authenticated"] is True, right
+    listed = tools.list_files("db", "/secret/")
+    assert listed["ok"] is True, listed
+    secret = tools.read_file("db", "/secret/exercise_secret.txt")
+    assert secret["ok"] is True, secret
+    logs = tools.read_logs("db", n=200)
+    assert logs["ok"] is True, logs
+    assert logs["lines"], "db produced no log lines for the sign-in flow"
+    text = "\n".join(entry["line"] for entry in logs["lines"])
+    assert f"signin fail user={default['user']} from=" in text
+    assert f"signin ok user={default['user']} from=" in text
+    assert f"dir list path=/secret entries={len(listed['files'])} from=" in text
+    assert ("file read path=/secret/exercise_secret.txt "
+            f"bytes={len(secret['content'])} from=") in text
+    assert default["pass"] not in text
+
+
+def test_db_logs_capture_rotate_and_reset(live_range):
+    try:
+        tools.restore_host("db")
+        patched = tools.patch_service("db", "fakestore")
+        assert patched["ok"] is True, patched
+        logs = tools.read_logs("db", n=200)
+        assert logs["ok"] is True, logs
+        text = "\n".join(entry["line"] for entry in logs["lines"])
+        assert "signin rotated from=" in text
+    finally:
+        tools.restore_host("db")
+    logs = tools.read_logs("db", n=200)
+    assert logs["ok"] is True, logs
+    text = "\n".join(entry["line"] for entry in logs["lines"])
+    assert "signin reset from=" in text
+
+
+def test_db_log_ids_stay_stable(live_range):
+    first = tools.read_logs("db", n=200)
+    assert first["ok"] is True, first
+    second = tools.read_logs("db", n=200)
+    assert second["ok"] is True, second
+    first_ids = [entry["id"] for entry in first["lines"]]
+    second_ids = [entry["id"] for entry in second["lines"]]
+    assert first_ids == second_ids
+    numbers = [int(entry_id.split(":")[1]) for entry_id in second_ids]
+    if numbers:
+        assert numbers == list(range(numbers[0], numbers[0] + len(numbers)))
+
+
+def test_workstation_logs_file_reads_and_signin(live_range):
+    noted = tools.read_file("workstation", "/srv/data/notes.txt")
+    assert noted["ok"] is True, noted
+    denied = tools.try_credential("workstation", "admin", "changeme")
+    assert denied["authenticated"] is False, denied
+    assert "no sign-in gate" in denied.get("note", "")
+    logs = tools.read_logs("workstation", n=200)
+    assert logs["ok"] is True, logs
+    assert logs["lines"], "workstation produced no log lines"
+    text = "\n".join(entry["line"] for entry in logs["lines"])
+    assert (f"file read path=/srv/data/notes.txt "
+            f"bytes={len(noted['content'])} from=") in text
+    assert "signin fail user=admin from=" in text
+    assert "note=no-gate" in text
+
+
 def test_patch_closes_admin_and_rotates_signin(live_range):
     default = _shipped_default()
     try:
