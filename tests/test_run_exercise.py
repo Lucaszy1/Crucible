@@ -1,6 +1,8 @@
 """Hermetic tests for the exercise runner script. No Docker here."""
 
-from crucible import orchestrator, run_exercise, sandbox
+import json
+
+from crucible import llm, orchestrator, run_exercise, sandbox
 from crucible.agents import ModelBlue, ModelRed, ScriptedBlue, ScriptedRed
 
 
@@ -143,3 +145,60 @@ def test_runner_summary_prints_outcome_and_delay(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "Outcome: blue_held" in out
     assert "Detection delay: 1 events" in out
+
+
+def test_runner_summary_prints_downtime_blue_and_cost(tmp_path, monkeypatch, capsys):
+    seen = _stubbed_run(monkeypatch, tmp_path)
+    monkeypatch.setattr(llm, "SPEND_FILE", tmp_path / "spend.jsonl")
+
+    def fake_exercise(red, blue, max_turns=12, run_path=None, exercise_id=None):
+        path = str(tmp_path / "fake.jsonl")
+        return {
+            "events": [],
+            "score": {"turns_used": 2, "total_events": 2, "time_to_detect": 2,
+                      "detection_delay": 1, "time_to_contain": None,
+                      "hosts_compromised": 0, "compromised_hosts": [],
+                      "secret_exfiltrated": False, "outcome": "blue_held",
+                      "downtime_cost": 9, "blue_score": 11},
+            "run_path": path,
+        }
+
+    monkeypatch.setattr(orchestrator, "run_exercise", fake_exercise)
+    monkeypatch.setattr(run_exercise.orchestrator, "run_exercise", fake_exercise)
+    assert run_exercise.main(["--agents", "scripted"]) == 0
+    out = capsys.readouterr().out
+    assert "Downtime cost: 9" in out
+    assert "Blue score: 11" in out
+    assert "Estimated cost: $" in out
+    assert seen["stopped"] is True
+
+
+def test_exercise_cost_since_sums_new_entries(tmp_path, monkeypatch):
+    spend = tmp_path / "spend.jsonl"
+    spend.write_text(
+        json.dumps({"exercise_id": "a", "cost_usd": 0.01}) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(llm, "SPEND_FILE", spend)
+    start = run_exercise._spend_line_count()
+    assert start == 1
+    with spend.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"exercise_id": "b", "cost_usd": 0.02}) + "\n")
+        handle.write(json.dumps({"exercise_id": "b", "cost_usd": 0.03}) + "\n")
+    assert run_exercise.exercise_cost_since(start) == 0.05
+
+
+def test_exercise_cost_for_id_filters(tmp_path, monkeypatch):
+    spend = tmp_path / "spend.jsonl"
+    spend.write_text(
+        "\n".join([
+            json.dumps({"exercise_id": "keep", "cost_usd": 0.02}),
+            json.dumps({"exercise_id": "drop", "cost_usd": 0.50}),
+            json.dumps({"exercise_id": "keep", "cost_usd": 0.03}),
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(llm, "SPEND_FILE", spend)
+    assert run_exercise.exercise_cost_for_id("keep") == 0.05
+    assert run_exercise.exercise_cost_for_id(None) == 0.0
+    assert run_exercise.exercise_cost_for_id("missing") == 0.0

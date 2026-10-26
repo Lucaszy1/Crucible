@@ -12,9 +12,10 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
-from crucible import orchestrator, sandbox, tools
+from crucible import llm, orchestrator, sandbox, tools
 from crucible.agents import ModelBlue, ModelRed, ScriptedBlue, ScriptedRed
 
 
@@ -78,7 +79,58 @@ def _summary(score: dict) -> list:
         f"Contained at event: {contain if contain is not None else 'no'}",
         f"Hosts compromised: {score.get('hosts_compromised')} ({hosts})",
         f"Secret exfiltrated: {'yes' if score.get('secret_exfiltrated') else 'no'}",
+        f"Downtime cost: {score.get('downtime_cost', 0)}",
+        f"Blue score: {score.get('blue_score', 0)}",
     ]
+
+
+def _spend_line_count() -> int:
+    """Count spend log lines so one exercise can measure its own cost."""
+    try:
+        text = llm.SPEND_FILE.read_text(encoding="utf-8")
+    except OSError:
+        return 0
+    return len([line for line in text.splitlines() if line.strip()])
+
+
+def exercise_cost_since(start_lines: int) -> float:
+    """Sum cost_usd for spend entries appended after a snapshot."""
+    try:
+        lines = llm.SPEND_FILE.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return 0.0
+    total = 0.0
+    for line in [entry for entry in lines if entry.strip()][start_lines:]:
+        try:
+            total += float(json.loads(line).get("cost_usd", 0.0))
+        except (ValueError, TypeError, AttributeError):
+            continue
+    return total
+
+
+def exercise_cost_for_id(exercise_id: str | None) -> float:
+    """Sum recorded cost for one exercise id (0.0 when unknown)."""
+    if exercise_id is None:
+        return 0.0
+    try:
+        lines = llm.SPEND_FILE.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return 0.0
+    total = 0.0
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if entry.get("exercise_id") == exercise_id:
+            try:
+                total += float(entry.get("cost_usd", 0.0))
+            except (TypeError, ValueError):
+                continue
+    return total
 
 
 def main(argv=None) -> int:
@@ -98,6 +150,7 @@ def main(argv=None) -> int:
         print("Check that Docker is running, then try again.", file=sys.stderr)
         return 1
 
+    spend_start = _spend_line_count()
     try:
         tools.restore_host("web")
         tools.restore_host("db")
@@ -121,6 +174,8 @@ def main(argv=None) -> int:
         print(line)
     model_driven, fallback = _count_driven_vs_fallback(result["events"])
     print(f"Model-driven turns: {model_driven}, fallback turns: {fallback}")
+    cost = exercise_cost_since(spend_start)
+    print(f"Estimated cost: ${cost:.4f}")
     print(f"Log: {result['run_path']}")
     if args.strict and fallback:
         print(
