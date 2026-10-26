@@ -24,5 +24,6 @@
   },
   "secret": {"host": "db", "path": "/secret/exercise_secret.txt"},
   "readable_roots": ["/secret/", "/srv/data/", "/srv/state/"],
-  "admin_endpoint": {"host": "web", "path": "/admin"}
+  "admin_endpoint": {"host": "web", "path": "/admin"},
+  "business_weights": {"web": 3, "db": 5, "workstation": 1}
 }

@@ -216,3 +216,107 @@ def test_start_returns_state_when_all_up(monkeypatch):
     monkeypatch.setattr(sandbox, "status",
                         lambda: {"web": True, "db": True, "workstation": True})
     assert sandbox.start() == {"web": True, "db": True, "workstation": True}
+
+
+def _evt_host(actor, tool, host, ok=True, index=1, extra=None):
+    result = {"ok": ok, "host": host}
+    if extra:
+        result.update(extra)
+    return {
+        "id": f"evt-{index:04d}",
+        "timestamp": "2026-01-01T00:00:00+00:00",
+        "actor": actor,
+        "tool": tool,
+        "args": {"host": host} if host else {},
+        "result": result,
+        "reasoning_summary": "note",
+        "evidence_refs": [],
+    }
+
+
+def test_score_downtime_counts_isolated_turns():
+    history = [
+        _event("red", "scan_host", {"ok": True}, 1),
+        _evt_host("blue", "isolate_host", "web", True, 2),
+        _event("red", "scan_host", {"ok": True}, 3),
+        _event("blue", "read_logs", {"ok": True}, 4),
+    ]
+    score = orchestrator.score_events(history)
+    assert score["downtime_cost"] == 9
+    assert score["blue_score"] == 11
+    assert score["outcome"] == "blue_held"
+
+
+def test_score_patch_counts_and_restore_clears():
+    history = [
+        _event("red", "scan_host", {"ok": True}, 1),
+        _evt_host("blue", "isolate_host", "db", True, 2),
+        _event("red", "scan_host", {"ok": True}, 3),
+        _evt_host("blue", "restore_host", "db", True, 4),
+        _event("red", "scan_host", {"ok": True}, 5),
+    ]
+    score = orchestrator.score_events(history)
+    assert score["downtime_cost"] == 10
+    assert score["blue_score"] == 10
+
+
+def test_score_patch_service_counts_downtime():
+    history = [
+        _event("red", "scan_host", {"ok": True}, 1),
+        _evt_host("blue", "patch_service", "db", True, 2),
+        _event("red", "scan_host", {"ok": True}, 3),
+    ]
+    score = orchestrator.score_events(history)
+    assert score["downtime_cost"] == 10
+    assert score["blue_score"] == 10
+
+
+def test_score_downtime_ignores_failed_actions():
+    history = [
+        _event("red", "scan_host", {"ok": True}, 1),
+        _evt_host("blue", "isolate_host", "db", False, 2),
+        _event("red", "scan_host", {"ok": True}, 3),
+    ]
+    score = orchestrator.score_events(history)
+    assert score["downtime_cost"] == 0
+    assert score["blue_score"] == 20
+
+
+def test_score_blue_score_zero_when_secret_read():
+    history = [
+        _event("red", "scan_host", {"ok": True}, 1),
+        _evt_host("blue", "isolate_host", "db", True, 2),
+        _event("red", "read_file",
+               {"ok": True, "host": "db", "path": "/secret/exercise_secret.txt"}, 3),
+    ]
+    score = orchestrator.score_events(history)
+    assert score["secret_exfiltrated"] is True
+    assert score["blue_score"] == 0
+    assert score["downtime_cost"] == 10
+
+
+def test_score_blue_score_floors_at_zero():
+    history = [_event("red", "scan_host", {"ok": True}, 1)]
+    history.append(_evt_host("blue", "isolate_host", "db", True, 2))
+    for index in range(3, 10):
+        history.append(_event("red", "scan_host", {"ok": True}, index))
+    score = orchestrator.score_events(history)
+    assert score["downtime_cost"] == 5 * 8
+    assert score["blue_score"] == 0
+
+
+def test_score_accepts_weight_override():
+    history = [
+        _event("red", "scan_host", {"ok": True}, 1),
+        _evt_host("blue", "isolate_host", "web", True, 2),
+    ]
+    score = orchestrator.score_events(history, business_weights={"web": 7})
+    assert score["downtime_cost"] == 7
+    assert score["blue_score"] == 13
+
+
+def test_business_weights_match_scenario():
+    scenario = sandbox.load_scenario()
+    assert scenario["business_weights"] == {"web": 3, "db": 5, "workstation": 1}
+    assert orchestrator.DEFAULT_BUSINESS_WEIGHTS == {"web": 3, "db": 5, "workstation": 1}
+    assert orchestrator.SECRET_PROTECTED_POINTS == 20

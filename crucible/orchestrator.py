@@ -17,6 +17,9 @@ from crucible.agents.scripted_red import ScriptedRed
 CONTAINMENT_TOOLS = ("isolate_host", "patch_service", "restore_host", "block_ip")
 MAX_TURNS = 20
 
+DEFAULT_BUSINESS_WEIGHTS = {"web": 3, "db": 5, "workstation": 1}
+SECRET_PROTECTED_POINTS = 20
+
 _DISPATCH = {
     "scan_host": tools.scan_host,
     "http_request": tools.http_request,
@@ -96,7 +99,61 @@ def _blue_acted(event_list: list) -> bool:
     return False
 
 
-def score_events(event_list: list) -> dict:
+def _business_weights(override: dict | None = None) -> dict:
+    """Return host business weights, preferring an explicit override."""
+    if override is not None:
+        merged = dict(DEFAULT_BUSINESS_WEIGHTS)
+        for host, value in (override or {}).items():
+            try:
+                merged[host] = int(value)
+            except (TypeError, ValueError):
+                continue
+        return merged
+    try:
+        from crucible import sandbox
+
+        weights = (sandbox.load_scenario().get("business_weights", {}) or {})
+        merged = dict(DEFAULT_BUSINESS_WEIGHTS)
+        for host, value in weights.items():
+            try:
+                merged[host] = int(value)
+            except (TypeError, ValueError):
+                continue
+        return merged
+    except Exception:
+        return dict(DEFAULT_BUSINESS_WEIGHTS)
+
+
+def _downtime_cost(event_list: list, weights: dict) -> int:
+    """Sum business weights for every turn each host stays down.
+
+    A successful isolate_host or patch_service marks the host down, and a
+    successful restore_host clears it. Each event adds the weights of the
+    hosts down after that event, so the isolating turn itself counts.
+    """
+    down: set = set()
+    total = 0
+    for event in event_list or []:
+        result = event.get("result", {}) or {}
+        if result.get("ok") is True:
+            tool = event.get("tool", "")
+            args = event.get("args", {}) or {}
+            host = args.get("host") or result.get("host")
+            if tool == "isolate_host" and host:
+                down.add(host)
+            elif tool == "patch_service" and host:
+                down.add(host)
+            elif tool == "restore_host" and host:
+                down.discard(host)
+        for host in down:
+            try:
+                total += int(weights.get(host, 0) or 0)
+            except (TypeError, ValueError):
+                continue
+    return total
+
+
+def score_events(event_list: list, business_weights: dict | None = None) -> dict:
     """Score an exercise from its events.
 
     Times are 1-based positions in the event list, since each agent
@@ -106,7 +163,10 @@ def score_events(event_list: list) -> dict:
     containment action at or after the first compromise, and stays None
     when no compromise occurred. Outcome is red_succeeded when the secret
     was read, blue_held when it was not read and blue acted, else
-    stalemate.
+    stalemate. Downtime cost sums host business weights for every turn
+    each host stays isolated or under patch. Blue score is the protected
+    secret value minus downtime cost, floored at zero, and zero when the
+    secret was read.
     """
     compromised = _compromised_hosts(event_list)
     secret_read = _secret_exfiltrated(event_list)
@@ -162,6 +222,13 @@ def score_events(event_list: list) -> dict:
     else:
         outcome = "stalemate"
 
+    weights = _business_weights(business_weights)
+    downtime_cost = _downtime_cost(event_list, weights)
+    if secret_read:
+        blue_score = 0
+    else:
+        blue_score = max(0, SECRET_PROTECTED_POINTS - downtime_cost)
+
     return {
         "time_to_detect": time_to_detect,
         "detection_delay": detection_delay,
@@ -171,6 +238,8 @@ def score_events(event_list: list) -> dict:
         "secret_exfiltrated": secret_read,
         "outcome": outcome,
         "total_events": len(event_list),
+        "downtime_cost": downtime_cost,
+        "blue_score": blue_score,
     }
 
 
