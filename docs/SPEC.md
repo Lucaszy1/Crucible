@@ -133,9 +133,9 @@ Per exercise: time to detect, time to contain, hosts compromised, secret exfiltr
 - [x] llm.py with spend guard
 - [x] Sandbox containers and allowlist
 - [x] tools.py with allowlist
-- [ ] Event schema (events.py, lands with day two loop)
-- [ ] Orchestrator loop
-- [ ] Red and blue agents
+- [x] Event schema (events.py, lands with day two loop)
+- [x] Orchestrator loop
+- [ ] Red and blue agents (scripted baseline done, model versions land day three)
 - [ ] Auditor agent
 - [ ] Dashboard v1
 - [ ] Replay
