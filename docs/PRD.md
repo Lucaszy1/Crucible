@@ -1,7 +1,7 @@
-# Armistice — Product Requirements
+# Crucible: Product Requirements
 
 ## What it is
-An autonomous cyber range. AI agents attack and defend a small, deliberately vulnerable network running in isolated Docker containers. Every match plays out live on a web dashboard, and every defender action is traceable to the exact log evidence behind it.
+An autonomous security validation range. AI agents probe and protect a small, deliberately vulnerable simulated network running in isolated Docker containers. Every match plays out live on a web dashboard, and every defender action is traceable to the exact log evidence behind it.
 
 ## Built for
 Meta Global AI Developer Hackathon, Indie track, Oct 26 to Nov 4 2026. All code is new, written during the event.
