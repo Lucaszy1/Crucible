@@ -5,7 +5,7 @@
     "web": {
       "service": "webapp",
       "version": "0.9-fake",
-      "note": "admin page left open at /admin"
+      "note": "admin page left open at /admin; its hint names the data host 'db'"
     },
     "db": {
       "service": "fakestore",

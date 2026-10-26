@@ -20,7 +20,7 @@ The hackathon bans projects involving "war." Every README line, UI label, commit
 
 - Everything runs in isolated Docker containers on an internal-only network with no internet access.
 - Red-team tools can only target hosts inside the sandbox allowlist. Enforce this in code, not just in prompts.
-- The planted weaknesses are toy misconfigurations (exposed admin endpoint, weak default credential, unpatched fake service version). No real exploit code, no malware, no real ransomware. Any "encryption" scenario is simulated by flipping state flags on dummy files.
+- The planted weaknesses are toy misconfigurations (exposed admin endpoint whose hint names the data host db, weak default credential, unpatched fake service version). No real exploit code, no malware, no real ransomware. Any "encryption" scenario is simulated by flipping state flags on dummy files.
 - No real credentials, keys, or data anywhere. MODEL_API_KEY lives in .env only, which is gitignored.
 
 ## 4. Hackathon constraints

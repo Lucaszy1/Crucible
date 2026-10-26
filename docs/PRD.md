@@ -8,7 +8,7 @@ Meta Global AI Developer Hackathon, Indie track, Oct 26 to Nov 4 2026. All code 
 
 ## Core loop (MVP)
 1. Scenario: 3 Docker containers on an isolated internal network, no internet access.
-   - web: a vulnerable web app with an exposed admin endpoint
+   - web: a vulnerable web app with an exposed admin endpoint whose hint names the data host db
    - db: holds a fake secret the attacker wants
    - workstation: a third node for lateral movement
 2. Attacker agent (Muse Spark, tool calling): scan, send HTTP requests, exploit. Goal: read the secret.

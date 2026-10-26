@@ -39,6 +39,7 @@ def test_admin_roundtrip_returns_real_body(live_range):
     assert out["ok"] is True, out
     assert out["status"] == 200
     assert "toy misconfiguration" in out["body"]
+    assert "'db'" in out["body"]
 
 
 def test_root_post_and_missing_paths(live_range):
