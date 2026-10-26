@@ -115,6 +115,26 @@ def test_blue_valid_call_carries_reasoning(tmp_path, monkeypatch):
     assert "odd requests" in action["reasoning"]
 
 
+def test_red_passes_default_reasoning_effort(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    monkeypatch.delenv("LLM_REASONING_EFFORT", raising=False)
+    resp = _response("Probing the web host.",
+                     [("scan_host", {"host": "web"})])
+    client = _FakeClient(resp)
+    ModelRed(client=client).next_action(1, [])
+    assert client.calls[0]["reasoning_effort"] == "low"
+
+
+def test_blue_reasoning_effort_env_override(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "minimal")
+    resp = _response("Reading web logs.",
+                     [("read_logs", {"host": "web"})])
+    client = _FakeClient(resp)
+    ModelBlue(client=client).next_action(2, [])
+    assert client.calls[0]["reasoning_effort"] == "minimal"
+
+
 def test_invalid_tool_call_falls_back(tmp_path, monkeypatch):
     _isolated_llm(tmp_path, monkeypatch)
     resp = _response("Trying something odd.", [("evil_tool", {"host": "web"})])

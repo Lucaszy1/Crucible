@@ -158,11 +158,13 @@ class ModelBlue:
     actor = ACTOR
 
     def __init__(self, client=None, exercise_id: str | None = None,
-                 max_tokens: int = MAX_TOKENS, temperature: float = 0.0):
+                 max_tokens: int = MAX_TOKENS, temperature: float = 0.0,
+                 reasoning_effort: str | None = None):
         self._client = client
         self._exercise_id = exercise_id
         self._max_tokens = max_tokens
         self._temperature = temperature
+        self._reasoning_effort = reasoning_effort
         self._fallback = ScriptedBlue()
 
     def _fallback_action(self, turn: int, history: list, note: str) -> dict | None:
@@ -184,6 +186,7 @@ class ModelBlue:
                 client=self._client,
                 max_tokens=self._max_tokens,
                 temperature=self._temperature,
+                reasoning_effort=self._reasoning_effort,
             )
         except Exception as exc:
             return self._fallback_action(

@@ -45,6 +45,7 @@ PRICE_PER_1K_USD = {
 DEFAULT_PRICE_PER_1K_USD = (0.002, 0.006)
 
 DEFAULT_DAILY_LIMIT_USD = 5.0
+DEFAULT_REASONING_EFFORT = "low"
 MAX_RETRIES = 4
 
 # Exception names that are worth another attempt after a short wait.
@@ -81,6 +82,12 @@ def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     """Estimate one call's cost in USD from the placeholder price table."""
     per_in, per_out = PRICE_PER_1K_USD.get(model, DEFAULT_PRICE_PER_1K_USD)
     return (input_tokens / 1000.0) * per_in + (output_tokens / 1000.0) * per_out
+
+
+def reasoning_effort_default() -> str:
+    """Read the reasoning effort override from the environment."""
+    value = (os.environ.get("LLM_REASONING_EFFORT", "") or "").strip()
+    return value or DEFAULT_REASONING_EFFORT
 
 
 def daily_limit_usd() -> float:
@@ -236,6 +243,7 @@ def chat(
     max_retries: int = MAX_RETRIES,
     temperature: float = 0.7,
     max_tokens: int = 1024,
+    reasoning_effort: str | None = None,
 ) -> dict:
     """Run one chat completion with guard, cache, and retries.
 
@@ -244,7 +252,12 @@ def chat(
     gets a real Meta Model API client.
     """
     model = model_for(role)
-    extra = {"temperature": temperature, "max_tokens": max_tokens}
+    effort = (reasoning_effort or "").strip() or reasoning_effort_default()
+    extra = {
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "reasoning_effort": effort,
+    }
     key = _cache_key(model, messages, tools, extra)
 
     if use_cache:

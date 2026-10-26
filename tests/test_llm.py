@@ -103,3 +103,25 @@ def test_tool_calls_normalized(isolated_storage):
     assert out["tool_calls"] == [
         {"id": "call_1", "name": "scan_host", "arguments": '{"host": "web"}'}
     ]
+
+
+def test_chat_sends_default_reasoning_effort_low(isolated_storage, monkeypatch):
+    monkeypatch.delenv("LLM_REASONING_EFFORT", raising=False)
+    client = _FakeClient()
+    llm.chat("dev", [{"role": "user", "content": "hi"}], client=client)
+    assert client.calls[0]["reasoning_effort"] == "low"
+
+
+def test_chat_reasoning_effort_env_override(isolated_storage, monkeypatch):
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "minimal")
+    client = _FakeClient()
+    llm.chat("dev", [{"role": "user", "content": "hi"}], client=client)
+    assert client.calls[0]["reasoning_effort"] == "minimal"
+
+
+def test_chat_reasoning_effort_explicit_wins(isolated_storage, monkeypatch):
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "minimal")
+    client = _FakeClient()
+    llm.chat("dev", [{"role": "user", "content": "hi"}], client=client,
+             reasoning_effort="low")
+    assert client.calls[0]["reasoning_effort"] == "low"
