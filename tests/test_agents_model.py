@@ -463,5 +463,12 @@ def test_exercise_turn_cap(tmp_path, monkeypatch):
     run_path = tmp_path / "capped.jsonl"
     result = orchestrator.run_exercise(_Always(), _AlwaysBlue(), max_turns=50,
                                        run_path=run_path)
-    assert len(result["events"]) == 20
-    assert result["score"]["turns_used"] == 20
+    assert len(result["events"]) == 30
+    assert result["score"]["turns_used"] == 30
+
+
+def test_default_turn_cap_is_thirty():
+    assert orchestrator.MAX_TURNS == 30
+    assert _common.DEFAULT_MAX_TURNS == 30
+    messages = red_build_messages(1, [])
+    assert "turn 1 of 30" in messages[1]["content"].lower()

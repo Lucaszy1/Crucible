@@ -98,7 +98,7 @@ Every tool call emits an event: id, timestamp, actor, tool, args, result, reason
 
 ## 9. Scoring
 
-Per exercise: time to detect, time to contain, hosts compromised, secret exfiltrated yes or no, blue actions justified percentage (from auditor), tokens spent. Learning curve chart across exercises is the hero visual.
+Per exercise: time to detect, time to contain, hosts compromised, secret exfiltrated yes or no, blue actions justified percentage (from auditor), tokens spent. Learning curve chart across exercises is the hero visual. Exercises run at most 30 events, which is 15 moves per team.
 
 Availability cost: each host carries a business weight from sandbox/scenario.json (web 3, db 5, workstation 1). Every turn a host stays isolated or under patch adds its weight to downtime_cost. The down set starts empty. A successful isolate_host or patch_service marks that host down. A successful restore_host clears it. Each event adds the weights of the hosts down after that event, so the isolating or patching turn itself counts. Failed actions change nothing, and a host down for both reasons counts once per turn.
 

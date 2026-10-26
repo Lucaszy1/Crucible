@@ -55,8 +55,8 @@ def parse_args(argv=None):
     parser.add_argument(
         "--max-turns",
         type=int,
-        default=20,
-        help="Turns to attempt per exercise, capped at 20",
+        default=30,
+        help="Turns to attempt per exercise, capped at 30",
     )
     parser.add_argument(
         "--no-cache",

@@ -35,6 +35,7 @@ def test_batch_args_parse():
     args = batch.parse_args(["--count", "1", "--prefix", "x"])
     assert args.agents == "scripted"
     assert args.no_cache is False
+    assert args.max_turns == 30
 
 
 def test_batch_rejects_zero_count(tmp_path, monkeypatch, capsys):
@@ -51,7 +52,7 @@ def test_batch_writes_csv_and_summary(tmp_path, monkeypatch, capsys):
         "demo-3": ("stalemate", None, None, 0, 20, 0.00),
     }
 
-    def fake_exercise(red, blue, max_turns=20, run_path=None, exercise_id=None):
+    def fake_exercise(red, blue, max_turns=30, run_path=None, exercise_id=None):
         outcome, delay, contain, down, blue, cost = plans[exercise_id]
         if cost:
             llm.record_spend(model="muse-spark-1.3", input_tokens=1000,
@@ -123,7 +124,7 @@ def test_batch_model_flag_uses_cache_option(tmp_path, monkeypatch):
             seen.setdefault("blue_cache", []).append(kwargs.get("use_cache", True))
             super().__init__(*args, **kwargs)
 
-    def fake_exercise(red, blue, max_turns=20, run_path=None, exercise_id=None):
+    def fake_exercise(red, blue, max_turns=30, run_path=None, exercise_id=None):
         return {"events": [], "score": {"outcome": "stalemate",
                                        "detection_delay": None,
                                        "time_to_contain": None,
@@ -143,7 +144,7 @@ def test_batch_model_flag_uses_cache_option(tmp_path, monkeypatch):
 def test_batch_mean_handles_no_detections(tmp_path, monkeypatch, capsys):
     _stub_common(monkeypatch, tmp_path)
 
-    def fake_exercise(red, blue, max_turns=20, run_path=None, exercise_id=None):
+    def fake_exercise(red, blue, max_turns=30, run_path=None, exercise_id=None):
         return {"events": [],
                 "score": {"outcome": "stalemate", "detection_delay": None,
                           "time_to_contain": None, "downtime_cost": 0,
