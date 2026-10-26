@@ -135,7 +135,7 @@ Per exercise: time to detect, time to contain, hosts compromised, secret exfiltr
 - [x] tools.py with allowlist
 - [x] Event schema (events.py, lands with day two loop)
 - [x] Orchestrator loop
-- [ ] Red and blue agents (scripted baseline done, model versions land day three)
+- [x] Red and blue agents (scripted baseline plus model versions on Muse Spark)
 - [ ] Auditor agent
 - [ ] Dashboard v1
 - [ ] Replay
