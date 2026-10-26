@@ -199,6 +199,34 @@ def test_empty_reply_logs_exact_cause(tmp_path, monkeypatch):
     assert "no tool call" not in action["reasoning"].lower()
 
 
+def test_blue_length_fallback_logs_cause(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    resp = _response("", [], finish_reason="length")
+    agent = ModelBlue(client=_FakeClient(resp))
+    action = agent.next_action(16, [])
+    assert action["tool"] == "read_logs"
+    assert "finish_reason=length" in action["reasoning"]
+    assert "token limit" in action["reasoning"].lower()
+
+
+def test_empty_reply_includes_finish_reason(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    resp = _response("   ", [], finish_reason="stop")
+    agent = ModelBlue(client=_FakeClient(resp))
+    action = agent.next_action(2, [])
+    assert "empty reply" in action["reasoning"].lower()
+    assert "finish_reason=stop" in action["reasoning"]
+
+
+def test_no_tool_call_includes_finish_reason(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    resp = _response("I will just think and not act.", [], finish_reason="stop")
+    agent = ModelBlue(client=_FakeClient(resp))
+    action = agent.next_action(2, [])
+    assert "no tool call" in action["reasoning"].lower()
+    assert "finish_reason=stop" in action["reasoning"]
+
+
 def test_length_reply_not_cached_and_cause_logged(tmp_path, monkeypatch):
     _isolated_llm(tmp_path, monkeypatch)
     bad = _response("", [], finish_reason="length")
@@ -399,6 +427,27 @@ def test_blue_prompt_notes_business_cost_without_formula():
     assert "business_weights" not in BLUE_PROMPT
     assert "downtime_cost" not in BLUE_PROMPT
     assert "blue_score" not in BLUE_PROMPT
+
+
+def test_blue_prompt_states_secret_loss_outweighs_downtime():
+    assert "exercise secret being read" in BLUE_PROMPT
+    assert "total loss" in BLUE_PROMPT
+    assert "outweighs any downtime cost" in BLUE_PROMPT
+
+
+def test_blue_prompt_contain_immediately_on_host_activity():
+    assert "signed in to a host" in BLUE_PROMPT
+    assert "listing or reading files" in BLUE_PROMPT
+    assert "contain that host immediately" in BLUE_PROMPT
+    assert "rather than keep gathering evidence" in BLUE_PROMPT
+
+
+def test_blue_prompt_check_data_host_early_and_restore_after():
+    assert "most likely heading toward" in BLUE_PROMPT
+    assert "data host" in BLUE_PROMPT
+    assert "worth doing early" in BLUE_PROMPT
+    assert "consider restore_host" in BLUE_PROMPT
+    assert "once red has stopped" in BLUE_PROMPT
 
 
 def test_red_messages_carry_remaining_turns_and_own_history():
