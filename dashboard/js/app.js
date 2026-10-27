@@ -7,7 +7,7 @@ import { renderTicks, renderTransport } from "./timeline.js";
 import { renderAttack } from "./attack.js";
 import { renderScoreboard } from "./scoreboard.js";
 import { focusEvidenceRef, renderEvidence } from "./evidence.js";
-import { fillRuns, initControls, setServer, showConfirm } from "./controls.js";
+import { fillRuns, initControls, serverStatus, setServer, showConfirm } from "./controls.js";
 
 const REPLAY_INTERVAL_MS = 1200;
 
@@ -242,10 +242,12 @@ function onLiveMessage(msg) {
     els.mode.textContent = "Ended";
     closeLive();
     refreshRuns(false);
+    pollStatus();
     render(false);
   } else if (msg.type === "error") {
     notice(`Exercise failed: ${msg.text || "unknown error"}`, true);
     closeLive();
+    pollStatus();
     render(false);
   } else if (msg.type === "note" && msg.text) {
     notice(msg.text, false);
@@ -299,13 +301,11 @@ async function pollStatus() {
   try {
     const spend = await fetchStatus();
     store.spend = spend;
-    if (spend.running) {
-      setServer(controls, "busy", `Exercise running (${spend.agents || "?"})`);
-      controls.run.disabled = true;
-    } else {
-      setServer(controls, "ok", "Server ready");
-      controls.run.disabled = false;
-      if (spend.last_warning && store.mode === "idle") notice(spend.last_warning, false);
+    const status = serverStatus(spend);
+    setServer(controls, status.state, status.label);
+    controls.run.disabled = status.runDisabled;
+    if (!spend.running && spend.last_warning && store.mode === "idle") {
+      notice(spend.last_warning, false);
     }
     renderScoreboard(
       {

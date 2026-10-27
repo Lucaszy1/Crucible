@@ -23,6 +23,15 @@ export function setServer(els, state, label) {
   els.label.textContent = label;
 }
 
+// Pure status rule shared by the control bar and the tests: any idle
+// snapshot reads "Server ready", a running one names the exercise.
+export function serverStatus(spend) {
+  if (spend && spend.running) {
+    return { state: "busy", label: `Exercise running (${spend.agents || "?"})`, runDisabled: true };
+  }
+  return { state: "ok", label: "Server ready", runDisabled: false };
+}
+
 export function showConfirm(els, spend, capped, onConfirm) {
   els.cost.textContent = `$${Number(spend?.estimated_exercise_cost || 0).toFixed(2)} (estimate)`;
   els.spent.textContent = `$${Number(spend?.spent_today || 0).toFixed(2)}`;
