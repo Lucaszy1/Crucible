@@ -1,0 +1,235 @@
+// Arena choreography: pure mapping from one event plus current state
+// to a list of animation steps. No DOM access, so node can test it.
+// Copy rules: exercise, contest, containment vocabulary only; the
+// banner and mark words below are the only Arena copy this module owns.
+import { HOSTS, RECON_TOOLS, CONTAINMENT_TOOLS, eventHost } from "./state.js";
+
+export const ARENA_HOSTS = HOSTS;
+
+const BLOCKED_ERROR = /outside|allowlist|sandbox|blocked|off-range|off range|unreachable|cut off|detached|no route/i;
+
+// A failed attempt that never reached the host: off-range host or a
+// network-level refusal. Sign-in refusals and missing files are not
+// blocked; they get their own Denied or fail beat.
+export function isBlockedAttempt(ev, states) {
+  if (!ev || (ev.result || {}).ok !== false) return false;
+  const host = eventHost(ev);
+  if (host && !HOSTS.includes(host)) return true;
+  const err = String((ev.result || {}).error || "");
+  if (BLOCKED_ERROR.test(err)) return true;
+  if (host && states && states[host] === "isolated" && ev.actor === "red") return true;
+  return false;
+}
+
+export function isSecretRead(ev) {
+  return Boolean(
+    ev && ev.actor === "red" && ev.tool === "read_file" &&
+    (ev.result || {}).ok === true &&
+    String((ev.result || {}).path || "").startsWith("/secret/"),
+  );
+}
+
+function evidenceHost(ev) {
+  const refs = ev.evidence_refs || [];
+  for (const ref of refs) {
+    const host = String(ref).split(":")[0];
+    if (HOSTS.includes(host)) return host;
+  }
+  return null;
+}
+
+// Target host for effects that need one. report_finding carries no
+// host arg, so fall back to its first cited host. Off-range hosts
+// are not valid targets and resolve to null.
+export function effectHost(ev) {
+  const direct = eventHost(ev);
+  if (direct && HOSTS.includes(direct)) return direct;
+  return evidenceHost(ev) || null;
+}
+
+function blockedSteps(ev) {
+  return [{ effect: "bounce-blocked", target: effectHost(ev) || "stage", mark: "Blocked" }];
+}
+
+// One event plus current host states to an ordered step list. Each
+// step is { effect, target?, secondary? } plus effect-specific fields.
+// secondary steps are decorative and skipped at 4x playback.
+export function choreograph(ev, ctx) {
+  const states = (ctx && ctx.states) || null;
+  if (!ev || typeof ev !== "object") return [{ effect: "idle-tick", secondary: true }];
+  if (isBlockedAttempt(ev, states)) return blockedSteps(ev);
+
+  const tool = ev.tool || "";
+  const result = ev.result || {};
+  const ok = result.ok === true;
+  const target = effectHost(ev);
+
+  switch (tool) {
+    case "scan_host":
+      if (!ok) return [{ effect: "scan-fail", target, secondary: true }];
+      return [
+        { effect: "scan-ring", from: "red", target },
+        { effect: "target-ping", target, secondary: true },
+      ];
+    case "http_request":
+      if (!ok) return [{ effect: "packet-fail", from: "red", target }];
+      return [
+        { effect: "packet", from: "red", target, shape: "dot" },
+        { effect: "target-ping", target, secondary: true },
+      ];
+    case "try_credential":
+      if (result.authenticated === true) {
+        return [
+          { effect: "key-through", from: "red", target },
+          { effect: "flash-red", target, secondary: true },
+          { effect: "foothold", target },
+        ];
+      }
+      return [
+        { effect: "key-try", from: "red", target },
+        { effect: "key-bounce", target, secondary: true },
+        { effect: "denied", target, mark: "Denied" },
+      ];
+    case "list_files":
+    case "read_file": {
+      if (!ok) {
+        const err = String(result.error || "").toLowerCase();
+        if (err.includes("sign-in") || err.includes("signin") || err.includes("auth")) {
+          return [{ effect: "denied", target, mark: "Denied" }];
+        }
+        return [{ effect: "file-fail", target }];
+      }
+      const steps = [{ effect: "file-stream", from: target, to: "red" }];
+      if (isSecretRead(ev)) {
+        steps.push(
+          { effect: "crack", target },
+          { effect: "vignette-red" },
+          { effect: "banner", text: "Secret exposed" },
+          { effect: "foothold", target, secondary: true },
+        );
+      }
+      return steps;
+    }
+    case "read_logs":
+      if (!ok) return [{ effect: "beam-fail", from: "blue", target }];
+      return [{ effect: "log-beam", from: "blue", target }];
+    case "list_processes":
+      if (!ok) return [{ effect: "beam-fail", from: "blue", target }];
+      return [{ effect: "log-beam", from: "blue", target, variant: "process" }];
+    case "report_finding":
+      if (!ok) return [{ effect: "idle-tick", secondary: true }];
+      return [
+        { effect: "alert-pulse", target },
+        { effect: "flag", target },
+      ];
+    case "isolate_host":
+      if (!ok) return [{ effect: "isolate-fail", target }];
+      return [
+        { effect: "isolate-snap", target },
+        { effect: "barrier", target },
+        { effect: "shield", target },
+      ];
+    case "patch_service":
+      if (!ok) return [{ effect: "patch-fail", target }];
+      return [
+        { effect: "wrench", target },
+        { effect: "ring-blue", target },
+        { effect: "check", target, mark: "Patched" },
+      ];
+    case "restore_host":
+      if (!ok) return [{ effect: "restore-fail", target }];
+      return [
+        { effect: "green-sweep", target },
+        { effect: "reconnect", target },
+      ];
+    case "block_ip":
+      if (!ok) return [{ effect: "block-fail", target: "stage" }];
+      return [{ effect: "block-pulse", ip: result.ip || (ev.args || {}).ip || null }];
+    case "wait":
+      return [{ effect: "idle-tick" }];
+    case "agent_error":
+      return [{ effect: "idle-tick", secondary: true }];
+    case "audit":
+      return [{
+        effect: "verdict",
+        target: result.target_event_id || (ev.args || {}).target_event_id || null,
+        verdict: result.verdict || null,
+        word: verdictWord(result.verdict),
+      }];
+    default:
+      if (!ok) return [{ effect: "idle-tick", secondary: true }];
+      if (target) {
+        return [
+          { effect: "packet", from: ev.actor === "blue" ? "blue" : "red", target, shape: "dot" },
+          { effect: "target-ping", target, secondary: true },
+        ];
+      }
+      return [{ effect: "idle-tick", secondary: true }];
+  }
+}
+
+// Auditor verdicts fold to three Arena words.
+export function verdictWord(verdict) {
+  if (verdict === "justified") return "justified";
+  if (verdict === "unsupported") return "flagged";
+  if (verdict) return "caution";
+  return null;
+}
+
+// Pressure bar, purely from events: red progress along the chain
+// (recon, sign-in, secret listing, secret read) versus blue
+// detection plus containment. Both 0-100.
+export function pressureFromEvents(eventList) {
+  let red = 0;
+  let detected = false;
+  let contained = false;
+  for (const ev of eventList || []) {
+    if (!ev) continue;
+    const r = ev.result || {};
+    if (ev.actor === "red" && r.ok === true) {
+      if (RECON_TOOLS.includes(ev.tool) || ev.tool === "http_request") red = Math.max(red, 25);
+      if (ev.tool === "try_credential" && r.authenticated === true) red = Math.max(red, 50);
+      if ((ev.tool === "list_files" || ev.tool === "read_file") &&
+        String(r.path || "").startsWith("/secret")) red = Math.max(red, 75);
+      if (isSecretRead(ev)) red = 100;
+    }
+    if (ev.actor === "blue" && r.ok === true) {
+      if (ev.tool === "report_finding") detected = true;
+      if (CONTAINMENT_TOOLS.includes(ev.tool)) contained = true;
+    }
+  }
+  return { red, blue: (detected ? 50 : 0) + (contained ? 50 : 0) };
+}
+
+// Per-host integrity, purely from events: red ground drops it,
+// restore_host refills it. 0-100 per host.
+export function integrityFromEvents(eventList) {
+  const integrity = { web: 100, app: 100, db: 100, workstation: 100 };
+  for (const ev of eventList || []) {
+    if (!ev) continue;
+    const host = eventHost(ev);
+    if (!host || !(host in integrity)) continue;
+    const r = ev.result || {};
+    if (ev.actor === "red" && r.ok === true) {
+      if (isSecretRead(ev)) {
+        integrity[host] = 0;
+      } else if (ev.tool === "try_credential" && r.authenticated === true) {
+        integrity[host] = Math.min(integrity[host], 50);
+      } else if (RECON_TOOLS.includes(ev.tool) || ev.tool === "http_request") {
+        if (integrity[host] === 100) integrity[host] = 85;
+      }
+    } else if (ev.actor === "blue" && ev.tool === "restore_host" && r.ok === true) {
+      integrity[host] = 100;
+    }
+  }
+  return integrity;
+}
+
+// Latest red/blue event in a slice for the Arena consoles.
+export function latestByActor(eventList, actor) {
+  const list = eventList || [];
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    if (list[i] && list[i].actor === actor) return list[i];
+  }
+  return null;
+}
