@@ -315,12 +315,14 @@ describe("entity levels", () => {
         return true;
       },
     });
-    const tex = { width: 64, height: 64 };
-    assert.doesNotThrow(() => paintIntrusion(stub, {}, { intrusionTex: tex }, 64, 64, 52, 1, 1.7));
-    assert.doesNotThrow(() => paintGuardian(stub, {}, { guardianTex: tex }, 64, 64, 52, 1, 1.7));
-    assert.doesNotThrow(() => paintIntrusion(stub, {}, {}, 64, 64, 52, 0, 0));
-    assert.doesNotThrow(() => paintGuardian(stub, {}, {}, 64, 64, 52, 0.15, 0));
-    assert.ok(calls.includes("clip"), "texture path clips");
+    const body = { width: 512, height: 512 };
+    const full = { sprites: {}, bodies: { intrusion: body, guardian: body },
+      swayX: 4, flare: 0.5, recoil: 0.5, burst: 0.5 };
+    assert.doesNotThrow(() => paintIntrusion(stub, full, 64, 64, 52, 1, 1.7));
+    assert.doesNotThrow(() => paintGuardian(stub, full, 64, 64, 52, 1, 1.7));
+    assert.doesNotThrow(() => paintIntrusion(stub, {}, 64, 64, 52, 0, 0));
+    assert.doesNotThrow(() => paintGuardian(stub, {}, 64, 64, 52, 0.15, 0));
+    assert.ok(calls.includes("drawImage"), "splash body draws");
     assert.ok(calls.includes("fillText"), "glyphs paint");
   });
 

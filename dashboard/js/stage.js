@@ -458,6 +458,7 @@ export function initStage(canvas, opts) {
     intrusion: 0,
     guardian: 0.15,
     surge: { red: 0, blue: 0 },
+    knock: { red: 0, blue: 0 },
     tug: 0,
     fx: [],
     sparks: [],
@@ -736,6 +737,49 @@ function drawGlow(ctx, sprite, x, y, r, alpha) {
   ctx.restore();
 }
 
+// Entity bodies: each hero splash baked once into a 512px sprite
+// with a soft radial mask, so the dark background disappears and
+// only the being remains. Drawn additively per frame.
+function buildEntityBodies(refs) {
+  const art = refs.art || {};
+  const key = `${art.intrusionTex ? "i" : ""}${art.guardianTex ? "g" : ""}`;
+  if (refs.bodyKey === key) return refs.bodies || {};
+  refs.bodyKey = key;
+  refs.bodies = {
+    intrusion: maskSplash(art.intrusionTex),
+    guardian: maskSplash(art.guardianTex),
+  };
+  return refs.bodies;
+}
+
+function maskSplash(tex) {
+  if (!tex || !tex.width) return null;
+  const S = 512;
+  const layer = makeLayer(S, S);
+  if (!layer) return null;
+  let g = null;
+  try {
+    g = layer.getContext("2d");
+  } catch {
+    return null;
+  }
+  if (!g) return null;
+  try {
+    const side = Math.min(tex.width, tex.height);
+    g.drawImage(tex, (tex.width - side) / 2, (tex.height - side) / 2, side, side, 0, 0, S, S);
+    g.globalCompositeOperation = "destination-in";
+    const mask = g.createRadialGradient(S / 2, S / 2, S * 0.2, S / 2, S / 2, S * 0.5);
+    mask.addColorStop(0, "rgba(255,255,255,1)");
+    mask.addColorStop(0.68, "rgba(255,255,255,1)");
+    mask.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = mask;
+    g.fillRect(0, 0, S, S);
+  } catch {
+    return null;
+  }
+  return layer;
+}
+
 function relayoutStage(refs) {
   if (!refs) return;
   const { cw, ch } = refs.geom;
@@ -853,6 +897,7 @@ export function renderStageStatic(refs, events, cursor, opts, instant) {
     refs.jewel = clean.jewel_host;
     refs.flash = null;
     refs.surge = { red: 0, blue: 0 };
+    refs.knock = { red: 0, blue: 0 };
     refs.cam = { dx: 0, dy: 0, z: 1 };
     refs.camTarget = { dx: 0, dy: 0, z: 1 };
     refs.trauma = 0;
@@ -907,6 +952,7 @@ export function stageNotify(refs, ev, states, speed) {
   if (ev.actor === "red" && ev.tool === "read_file" && (ev.result || {}).ok === true &&
       String((ev.result || {}).path || "").startsWith("/secret/")) {
     refs.trauma = Math.min(1, refs.trauma + 0.8);
+    refs.knock.blue = refs.clock + 600;
   }
   const host = eventHost(ev);
   if (host && refs.nodes[host]) {
@@ -916,6 +962,7 @@ export function stageNotify(refs, ev, states, speed) {
   const r = (ev.result || {}).ok === true;
   if (ev.actor === "blue" && r && (ev.tool === "isolate_host" || ev.tool === "patch_service")) {
     refs.trauma = Math.min(1, refs.trauma + 0.45);
+    refs.knock.red = refs.clock + 450;
   }
   if (ev.actor === "auditor") showStageAuditor(refs, ev);
   updateStageHud(refs);
@@ -1329,6 +1376,7 @@ function drawStage(refs) {
   ensureFrame(refs);
   buildStaticLayers(refs);
   buildSprites(refs);
+  buildEntityBodies(refs);
   const target = refs.frameCtx || ctx;
   const direct = target === ctx;
   try {
@@ -1681,98 +1729,90 @@ function paintHostLabel(refs, ctx, id, x, y, r, jewel) {
 function paintEntities(refs, ctx) {
   const slots = refs.stage.entities;
   const t = refs.clock / 1000;
-  const sprites = refs.sprites || {};
-  const art = refs.art || {};
   const red = slots.intrusion;
   const blue = slots.guardian;
   const redHot = refs.clock < refs.surge.red ? (refs.surge.red - refs.clock) / 900 : 0;
   const blueHot = refs.clock < refs.surge.blue ? (refs.surge.blue - refs.clock) / 900 : 0;
+  const redKnock = refs.clock < refs.knock.red ? (refs.knock.red - refs.clock) / 450 : 0;
+  const blueKnock = refs.clock < refs.knock.blue ? (refs.knock.blue - refs.clock) / 600 : 0;
   const level = Math.min(1, refs.intrusion + redHot * 0.25);
   const energy = Math.min(1.15, refs.guardian + blueHot * 0.35);
-  paintIntrusion(ctx, sprites, art, red.x, red.y,
-    red.r * (0.68 + 0.42 * refs.intrusion), level, t);
-  paintGuardian(ctx, sprites, art, blue.x, blue.y, blue.r, energy, t);
+  const sway = refs.cam.dx * 0.12;
+  paintIntrusion(ctx, {
+    sprites: refs.sprites || {}, bodies: refs.bodies || {},
+    swayX: sway, flare: redHot, recoil: redKnock, burst: redHot,
+  }, red.x, red.y, red.r * (0.68 + 0.42 * refs.intrusion), level, t);
+  paintGuardian(ctx, {
+    sprites: refs.sprites || {}, bodies: refs.bodies || {},
+    swayX: sway, flare: blueHot, recoil: blueKnock, burst: 0,
+  }, blue.x, blue.y, blue.r, energy, t);
 }
 
-// The Intrusion: a hot white core wrapped in layered jagged crimson
-// shards turning at different speeds, glitch slices, and orbiting
-// code glyphs. Flicker turns violent as red progresses. Abstract
-// light and code only; the splash art lights the inside additively.
-export function paintIntrusion(ctx, sprites, art, x, y, r, level, t) {
+// The Intrusion: the hero splash as its body, drawn large and
+// additive with a soft mask, with rotating shard rings, orbiting
+// code glyphs, and glitch slices on top. Idle breathing, flare and
+// recoil on events. Abstract light and code only.
+export function paintIntrusion(ctx, env, x, y, r, level, t) {
   const rr = Math.max(8, r);
   const lvl = Math.max(0, Math.min(1, level));
+  const mood = env || {};
+  const sprites = mood.sprites || {};
+  const body = (mood.bodies || {}).intrusion;
   const violence = 0.25 + lvl * 1.6;
   const step = Math.floor(t * 24);
   const rnd = (n) => {
     const s = Math.sin(step * 12.9898 + n * 78.233) * 43758.5453;
     return s - Math.floor(s);
   };
-  const jx = (rnd(1) - 0.5) * rr * 0.08 * violence;
+  const recoil = Math.max(0, Math.min(1, mood.recoil || 0));
+  const burst = Math.max(0, Math.min(1, mood.burst || 0));
+  const breath = 1 + Math.sin(t * 0.9) * 0.025;
+  const jx = (rnd(1) - 0.5) * rr * 0.08 * violence - recoil * rr * 0.35;
   const jy = (rnd(2) - 0.5) * rr * 0.08 * violence;
+  const sway = (mood.swayX || 0) + Math.sin(t * 0.5) * rr * 0.04;
   ctx.save();
-  ctx.translate(x + jx, y + Math.sin(t * 1.1) * rr * 0.04 + jy);
+  ctx.translate(x + jx + sway, y + Math.sin(t * 1.1) * rr * 0.04 + jy);
+  ctx.scale(breath, breath);
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
-  drawGlow(ctx, (sprites || {}).intrusion, 0, 0, rr * 2.4, 0.45 + lvl * 0.55);
+  drawGlow(ctx, sprites.intrusion, 0, 0, rr * 2.4, 0.45 + lvl * 0.55);
   ctx.restore();
-  const tex = art && art.intrusionTex;
-  if (tex && tex.width) {
+  // Splash body, large and additive; the baked mask drops the dark
+  // ground so only the being remains.
+  if (body) {
     ctx.save();
-    ctx.beginPath();
-    ctx.arc(0, 0, rr * 1.3, 0, 6.283);
-    ctx.clip();
     ctx.globalCompositeOperation = "lighter";
-    ctx.globalAlpha = 0.4 + lvl * 0.3;
-    ctx.rotate(Math.sin(t * 0.18) * 0.2 + t * 0.03);
-    const ts = rr * 2.6;
-    ctx.drawImage(tex, -ts / 2, -ts / 2, ts, ts);
+    ctx.globalAlpha = 0.95;
+    const bs = rr * 2.5;
+    ctx.drawImage(body, -bs / 2, -bs / 2, bs, bs);
     ctx.restore();
-  }
-  // Dark jagged body: the silhouette anchor under the shards.
-  ctx.save();
-  ctx.rotate(t * 0.12);
-  ctx.fillStyle = "rgba(24,6,7,0.95)";
-  ctx.strokeStyle = lvl > 0.66 ? "#ff7a5c" : "#e03228";
-  ctx.lineWidth = Math.max(1.5, rr * 0.035);
-  ctx.beginPath();
-  const teeth = 9;
-  for (let i = 0; i < teeth; i += 1) {
-    const a = (i * 6.283) / teeth;
-    const rad = rr * (i % 2 === 0 ? 0.98 : 0.72);
-    const px = Math.cos(a) * rad;
-    const py = Math.sin(a) * rad;
-    if (i === 0) ctx.moveTo(px, py);
-    else ctx.lineTo(px, py);
-  }
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-  ctx.restore();
-  // Radiating spikes: thin teeth that sell the silhouette.
-  const spikes = 6 + Math.round(lvl * 3);
-  for (let i = 0; i < spikes; i += 1) {
-    const a = t * 0.35 + (i * 6.283) / spikes;
-    const len = rr * (0.35 + 0.3 * Math.abs(Math.sin(t * 3.1 + i * 2.4)) + lvl * 0.25);
-    const base = rr * 0.85;
-    const tip = base + len;
-    const wdt = rr * 0.07;
-    const dx = Math.cos(a);
-    const dy = Math.sin(a);
-    const nx = -dy;
-    const ny = dx;
-    ctx.fillStyle = "rgba(255,59,47,0.85)";
+  } else {
+    // Procedural fallback when the art is missing.
+    ctx.save();
+    ctx.rotate(t * 0.12);
+    ctx.fillStyle = "rgba(24,6,7,0.95)";
+    ctx.strokeStyle = lvl > 0.66 ? "#ff7a5c" : "#e03228";
+    ctx.lineWidth = Math.max(1.5, rr * 0.035);
     ctx.beginPath();
-    ctx.moveTo(dx * base + nx * wdt, dy * base + ny * wdt);
-    ctx.lineTo(dx * tip, dy * tip);
-    ctx.lineTo(dx * base - nx * wdt, dy * base - ny * wdt);
+    const teeth = 9;
+    for (let i = 0; i < teeth; i += 1) {
+      const a = (i * 6.283) / teeth;
+      const rad = rr * (i % 2 === 0 ? 0.98 : 0.72);
+      const px = Math.cos(a) * rad;
+      const py = Math.sin(a) * rad;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
     ctx.closePath();
     ctx.fill();
+    ctx.stroke();
+    ctx.restore();
   }
-  // Layered shard rings, each turning at its own speed.
+  // Layered shard rings over the body, each turning at its own speed.
   const rings = [
-    { n: 8, rad: 1.12, size: 0.2, speed: 0.55, wob: 0.1 },
-    { n: 6, rad: 0.78, size: 0.18, speed: -0.38, wob: 0.14 },
-    { n: 5, rad: 0.5, size: 0.16, speed: 0.9, wob: 0.08 },
+    { n: 7, rad: 1.1, size: 0.17, speed: 0.55, wob: 0.1 },
+    { n: 5, rad: 0.76, size: 0.15, speed: -0.38, wob: 0.14 },
+    { n: 4, rad: 0.48, size: 0.13, speed: 0.9, wob: 0.08 },
   ];
   const extra = Math.round(lvl * 3);
   rings.forEach((ring, ri) => {
@@ -1798,24 +1838,24 @@ export function paintIntrusion(ctx, sprites, art, x, y, r, level, t) {
       ctx.restore();
     }
   });
-  // White-hot core with violent flicker.
+  // White-hot heart with violent flicker.
   const flick = 1 + (rnd(3) - 0.5) * 0.5 * violence + Math.sin(t * 47) * 0.06 * violence;
-  const coreR = Math.max(2, rr * 0.3 * flick);
+  const coreR = Math.max(2, rr * 0.2 * flick);
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
-  drawGlow(ctx, (sprites || {}).white, 0, 0, coreR * 3.2, 0.5 + lvl * 0.4);
+  drawGlow(ctx, sprites.white, 0, 0, coreR * 3.2, 0.5 + lvl * 0.4);
   ctx.fillStyle = "#fff6f2";
   ctx.beginPath();
   ctx.arc(0, 0, coreR, 0, 6.283);
   ctx.fill();
   ctx.restore();
-  // Horizontal glitch-slice displacement across the body.
-  const slices = 2 + Math.round(lvl * 3);
+  // Horizontal glitch slices across the body, bursting after events.
+  const slices = 2 + Math.round(lvl * 3) + Math.round(burst * 3);
   for (let i = 0; i < slices; i += 1) {
     const gy = -rr * 1.2 + ((i + rnd(10 + i) * 0.6) / slices) * rr * 2.4;
     const gh = Math.max(1, rr * (0.02 + rnd(20 + i) * 0.03));
-    const off = (rnd(30 + i) - 0.5) * rr * 0.5 * (0.3 + lvl);
-    ctx.fillStyle = `rgba(255,70,60,${(0.25 + lvl * 0.4).toFixed(2)})`;
+    const off = (rnd(30 + i) - 0.5) * rr * 0.5 * (0.3 + lvl + burst * 0.8);
+    ctx.fillStyle = `rgba(255,70,60,${(0.25 + lvl * 0.4 + burst * 0.25).toFixed(2)})`;
     ctx.fillRect(-rr * 1.5 + off, gy, rr * 3, gh);
     ctx.fillStyle = "rgba(127,212,255,0.18)";
     ctx.fillRect(-rr * 1.5 + off * 0.5, gy + gh, rr * 3, 1);
@@ -1834,36 +1874,45 @@ export function paintIntrusion(ctx, sprites, art, x, y, r, level, t) {
     ctx.fillText(glyphs[(i * 3 + step) % glyphs.length], Math.cos(a) * dist, Math.sin(a) * dist);
   }
   ctx.restore();
+  // Event flare: a white flash over the body.
+  const flare = Math.max(0, Math.min(1, mood.flare || 0));
+  if (flare > 0.02) {
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    drawGlow(ctx, sprites.white, 0, 0, rr * 1.7, flare * 0.55);
+    ctx.restore();
+  }
   ctx.restore();
 }
 
-// The Guardian: a bright cyan-white core inside segmented rings
-// turning in opposite directions, with orbiting shield plates and a
-// calm steady pulse that brightens on blue actions. Abstract light
-// and code only; the splash art lights the inside additively.
-export function paintGuardian(ctx, sprites, art, x, y, r, energy, t) {
+// The Guardian: the hero splash as its body, drawn large and
+// additive with a soft mask, with segmented counter-turning rings,
+// orbiting shield plates, and a calm core pulse. Idle breathing,
+// flare and recoil on events. Abstract light and code only.
+export function paintGuardian(ctx, env, x, y, r, energy, t) {
   const rr = Math.max(8, r);
   const e = Math.max(0.15, Math.min(1.2, energy));
-  const breathe = 1 + Math.sin(t * 1.4) * 0.02;
-  const sp = sprites || {};
+  const mood = env || {};
+  const sp = mood.sprites || {};
+  const body = (mood.bodies || {}).guardian;
+  const recoil = Math.max(0, Math.min(1, mood.recoil || 0));
+  const breathe = 1 + Math.sin(t * 1.1) * 0.025;
+  const sway = (mood.swayX || 0) + Math.sin(t * 0.45 + 1.2) * rr * 0.04;
   ctx.save();
-  ctx.translate(x, y + Math.sin(t * 0.9) * rr * 0.03);
+  ctx.translate(x + sway + recoil * rr * 0.35, y + Math.sin(t * 0.9) * rr * 0.03);
   ctx.scale(breathe, breathe);
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
   drawGlow(ctx, sp.guardian, 0, 0, rr * 2.4, 0.4 + e * 0.55);
   ctx.restore();
-  const tex = art && art.guardianTex;
-  if (tex && tex.width) {
+  // Splash body, large and additive; the baked mask drops the dark
+  // ground so only the sentinel remains.
+  if (body) {
     ctx.save();
-    ctx.beginPath();
-    ctx.arc(0, 0, rr * 1.3, 0, 6.283);
-    ctx.clip();
     ctx.globalCompositeOperation = "lighter";
-    ctx.globalAlpha = 0.22 + e * 0.2;
-    ctx.rotate(t * 0.05);
-    const ts = rr * 2.4;
-    ctx.drawImage(tex, -ts / 2, -ts / 2, ts, ts);
+    ctx.globalAlpha = 0.95;
+    const bs = rr * 2.5;
+    ctx.drawImage(body, -bs / 2, -bs / 2, bs, bs);
     ctx.restore();
   }
   // Segmented rings turning in opposite directions.
@@ -1929,6 +1978,14 @@ export function paintGuardian(ctx, sprites, art, x, y, r, energy, t) {
     ctx.beginPath();
     ctx.arc(0, 0, rr * (0.4 + phase * 1.1), 0, 6.283);
     ctx.stroke();
+    ctx.restore();
+  }
+  // Event flare: a white flash over the body.
+  const flare = Math.max(0, Math.min(1, mood.flare || 0));
+  if (flare > 0.02) {
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    drawGlow(ctx, sp.white, 0, 0, rr * 1.7, flare * 0.55);
     ctx.restore();
   }
   ctx.restore();
