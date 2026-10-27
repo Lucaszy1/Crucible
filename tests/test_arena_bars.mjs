@@ -2,7 +2,7 @@
 // blue held blocks. Pure functions over the event stream.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { hostBlocks, pressureValue, RED_NOTCHES, redProgress, scoreEvents } from "../dashboard/js/state.js";
+import { hostBlocks, pressureValue, redNotches, scoreEvents } from "../dashboard/js/state.js";
 
 function ev(id, actor, tool, args, result, extra) {
   return { id, actor, tool, args: args || {}, result: result || { ok: true }, ...(extra || {}) };
@@ -70,42 +70,53 @@ describe("pressureValue", () => {
   });
 });
 
-describe("redProgress", () => {
-  it("starts empty with four labeled notches", () => {
-    assert.deepEqual(RED_NOTCHES.map((n) => n.key), ["admin", "app", "db", "secret"]);
-    assert.deepEqual(redProgress([]), { level: 0, notches: [false, false, false, false] });
+describe("redNotches", () => {
+  const CHAIN = [ADMIN, APP_AUTH, DB_AUTH, SECRET];
+
+  it("sizes the bar from the full episode and starts empty", () => {
+    const empty = redNotches(CHAIN, []);
+    assert.equal(empty.total, 4);
+    assert.equal(empty.level, 0);
+    assert.deepEqual(empty.notches, [false, false, false, false]);
+    assert.deepEqual(empty.milestones.map((m) => m.kind), ["leak", "signin", "signin", "secret"]);
   });
 
   it("fills notches along the chain in order", () => {
-    assert.deepEqual(redProgress([ADMIN]).notches, [true, false, false, false]);
-    assert.deepEqual(redProgress([ADMIN, APP_AUTH]), { level: 2, notches: [true, true, false, false] });
-    assert.deepEqual(redProgress([ADMIN, APP_AUTH, DB_AUTH, SECRET]),
-      { level: 4, notches: [true, true, true, true] });
+    assert.deepEqual(redNotches(CHAIN, [ADMIN]).notches, [true, false, false, false]);
+    const half = redNotches(CHAIN, [ADMIN, APP_AUTH]);
+    assert.equal(half.level, 2);
+    assert.deepEqual(half.notches, [true, true, false, false]);
+    const full = redNotches(CHAIN, CHAIN);
+    assert.equal(full.level, 4);
+    assert.deepEqual(full.notches, [true, true, true, true]);
   });
 
   it("shows level zero for a lone late notch", () => {
-    assert.deepEqual(redProgress([DB_AUTH]), { level: 0, notches: [false, false, true, false] });
+    const lone = redNotches(CHAIN, [DB_AUTH]);
+    assert.equal(lone.level, 0);
+    assert.deepEqual(lone.notches, [false, false, true, false]);
   });
 
   it("drops back when blue isolates the relied-on host", () => {
-    const before = redProgress([ADMIN, APP_AUTH]);
+    const before = redNotches(CHAIN, [ADMIN, APP_AUTH]);
     assert.equal(before.level, 2);
-    const after = redProgress([ADMIN, APP_AUTH, ISOLATE_APP]);
-    assert.deepEqual(after, { level: 1, notches: [true, false, false, false] });
+    const after = redNotches(CHAIN, [ADMIN, APP_AUTH, ISOLATE_APP]);
+    assert.equal(after.level, 1);
+    assert.deepEqual(after.notches, [true, false, false, false]);
   });
 
   it("drops back on patch and recovers when red re-earns", () => {
     const patch = ev("p", "blue", "patch_service", { host: "app" }, { ok: true, host: "app" });
-    const dropped = redProgress([ADMIN, APP_AUTH, patch]);
+    const dropped = redNotches(CHAIN, [ADMIN, APP_AUTH, patch]);
     assert.equal(dropped.level, 1);
     const again = ev("e9", "red", "try_credential", { host: "app" },
       { ok: true, host: "app", authenticated: true });
-    assert.equal(redProgress([ADMIN, APP_AUTH, patch, again]).level, 2);
+    assert.equal(redNotches(CHAIN, [ADMIN, APP_AUTH, patch, again]).level, 2);
   });
 
   it("ignores failed containment", () => {
     const fail = ev("f", "blue", "isolate_host", { host: "app" }, { ok: false, error: "nope" });
-    assert.equal(redProgress([ADMIN, APP_AUTH, fail]).level, 2);
+    assert.equal(redNotches(CHAIN, [ADMIN, APP_AUTH, fail]).level, 2);
   });
 });
 

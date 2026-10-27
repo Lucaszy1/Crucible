@@ -290,49 +290,6 @@ export function pressureValue(eventList, layout) {
   return value;
 }
 
-// Red progress along the four-notch chain: admin page leak, app
-// sign-in, database sign-in, secret read. Each notch names the host
-// red relied on; a later blue isolate or patch on that host drops
-// the notch until red earns it again. Level is the longest held
-// prefix, so the bar only ever shows solid ground.
-export const RED_NOTCHES = [
-  { key: "admin", label: "Admin page leak", host: "web" },
-  { key: "app", label: "App sign-in", host: "app" },
-  { key: "db", label: "Database sign-in", host: "db" },
-  { key: "secret", label: "Secret read", host: "db" },
-];
-
-function notchAchieved(index, ev) {
-  if (index === 0) return isAdminRead(ev);
-  if (index === 1) return authHost(ev) === "app";
-  if (index === 2) return authHost(ev) === "db";
-  return isSecretReadEvent(ev);
-}
-
-export function redProgress(eventList) {
-  const achievedAt = [null, null, null, null];
-  const containedAt = { web: -1, app: -1, db: -1, workstation: -1 };
-  (eventList || []).forEach((ev, i) => {
-    if (!ev) return;
-    for (let n = 0; n < RED_NOTCHES.length; n += 1) {
-      if (notchAchieved(n, ev)) achievedAt[n] = i;
-    }
-    const r = ev.result || {};
-    if (ev.actor === "blue" && r.ok === true &&
-        (ev.tool === "isolate_host" || ev.tool === "patch_service")) {
-      const host = eventHost(ev);
-      if (host && host in containedAt) containedAt[host] = i;
-    }
-  });
-  const notches = RED_NOTCHES.map((notch, n) => {
-    if (achievedAt[n] === null) return false;
-    return containedAt[notch.host] < achievedAt[n];
-  });
-  let level = 0;
-  while (level < notches.length && notches[level]) level += 1;
-  return { level, notches };
-}
-
 // A credential-bearing file read: a config or export style path
 // outside the secret tree, read successfully by red.
 function credsPath(ev) {
@@ -358,7 +315,8 @@ function milestoneLabel(milestone, index) {
 // sizes the bar (three to five notches); the slice decides which
 // are lit. Each notch names the host red relied on, and a later
 // blue isolate or patch on that host drops it until red earns it
-// again, exactly like redProgress. Level is the longest held prefix.
+// again, so the bar only ever shows solid ground. Level is the
+// longest held prefix.
 export function redNotches(fullEvents, sliceEvents) {
   const milestones = [];
   const seen = new Set();
