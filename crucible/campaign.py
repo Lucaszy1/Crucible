@@ -38,6 +38,10 @@ CSV_FIELDS = (
     "cost",
     "playbook_rule_count",
     "sensors",
+    "intrusion",
+    "contained_after_intrusion",
+    "secret_read",
+    "relevant_detection_delay",
 )
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -107,7 +111,8 @@ def _write_csv(path: Path, rows: list) -> None:
         writer.writeheader()
         for row in rows:
             out = {key: row.get(key) for key in CSV_FIELDS}
-            for key in ("detection_delay", "time_to_contain"):
+            for key in ("detection_delay", "time_to_contain",
+                        "relevant_detection_delay"):
                 if out[key] is None:
                     out[key] = ""
             writer.writerow(out)
@@ -289,6 +294,12 @@ def _run_episode(arm: dict, number: int, args, seed: str | None) -> None:
         "cost": round(cost, 6),
         "playbook_rule_count": len(arm["playbook"].get("rules", []) or []),
         "sensors": score.get("sensors", args.sensors),
+        "intrusion": score.get("intrusion", False),
+        "contained_after_intrusion": score.get(
+            "contained_after_intrusion", False),
+        "secret_read": score.get("secret_read", score.get(
+            "secret_exfiltrated", False)),
+        "relevant_detection_delay": score.get("relevant_detection_delay"),
         "referee_model": referee_model,
         "red_admin": admin,
         "red_in": got_in,
@@ -327,6 +338,9 @@ def _report_arm(arm: dict) -> float:
           f"{stats['episodes']} ({stats['admin_rate']}) | red in "
           f"{stats['in_count']}/{stats['episodes']} ({stats['in_rate']}) | "
           f"wins {stats['wins']}")
+    for line in orchestrator.format_intrusion_lines(
+            orchestrator.intrusion_conditional_summary(rows)):
+        print(line)
     print(f"Total cost: ${total_cost:.4f}")
     print(f"CSV: {arm['dir'] / 'summary.csv'}")
     return total_cost

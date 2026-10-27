@@ -165,6 +165,48 @@ def test_summary_csv_and_json(tmp_path, monkeypatch):
     assert state["episodes"][0]["referee_model"] == "muse-wonder-1.0"
 
 
+def test_campaign_reports_intrusion_conditional_numbers(tmp_path, monkeypatch,
+                                                            capsys):
+    _stub_common(monkeypatch, tmp_path)
+    seen = {}
+    scores = [
+        {"outcome": "red_succeeded", "blue_score": 0.0, "downtime_pct": 5.0,
+         "detection_delay": 2, "time_to_contain": 6, "turns_used": 8,
+         "total_events": 8, "intrusion": True,
+         "contained_after_intrusion": True, "secret_read": True,
+         "relevant_detection_delay": 3},
+        {"outcome": "blue_held", "blue_score": 100.0, "downtime_pct": 0.0,
+         "detection_delay": 1, "time_to_contain": None, "turns_used": 4,
+         "total_events": 4, "intrusion": False,
+         "contained_after_intrusion": False, "secret_read": False,
+         "relevant_detection_delay": None},
+    ]
+    _stub_exercise(monkeypatch, seen, scores)
+    _stub_referee(monkeypatch, seen)
+    assert campaign.main(["--name", "cond", "--episodes", "2", "--memory",
+                          "off"]) == 0
+    out = capsys.readouterr().out
+    assert "Episodes with intrusion: 1/2" in out
+    assert "Secret-read rate given intrusion: 100.0%" in out
+    assert "Containment rate given intrusion: 100.0%" in out
+    assert "Median relevant detection delay given intrusion: 3 events" in out
+    assert "Median time to contain given intrusion: 6 events" in out
+    assert "Mean downtime among contained: 5.00%" in out
+    with (tmp_path / "runs" / "campaign-cond" / "summary.csv").open(
+            encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows[0]["intrusion"] == "True"
+    assert rows[0]["relevant_detection_delay"] == "3"
+    assert rows[1]["intrusion"] == "False"
+    assert rows[1]["relevant_detection_delay"] == ""
+    header = list(rows[0].keys())
+    assert header[:8] == ["episode", "outcome", "blue_score", "downtime_pct",
+                          "detection_delay", "time_to_contain", "cost",
+                          "playbook_rule_count"]
+    assert header[8:] == ["sensors", "intrusion", "contained_after_intrusion",
+                          "secret_read", "relevant_detection_delay"]
+
+
 def test_thirds_compare_first_vs_last(tmp_path, monkeypatch, capsys):
     _stub_common(monkeypatch, tmp_path)
     seen = {}

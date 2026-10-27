@@ -9,6 +9,7 @@ stay reproducible from the saved log.
 from __future__ import annotations
 
 import inspect
+import statistics
 
 from crucible import events, tools
 from crucible import sensors as sensor_rules
@@ -265,6 +266,118 @@ def _downtime_pct(downtime_cost: int, weights: dict, num_events: int) -> float:
     return round(min(100.0, max(0.0, raw)), 2)
 
 
+def _red_signin_positions(scoring: list) -> list:
+    """Return 1-based positions of red's successful sign-ins."""
+    positions = []
+    for index, event in enumerate(scoring, start=1):
+        if event.get("actor") != "red" or event.get("tool") != "try_credential":
+            continue
+        if (event.get("result", {}) or {}).get("authenticated") is True:
+            positions.append(index)
+    return positions
+
+
+def _hint_read_positions(scoring: list) -> list:
+    """Return 1-based positions of red's privileged page reads.
+
+    A hint read is a successful request to a privileged page, matched
+    generically on the page word and a 2xx status, never on scenario
+    paths or response bodies.
+    """
+    positions = []
+    for index, event in enumerate(scoring, start=1):
+        if event.get("actor") != "red" or event.get("tool") != "http_request":
+            continue
+        result = event.get("result", {}) or {}
+        if result.get("ok") is not True:
+            continue
+        if not str(result.get("status", "")).startswith("2"):
+            continue
+        path = str((event.get("args", {}) or {}).get("path", "") or "")
+        if "admin" in path.lower():
+            positions.append(index)
+    return positions
+
+
+def _line_shows_red_success(line: str) -> bool:
+    """Check whether a log line records a red success.
+
+    Successful sign-ins, file reads, directory listings, and
+    successful privileged page requests all come only from red's
+    tools, so any such line is red-success evidence.
+    """
+    text = str(line or "")
+    if "signin ok" in text or "file read" in text or "dir list" in text:
+        return True
+    lowered = text.lower()
+    return "admin" in lowered and "status=2" in lowered
+
+
+def _read_line_texts(scoring: list) -> dict:
+    """Map log line ids blue read to their text, over all events."""
+    texts: dict = {}
+    for event in scoring or []:
+        if event.get("actor") != "blue" or event.get("tool") != "read_logs":
+            continue
+        result = event.get("result", {}) or {}
+        if result.get("ok") is not True:
+            continue
+        for row in result.get("lines", []) or []:
+            ref = (row or {}).get("id")
+            if ref and ref not in texts:
+                texts[ref] = str((row or {}).get("line", ""))
+    return texts
+
+
+def _cites_red_success(event: dict, alert_map: dict, texts: dict) -> bool:
+    """Check whether blue's evidence refs include a red-success line.
+
+    Cited alert refs count when the alert fired on red-success
+    evidence (any rule but the failed-guess burst). Cited log ids
+    count when their text shows a red success.
+    """
+    refs = list((event or {}).get("evidence_refs", []) or [])
+    for ref in refs:
+        if sensor_rules.is_alert_ref(ref):
+            entry = (alert_map or {}).get(ref)
+            if entry is not None and sensor_rules.alert_shows_success(entry):
+                return True
+    for ref in sensor_rules.resolve_refs(refs, alert_map):
+        if sensor_rules.is_alert_ref(ref):
+            continue
+        if _line_shows_red_success((texts or {}).get(ref, "")):
+            return True
+    return False
+
+
+def _relevant_detection_delay(scoring: list) -> int | None:
+    """Count events from red's first compromise step to blue's detection.
+
+    The first compromise step is red's first successful sign-in or hint
+    read, whichever comes first. Detection is blue's first successful
+    report or alert-citing action whose evidence refs include a log
+    line from a red success. None when either side never happens.
+    """
+    steps = _red_signin_positions(scoring) + _hint_read_positions(scoring)
+    if not steps:
+        return None
+    first_step = min(steps)
+    alert_map = sensor_rules.alert_map_from_events(scoring)
+    texts = _read_line_texts(scoring)
+    for index, event in enumerate(scoring, start=1):
+        if event.get("actor") != "blue":
+            continue
+        if (event.get("result", {}) or {}).get("ok") is not True:
+            continue
+        refs = list(event.get("evidence_refs", []) or [])
+        cites_alert = any(sensor_rules.is_alert_ref(ref) for ref in refs)
+        if event.get("tool") != "report_finding" and not cites_alert:
+            continue
+        if _cites_red_success(event, alert_map, texts):
+            return index - first_step
+    return None
+
+
 def score_events(event_list: list, business_weights: dict | None = None) -> dict:
     """Score an exercise from its events.
 
@@ -280,7 +393,12 @@ def score_events(event_list: list, business_weights: dict | None = None) -> dict
     secret read when it occurs, else the exercise end. Downtime pct is
     that cost as a percent of maximum weighted uptime (weight sum times
     events counted). Blue score is 0 when the secret was read, else 100
-    minus downtime pct, so a fully quiet exercise scores 100. Auditor
+    minus downtime pct, so a fully quiet exercise scores 100. Intrusion
+    is true when red signed in anywhere; contained_after_intrusion is
+    true when blue contained at or after the first such sign-in.
+    Relevant detection delay counts events from red's first compromise
+    step (first successful sign-in or hint read) to blue's first
+    report or alert-citing action citing a red-success line. Auditor
     and system events never shift positions or downtime: detection,
     containment, and downtime count over red and blue events only,
     while the audit metrics summarize the auditor events separately.
@@ -334,6 +452,23 @@ def score_events(event_list: list, business_weights: dict | None = None) -> dict
                 time_to_contain = index
                 break
 
+    signin_positions = _red_signin_positions(scoring)
+    intrusion = bool(signin_positions)
+    contained_after_intrusion = False
+    if intrusion:
+        first_signin_at = min(signin_positions)
+        for index, event in enumerate(scoring, start=1):
+            if index < first_signin_at:
+                continue
+            if event.get("actor") != "blue":
+                continue
+            if event.get("tool") not in CONTAINMENT_TOOLS:
+                continue
+            if (event.get("result", {}) or {}).get("ok") is True:
+                contained_after_intrusion = True
+                break
+    relevant_detection_delay = _relevant_detection_delay(scoring)
+
     if secret_read:
         outcome = "red_succeeded"
     elif _blue_acted(scoring):
@@ -355,10 +490,14 @@ def score_events(event_list: list, business_weights: dict | None = None) -> dict
         "sensors": _sensors_mode(event_list),
         "time_to_detect": time_to_detect,
         "detection_delay": detection_delay,
+        "relevant_detection_delay": relevant_detection_delay,
         "time_to_contain": time_to_contain,
+        "intrusion": intrusion,
+        "contained_after_intrusion": contained_after_intrusion,
         "hosts_compromised": len(compromised),
         "compromised_hosts": sorted(compromised),
         "secret_exfiltrated": secret_read,
+        "secret_read": secret_read,
         "outcome": outcome,
         "total_events": len(scoring),
         "downtime_cost": downtime_cost,
@@ -369,6 +508,99 @@ def score_events(event_list: list, business_weights: dict | None = None) -> dict
         "invalid_refs_count": audit["invalid_refs_count"],
         "mean_audit_score": audit["mean_audit_score"],
     }
+
+
+def intrusion_conditional_summary(rows: list) -> dict:
+    """Summarize intrusion-conditional numbers over episode rows.
+
+    Each row carries intrusion, contained_after_intrusion, secret_read
+    (or secret_exfiltrated), relevant_detection_delay, time_to_contain,
+    and downtime_pct. Returns the intrusion count, the secret-read and
+    containment rates among intruded episodes, the median relevant
+    detection delay and time to contain among them, and the mean
+    downtime among contained ones. Rates are None when no episode had
+    an intrusion; medians skip episodes that never detected or
+    contained; the downtime mean covers contained_after_intrusion
+    episodes only.
+    """
+    total = len(rows or [])
+    intruded = [row for row in rows or [] if (row or {}).get("intrusion") is True]
+    count = len(intruded)
+    if not count:
+        return {
+            "episodes": total,
+            "intrusions": 0,
+            "secret_read_rate": None,
+            "containment_rate": None,
+            "median_relevant_detection_delay": None,
+            "median_time_to_contain": None,
+            "mean_downtime_contained": None,
+        }
+
+    def _secret(row: dict) -> bool:
+        if "secret_read" in row:
+            return row.get("secret_read") is True
+        return row.get("secret_exfiltrated") is True
+
+    secret_hits = sum(1 for row in intruded if _secret(row or {}))
+    contained = [row for row in intruded
+                 if (row or {}).get("contained_after_intrusion") is True]
+    delays = [(row or {}).get("relevant_detection_delay") for row in intruded]
+    delays = [value for value in delays if isinstance(value, (int, float))]
+    contains = [(row or {}).get("time_to_contain") for row in intruded]
+    contains = [value for value in contains if isinstance(value, (int, float))]
+    downtimes = [(row or {}).get("downtime_pct") for row in contained]
+    downtimes = [value for value in downtimes if isinstance(value, (int, float))]
+    return {
+        "episodes": total,
+        "intrusions": count,
+        "secret_read_rate": round(secret_hits / count, 3),
+        "containment_rate": round(len(contained) / count, 3),
+        "median_relevant_detection_delay": (statistics.median(delays)
+                                            if delays else None),
+        "median_time_to_contain": (statistics.median(contains)
+                                  if contains else None),
+        "mean_downtime_contained": (round(sum(downtimes) / len(downtimes), 2)
+                                   if downtimes else None),
+    }
+
+
+def format_intrusion_lines(summary: dict) -> list:
+    """Render intrusion-conditional summary lines for final tables.
+
+    Shared by batch, campaign, and bench so every final table reports
+    the same intrusion-conditional numbers in the same words.
+    """
+    summary = summary or {}
+    total = summary.get("episodes", 0)
+    count = summary.get("intrusions", 0)
+    lines = [f"Episodes with intrusion: {count}/{total}"]
+    secret_rate = summary.get("secret_read_rate")
+    contain_rate = summary.get("containment_rate")
+    if secret_rate is None:
+        lines.append("Secret-read rate given intrusion: no intrusions")
+    else:
+        lines.append(f"Secret-read rate given intrusion: {secret_rate * 100:.1f}%")
+    if contain_rate is None:
+        lines.append("Containment rate given intrusion: no intrusions")
+    else:
+        lines.append(f"Containment rate given intrusion: {contain_rate * 100:.1f}%")
+    delay = summary.get("median_relevant_detection_delay")
+    if delay is None:
+        lines.append("Median relevant detection delay given intrusion: no detections")
+    else:
+        lines.append(f"Median relevant detection delay given intrusion: {delay} events")
+    contain_at = summary.get("median_time_to_contain")
+    if contain_at is None:
+        lines.append("Median time to contain given intrusion: no containment")
+    else:
+        lines.append(f"Median time to contain given intrusion: {contain_at} events")
+    downtime = summary.get("mean_downtime_contained")
+    if downtime is None:
+        lines.append("Mean downtime among contained: no contained episodes")
+    else:
+        lines.append(f"Mean downtime among contained: {downtime:.2f}%")
+    return lines
 
 
 def _sensors_mode(event_list: list) -> str:

@@ -37,6 +37,10 @@ CSV_FIELDS = (
     "fallback_turns",
     "estimated_cost_usd",
     "sensors",
+    "intrusion",
+    "contained_after_intrusion",
+    "secret_read",
+    "relevant_detection_delay",
 )
 
 
@@ -185,6 +189,13 @@ def main(argv=None) -> int:
                     "fallback_turns": fallback_turns,
                     "estimated_cost_usd": round(cost, 6),
                     "sensors": score.get("sensors", args.sensors),
+                    "intrusion": score.get("intrusion", False),
+                    "contained_after_intrusion": score.get(
+                        "contained_after_intrusion", False),
+                    "secret_read": score.get("secret_read", score.get(
+                        "secret_exfiltrated", False)),
+                    "relevant_detection_delay": score.get(
+                        "relevant_detection_delay"),
                 }
             )
             delay = score.get("detection_delay")
@@ -211,7 +222,7 @@ def main(argv=None) -> int:
         for row in rows:
             out = dict(row)
             for key in ("detection_delay", "time_to_contain", "justified_pct",
-                        "mean_audit_score"):
+                        "mean_audit_score", "relevant_detection_delay"):
                 if out[key] is None:
                     out[key] = ""
             writer.writerow(out)
@@ -235,6 +246,9 @@ def main(argv=None) -> int:
         print(f"Mean detection delay: {mean_delay:.2f} events")
     print(f"Mean downtime: {mean_downtime:.2f}%" if mean_downtime is not None else "Mean downtime: no")
     print(f"Mean blue_score: {mean_blue:.2f}" if mean_blue is not None else "Mean blue_score: no")
+    for line in orchestrator.format_intrusion_lines(
+            orchestrator.intrusion_conditional_summary(rows)):
+        print(line)
     print(f"Total estimated cost: ${total_cost:.4f}")
     print(f"CSV: {path}")
     return 0

@@ -286,7 +286,7 @@ def format_alerts_section(alerts: list) -> str:
 
 
 def alert_map_from_events(event_list: list) -> dict:
-    """Map each shown alert id to its text and log refs.
+    """Map each shown alert id to its rule, text, and log refs.
 
     Reads the sensor_alerts attached to blue events, so the map holds
     exactly the alerts blue was shown, in episode order.
@@ -297,11 +297,31 @@ def alert_map_from_events(event_list: list) -> dict:
             ident = (alert or {}).get("id", "")
             if ident and ident not in out:
                 out[ident] = {
+                    "rule": str((alert or {}).get("rule", "")),
                     "text": str((alert or {}).get("text", "")),
                     "refs": [ref for ref in (alert or {}).get("refs", []) or []
                              if ref],
                 }
     return out
+
+
+# Rules that fire only on evidence of a red success (signed-in
+# sessions, privileged page reads, file and directory reads). The
+# failed-guess burst rule is the only one that fires on failures alone.
+SUCCESS_RULES = (
+    "success_after_failures",
+    "success_first_try",
+    "privileged_page",
+    "sensitive_file_read",
+    "list_then_read",
+    "lateral_step",
+    "crown_jewel_read",
+)
+
+
+def alert_shows_success(alert: dict) -> bool:
+    """Check whether an alert fired on red-success evidence."""
+    return str((alert or {}).get("rule", "")) in SUCCESS_RULES
 
 
 def resolve_refs(refs: list, alert_map: dict) -> list:

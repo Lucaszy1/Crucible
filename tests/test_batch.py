@@ -122,6 +122,8 @@ def test_batch_writes_csv_and_summary(tmp_path, monkeypatch, capsys):
     assert rows[2]["detection_delay"] == ""
     assert rows[2]["time_to_contain"] == ""
     assert rows[0]["sensors"] == "on"
+    assert rows[0]["intrusion"] == "False"
+    assert rows[0]["relevant_detection_delay"] == ""
 
     out = capsys.readouterr().out
     assert "demo-1: outcome=blue_held" in out
@@ -134,8 +136,66 @@ def test_batch_writes_csv_and_summary(tmp_path, monkeypatch, capsys):
     assert "Mean detection delay: 4.00" in out
     assert "Mean downtime: 6.25%" in out
     assert "Mean blue_score: 60.42" in out
+    assert "Episodes with intrusion: 0/3" in out
+    assert "Secret-read rate given intrusion: no intrusions" in out
     assert "Total estimated cost: $0.0500" in out
     assert "CSV:" in out
+
+
+def test_batch_reports_intrusion_conditional_numbers(tmp_path, monkeypatch,
+                                                     capsys):
+    _stub_common(monkeypatch, tmp_path)
+    plans = {
+        "mix-1": {"outcome": "red_succeeded", "detection_delay": 2,
+                  "time_to_contain": 6, "downtime_cost": 5,
+                  "downtime_pct": 5.0, "blue_score": 0,
+                  "intrusion": True, "contained_after_intrusion": True,
+                  "secret_read": True, "relevant_detection_delay": 3},
+        "mix-2": {"outcome": "red_succeeded", "detection_delay": 2,
+                  "time_to_contain": None, "downtime_cost": 0,
+                  "downtime_pct": 0.0, "blue_score": 0,
+                  "intrusion": True, "contained_after_intrusion": False,
+                  "secret_read": True, "relevant_detection_delay": 7},
+        "mix-3": {"outcome": "blue_held", "detection_delay": 1,
+                  "time_to_contain": None, "downtime_cost": 0,
+                  "downtime_pct": 0.0, "blue_score": 100.0,
+                  "intrusion": False, "contained_after_intrusion": False,
+                  "secret_read": False, "relevant_detection_delay": None},
+    }
+
+    def fake_exercise(red, blue, max_turns=30, run_path=None, exercise_id=None, audit="off", sensors="on"):
+        return {"events": [], "score": dict(plans[exercise_id]),
+                "run_path": str(tmp_path / "x.jsonl")}
+
+    monkeypatch.setattr(orchestrator, "run_exercise", fake_exercise)
+    monkeypatch.setattr(batch.orchestrator, "run_exercise", fake_exercise)
+    assert batch.main(["--count", "3", "--prefix", "mix"]) == 0
+    out = capsys.readouterr().out
+    assert "Episodes with intrusion: 2/3" in out
+    assert "Secret-read rate given intrusion: 100.0%" in out
+    assert "Containment rate given intrusion: 50.0%" in out
+    assert "Median relevant detection delay given intrusion: 5.0 events" in out
+    assert "Median time to contain given intrusion: 6 events" in out
+    assert "Mean downtime among contained: 5.00%" in out
+    with (tmp_path / "runs" / "batch-mix.csv").open(encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows[0]["intrusion"] == "True"
+    assert rows[0]["contained_after_intrusion"] == "True"
+    assert rows[0]["secret_read"] == "True"
+    assert rows[0]["relevant_detection_delay"] == "3"
+    assert rows[2]["intrusion"] == "False"
+    assert rows[2]["relevant_detection_delay"] == ""
+    header = list(rows[0].keys())
+    assert header[:15] == [
+        "exercise_id", "outcome", "detection_delay", "time_to_contain",
+        "downtime_cost", "downtime_pct", "blue_score", "justified_pct",
+        "unsupported_count", "invalid_refs_count", "mean_audit_score",
+        "red_attempts", "model_turns", "fallback_turns",
+        "estimated_cost_usd",
+    ]
+    assert header[15:] == ["sensors", "intrusion",
+                           "contained_after_intrusion", "secret_read",
+                           "relevant_detection_delay"]
 
 
 def test_batch_model_flag_uses_cache_option(tmp_path, monkeypatch):

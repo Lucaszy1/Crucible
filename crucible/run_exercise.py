@@ -112,6 +112,7 @@ def _warn_spend_cap() -> None:
 def _summary(score: dict) -> list:
     detect = score.get("time_to_detect")
     delay = score.get("detection_delay")
+    relevant = score.get("relevant_detection_delay")
     contain = score.get("time_to_contain")
     hosts = ", ".join(score.get("compromised_hosts", [])) or "none"
     try:
@@ -122,9 +123,13 @@ def _summary(score: dict) -> list:
         f"Turns used: {score.get('turns_used')} of {score.get('total_events')} events",
         f"Sensors: {score.get('sensors', 'off')}",
         f"Outcome: {score.get('outcome', 'unknown')}",
+        f"Intrusion: {'yes' if score.get('intrusion') else 'no'}",
         f"Detected at event: {detect if detect is not None else 'no'}",
         f"Detection delay: {delay if delay is not None else 'no'} events",
+        f"Relevant detection delay: {relevant if relevant is not None else 'no'} events",
         f"Contained at event: {contain if contain is not None else 'no'}",
+        f"Contained after intrusion: "
+        f"{'yes' if score.get('contained_after_intrusion') else 'no'}",
         f"Hosts compromised: {score.get('hosts_compromised')} ({hosts})",
         f"Secret exfiltrated: {'yes' if score.get('secret_exfiltrated') else 'no'}",
         f"Downtime cost: {score.get('downtime_cost', 0)}",

@@ -155,6 +155,9 @@ def test_runner_summary_prints_outcome_and_delay(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "Outcome: blue_held" in out
     assert "Detection delay: 1 events" in out
+    assert "Intrusion: no" in out
+    assert "Relevant detection delay: no events" in out
+    assert "Contained after intrusion: no" in out
 
 
 def test_runner_summary_prints_downtime_blue_and_cost(tmp_path, monkeypatch, capsys):
