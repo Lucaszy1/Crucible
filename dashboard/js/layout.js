@@ -232,8 +232,8 @@ export function arenaGeometry(layout) {
     edges,
     entry,
     jewel: clean.jewel_host,
-    red: { x: lo - 240, y: 450 },
-    blue: { x: hi + 240, y: 790 },
+    red: { x: Math.max(60, lo - 240), y: 450 },
+    blue: { x: Math.min(1540, hi + 240), y: 790 },
   };
 }
 
@@ -258,7 +258,7 @@ export function mapGeometry(layout) {
       group.forEach((id, i) => {
         let y = 140;
         if (group.length === 2) y = i === 0 ? 140 : 285;
-        else if (group.length > 2) y = 80 + (i * 200) / (group.length - 1);
+        else if (group.length > 2) y = 85 + (i * 195) / (group.length - 1);
         positions[id] = { x, y };
       });
     });
