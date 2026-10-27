@@ -17,6 +17,20 @@ SEVERITIES = ("low", "medium", "high", "critical")
 
 FAIL_BURST_THRESHOLD = 3
 
+# Quoted evidence per alert: at most this many log lines, each cut to
+# this many characters. Quotes are verbatim apart from the cut.
+MAX_EVIDENCE_LINES = 3
+MAX_EVIDENCE_CHARS = 160
+
+# Generic credential-like key=value tokens: pass= and every longer
+# pass* spelling, plus pwd, secret, and token. A log line carrying
+# one is never quoted (its ref is still listed); the sign-in gate is
+# documented to log user and source only, so this is defense in
+# depth. Plain words, no scenario names, paths, or accounts here, and
+# the pass stem stays short on purpose: the source-scan test forbids
+# the scenario's pass value as a literal string.
+_PASSWORD_TOKEN_RE = re.compile(r"(?i)\b(?:pass\w*|pwd|secret|token)\s*[:=]")
+
 # Generic words that mark a requested page as privileged. These are
 # ordinary security words, not scenario names or full paths.
 PRIVILEGED_PAGE_WORDS = ("admin",)
@@ -142,6 +156,46 @@ def _privileged_path(path: str) -> bool:
     return any(word in lowered for word in PRIVILEGED_PAGE_WORDS)
 
 
+def safe_to_quote(line: str) -> bool:
+    """Check a log line for credential-like content before quoting."""
+    return not _PASSWORD_TOKEN_RE.search(str(line or ""))
+
+
+def trim_evidence(line: str) -> str:
+    """Cut one quoted line to the evidence budget, marking the cut."""
+    text = str(line or "")
+    if len(text) <= MAX_EVIDENCE_CHARS:
+        return text
+    return text[:MAX_EVIDENCE_CHARS] + "..."
+
+
+def evidence_for(refs: list, texts: dict) -> list:
+    """Quote up to MAX_EVIDENCE_LINES of an alert's refs.
+
+    Each quote carries the log line id plus the verbatim line text
+    (trimmed), from the same episode logs blue could read herself.
+    Lines with credential-like content are skipped, never quoted;
+    every skipped ref still appears in the alert's ref list.
+    """
+    out: list = []
+    for ref in refs or []:
+        if len(out) >= MAX_EVIDENCE_LINES:
+            break
+        line = (texts or {}).get(ref)
+        if line is None or not safe_to_quote(line):
+            continue
+        out.append({"ref": ref, "line": trim_evidence(line)})
+    return out
+
+
+def format_evidence_lines(evidence: list) -> str:
+    """Render quoted lines for prompts, one indented line per quote."""
+    return "".join(
+        f"\n  {(item or {}).get('ref', '?')}: {(item or {}).get('line', '')}"
+        for item in evidence or []
+    )
+
+
 def build_alerts(logs: dict, *, connections=None, crown_jewel_host=None) -> list:
     """Run every sensor rule over episode logs, deterministically.
 
@@ -151,9 +205,14 @@ def build_alerts(logs: dict, *, connections=None, crown_jewel_host=None) -> list
     come from the blue-visible inventory. Rules run in a fixed order
     over hosts and lines in sorted order, so alert ids are stable for
     the same logs. Each alert carries id, rule, severity, a plain
-    sentence, and evidence refs (log line ids).
+    sentence, evidence refs (log line ids), and up to three quoted
+    evidence lines so blue can act without re-reading the logs.
     """
     parsed = _parsed(logs)
+    texts: dict = {}
+    for host_lines in (logs or {}).values():
+        for ref, line in host_lines or []:
+            texts[ref] = line
     links = {}
     for host, peers in (connections or {}).items():
         links[host] = set(peers or [])
@@ -169,6 +228,7 @@ def build_alerts(logs: dict, *, connections=None, crown_jewel_host=None) -> list
             "severity": severity,
             "text": text,
             "refs": list(clean),
+            "evidence": evidence_for(clean, texts),
         })
 
     for host in sorted(parsed):
@@ -270,7 +330,12 @@ def alert_key(alert: dict) -> tuple:
 
 
 def format_alerts_section(alerts: list) -> str:
-    """Render new alerts for blue's prompt, or the quiet line."""
+    """Render new alerts for blue's prompt, or the quiet line.
+
+    Each alert keeps its one-line shape, with its quoted evidence
+    lines underneath. Alerts without quotes (old shapes) render as
+    before.
+    """
     if not alerts:
         return "New alerts since your last move: none.\n"
     lines = ["New alerts since your last move:"]
@@ -281,15 +346,17 @@ def format_alerts_section(alerts: list) -> str:
             f"[{(alert or {}).get('severity', '?')}] "
             f"{(alert or {}).get('text', '').strip()} "
             f"(refs: {refs})"
+            f"{format_evidence_lines((alert or {}).get('evidence', []))}"
         )
     return "\n".join(lines) + "\n"
 
 
 def alert_map_from_events(event_list: list) -> dict:
-    """Map each shown alert id to its rule, text, and log refs.
+    """Map each shown alert id to its rule, text, log refs, and quotes.
 
     Reads the sensor_alerts attached to blue events, so the map holds
-    exactly the alerts blue was shown, in episode order.
+    exactly the alerts blue was shown, in episode order, with the same
+    quoted lines.
     """
     out: dict = {}
     for event in event_list or []:
@@ -301,6 +368,11 @@ def alert_map_from_events(event_list: list) -> dict:
                     "text": str((alert or {}).get("text", "")),
                     "refs": [ref for ref in (alert or {}).get("refs", []) or []
                              if ref],
+                    "evidence": [
+                        {"ref": str((item or {}).get("ref", "")),
+                         "line": str((item or {}).get("line", ""))}
+                        for item in (alert or {}).get("evidence", []) or []
+                    ],
                 }
     return out
 

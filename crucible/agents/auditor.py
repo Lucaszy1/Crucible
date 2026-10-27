@@ -397,8 +397,10 @@ def build_messages(blue_event: dict, prior_events: list,
                     cited.append(f"{ref}: NOT SHOWN to blue at that time")
                 else:
                     under = ", ".join(entry.get("refs", []) or [])
+                    quotes = sensors.format_evidence_lines(
+                        entry.get("evidence", []) or [])
                     cited.append(f"{ref}: {entry.get('text', '').strip()} "
-                                 f"(log lines: {under})")
+                                 f"(log lines: {under}){quotes}")
             elif ref in visible:
                 first = seen.get(ref, "?")
                 cited.append(f"{ref} (first seen at {first}): {visible[ref]}")
