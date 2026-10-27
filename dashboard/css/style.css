@@ -219,7 +219,7 @@ select {
 }
 .red-col h2 { color: var(--red); }
 .blue-col h2 { color: var(--blue); }
-.stream { display: flex; flex-direction: column; gap: 8px; max-height: 640px; overflow-y: auto; padding-right: 2px; }
+.stream { display: flex; flex-direction: column; gap: 8px; max-height: clamp(220px, calc(100vh - 430px), 640px); overflow-y: auto; padding-right: 2px; }
 .card {
   background: var(--panel-2); border: 1px solid var(--border);
   border-radius: 6px; padding: 8px 10px; font-size: 12px;
@@ -308,7 +308,7 @@ select {
 @media (max-width: 1280px) {
   .grid { grid-template-columns: 250px minmax(0, 1fr) 250px; gap: 8px; padding: 8px 12px 12px; }
   .topbar, .control-bar, .timeline-bar, .tick-strip { padding-left: 12px; padding-right: 12px; }
-  .stream { max-height: 520px; }
+  .stream { max-height: clamp(200px, calc(100vh - 470px), 520px); }
 }
 @media (max-width: 1050px) {
   .grid { grid-template-columns: 1fr; }
