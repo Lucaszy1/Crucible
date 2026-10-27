@@ -770,7 +770,7 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
   display: flex; flex-direction: column; gap: 8px; min-width: 0;
 }
 .lobby-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.lobby-id { margin: 0; font-size: 14px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lobby-id { margin: 0; font-size: 14px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 auto; }
 .lobby-outcome { font-size: 12px; font-weight: 700; white-space: nowrap; }
 .lobby-card[data-tone="red"] .lobby-outcome { color: var(--red); }
 .lobby-card[data-tone="blue"] .lobby-outcome { color: var(--accent); }
