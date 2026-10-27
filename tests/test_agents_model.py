@@ -601,6 +601,57 @@ def test_last_tool_result_reaches_blue_prompt():
     assert "unique-probe-marker" in user_text
 
 
+def test_blue_messages_show_isolated_hosts_with_turn_counts():
+    history = [
+        _red_event("scan_host", {"host": "web"},
+                   {"ok": True, "host": "web"}, 1),
+        _blue_event("isolate_host", {"host": "db"},
+                    {"ok": True, "host": "db"}, 2),
+        _red_event("scan_host", {"host": "app"},
+                   {"ok": True, "host": "app"}, 3),
+        _blue_event("isolate_host", {"host": "web"},
+                    {"ok": True, "host": "web"}, 4),
+        _red_event("scan_host", {"host": "db"},
+                   {"ok": True, "host": "db"}, 5),
+    ]
+    user_text = blue_build_messages(6, history)[1]["content"]
+    assert "Isolated hosts: db (4 turns), web (2 turns)." in user_text
+
+
+def test_blue_messages_show_no_isolated_hosts_when_clear():
+    assert "Isolated hosts: none." in blue_build_messages(1, [])[1]["content"]
+    history = [
+        _blue_event("isolate_host", {"host": "db"},
+                    {"ok": True, "host": "db"}, 1),
+        _blue_event("restore_host", {"host": "db"},
+                    {"ok": True, "host": "db"}, 2),
+    ]
+    assert "Isolated hosts: none." in blue_build_messages(3, history)[1]["content"]
+
+
+def test_blue_isolated_line_ignores_failed_actions():
+    history = [
+        _blue_event("isolate_host", {"host": "db"},
+                    {"ok": False, "error": "host is not up"}, 1),
+        _red_event("scan_host", {"host": "web"},
+                   {"ok": True, "host": "web"}, 2),
+    ]
+    assert "Isolated hosts: none." in blue_build_messages(3, history)[1]["content"]
+
+
+def test_blue_isolated_line_counts_patched_hosts_until_restore():
+    history = [
+        _blue_event("patch_service", {"host": "web", "service": "webapp"},
+                    {"ok": True, "host": "web"}, 1),
+        _red_event("scan_host", {"host": "web"},
+                   {"ok": True, "host": "web"}, 2),
+    ]
+    assert "Isolated hosts: web (2 turns)." in blue_build_messages(3, history)[1]["content"]
+    history.append(_blue_event("restore_host", {"host": "web"},
+                               {"ok": True, "host": "web"}, 3))
+    assert "Isolated hosts: none." in blue_build_messages(4, history)[1]["content"]
+
+
 def test_own_history_keeps_http_hint_text():
     history = [_red_event("http_request", {"host": "web", "path": "/admin"},
                           {"ok": True, "host": "web", "status": 200,

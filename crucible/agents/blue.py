@@ -148,11 +148,51 @@ TOOL_SCHEMAS = [
 ]
 
 
+def _down_hosts(history: list) -> dict:
+    """Map each host blue left down to its 1-based starting event number.
+
+    Mirrors scoring: a successful isolate_host or patch_service marks the
+    host down, a successful restore_host clears it, failed actions change
+    nothing. Patched hosts count as down because they accrue cost too.
+    """
+    down: dict = {}
+    for index, event in enumerate(history or [], start=1):
+        result = event.get("result", {}) or {}
+        if result.get("ok") is not True:
+            continue
+        tool = event.get("tool", "")
+        args = event.get("args", {}) or {}
+        host = args.get("host") or result.get("host")
+        if not host:
+            continue
+        if tool in ("isolate_host", "patch_service"):
+            if host not in down:
+                down[host] = index
+        elif tool == "restore_host":
+            down.pop(host, None)
+    return down
+
+
+def _isolated_hosts_line(history: list) -> str:
+    """Render blue's down hosts with turn counts for the turn prompt."""
+    down = _down_hosts(history)
+    if not down:
+        return "Isolated hosts: none."
+    total = len(history or [])
+    parts = []
+    for host in sorted(down):
+        turns = total - down[host] + 1
+        unit = "turn" if turns == 1 else "turns"
+        parts.append(f"{host} ({turns} {unit})")
+    return "Isolated hosts: " + ", ".join(parts) + "."
+
+
 def _build_messages(turn: int, history: list,
                     max_turns: int = _common.DEFAULT_MAX_TURNS) -> list:
     recent = _common.summarize_history(history)
     own = _common.summarize_own_history(history, ACTOR)
     last_result = _common.format_last_result(history, ACTOR)
+    isolated = _isolated_hosts_line(history)
     remaining = max(0, int(max_turns) - int(turn) + 1)
     user_text = (
         f"This is turn {turn} of {max_turns}. "
@@ -161,6 +201,7 @@ def _build_messages(turn: int, history: list,
         f"Your most recent tool result:\n{last_result}\n"
         f"Your previous moves:\n{own}\n"
         f"Recent exercise moves:\n{recent}\n"
+        f"{isolated}\n"
         "Reply text must hold a one or two sentence reasoning summary. "
         "Cite log line ids when you report or contain."
     )
