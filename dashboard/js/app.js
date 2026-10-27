@@ -5,6 +5,7 @@ import { initMap, updateMap } from "./network.js";
 import { renderStreams } from "./streams.js";
 import { renderTicks, renderTransport } from "./timeline.js";
 import { renderAttack } from "./attack.js";
+import { reduceAudits, renderAuditor } from "./audit.js";
 import { renderScoreboard } from "./scoreboard.js";
 import { focusEvidenceRef, renderEvidence } from "./evidence.js";
 import { fillRuns, initControls, serverStatus, setServer, showConfirm } from "./controls.js";
@@ -41,6 +42,10 @@ const els = {
   chips: document.getElementById("evidenceChips"),
   tabs: document.getElementById("logTabs"),
   viewer: document.getElementById("logViewer"),
+  auditList: document.getElementById("auditList"),
+  auditChips: document.getElementById("auditChips"),
+  auditCost: document.getElementById("auditCost"),
+  auditCount: document.getElementById("auditCount"),
 };
 
 const controls = {
@@ -94,23 +99,29 @@ function notice(text, isError) {
 
 function setMode(mode, label) {
   store.mode = mode;
-  els.mode.dataset.mode = mode === "live" ? "live" : mode === "replay" ? "replay" : "idle";
-  els.mode.textContent = mode === "live" ? "Live" : mode === "replay" ? "Replay" : "Idle";
+  els.mode.dataset.mode = mode === "live" ? "live" : mode === "replay" ? "replay" : mode === "booting" ? "booting" : "idle";
+  els.mode.textContent = mode === "live" ? "Live" : mode === "replay" ? "Replay" : mode === "booting" ? "Booting" : "Idle";
   if (label) store.label = label;
   els.title.textContent = store.label;
+}
+
+function onEvidenceRef(ref) {
+  focusEvidenceRef(ref);
+  renderEvidence({ chips: els.chips, tabs: els.tabs, viewer: els.viewer }, store.events, store.cursor);
 }
 
 function render(animate) {
   const slice = store.events.slice(0, store.cursor);
   const states = reduceHostStates(slice);
   updateMap(mapRefs, states, slice, animate);
+  const audits = reduceAudits(store.events, store.cursor);
   renderStreams(
     { red: els.red, redCount: els.redCount, blue: els.blue, blueCount: els.blueCount },
-    store.events, store.cursor, store.attackMap,
-    (ref) => {
-      focusEvidenceRef(ref);
-      renderEvidence({ chips: els.chips, tabs: els.tabs, viewer: els.viewer }, store.events, store.cursor);
-    },
+    store.events, store.cursor, store.attackMap, onEvidenceRef, audits.byTarget,
+  );
+  renderAuditor(
+    { list: els.auditList, chips: els.auditChips, cost: els.auditCost, count: els.auditCount },
+    store.events, store.cursor, audits, onEvidenceRef,
   );
   const canScrub = store.mode === "replay";
   renderTicks(els.ticks, store.events, store.cursor, canScrub, (index) => jump(index));
@@ -216,7 +227,8 @@ async function beginRun(agents) {
   controls.run.disabled = true;
   try {
     const data = await startExercise(agents);
-    setMode("live", `Live exercise ${data.exercise_id}`);
+    store.liveExerciseId = data.exercise_id;
+    setMode("booting", `Booting range for ${data.exercise_id}`);
     store.events = [];
     store.cursor = 0;
     store.finalScore = null;
@@ -232,6 +244,10 @@ async function beginRun(agents) {
 
 function onLiveMessage(msg) {
   if (msg.type === "event" && msg.event) {
+    if (store.mode === "booting") {
+      const name = store.liveExerciseId ? `Live exercise ${store.liveExerciseId}` : "Live exercise";
+      setMode("live", name);
+    }
     store.events.push(msg.event);
     store.cursor = store.events.length;
     render(true);
@@ -246,6 +262,7 @@ function onLiveMessage(msg) {
     render(false);
   } else if (msg.type === "error") {
     notice(`Exercise failed: ${msg.text || "unknown error"}`, true);
+    if (store.events.length === 0) setMode("idle", "No exercise loaded");
     closeLive();
     pollStatus();
     render(false);
@@ -256,7 +273,7 @@ function onLiveMessage(msg) {
 
 function onLiveError() {
   // EventSource reconnects on its own; only flag when live is expected.
-  if (store.mode === "live" && store.liveSource) {
+  if ((store.mode === "live" || store.mode === "booting") && store.liveSource) {
     notice("Live stream interrupted, reconnecting…", true);
   }
 }

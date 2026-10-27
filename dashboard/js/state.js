@@ -55,7 +55,8 @@ export function secretRead(eventList) {
 // Frontend mirror of orchestrator.score_events so the scoreboard can
 // update live. The server score at the end of a run is authoritative.
 export function scoreEvents(eventList, weights) {
-  const list = eventList || [];
+  // Auditor events never shift positions or downtime, mirroring the server.
+  const list = (eventList || []).filter((ev) => ev && ev.actor !== "auditor");
   const w = { ...DEFAULT_WEIGHTS, ...(weights || {}) };
 
   const compromised = new Set();

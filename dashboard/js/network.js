@@ -99,6 +99,42 @@ function edgePoints(from, to) {
   };
 }
 
+// Small inline glyph per host, drawn inside the node ring:
+// globe for web, gear for app, database cylinder for db,
+// monitor for workstation. Stroked with the node state color.
+function hostIcon(host, pos) {
+  const group = el("g", {
+    class: "node-icon",
+    transform: `translate(${pos.x} ${pos.y})`,
+  });
+  const stroke = (name, attrs) => group.append(el(name, { class: "icon-stroke", ...attrs }));
+  if (host === "web") {
+    stroke("circle", { cx: 0, cy: 0, r: 9 });
+    stroke("ellipse", { cx: 0, cy: 0, rx: 4.2, ry: 9 });
+    stroke("line", { x1: -9, y1: 0, x2: 9, y2: 0 });
+  } else if (host === "app") {
+    stroke("circle", { cx: 0, cy: 0, r: 5 });
+    stroke("circle", { cx: 0, cy: 0, r: 2.4 });
+    for (let i = 0; i < 8; i += 1) {
+      const angle = (i / 8) * Math.PI * 2;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      stroke("line", {
+        x1: (cos * 5).toFixed(2), y1: (sin * 5).toFixed(2),
+        x2: (cos * 8.4).toFixed(2), y2: (sin * 8.4).toFixed(2),
+      });
+    }
+  } else if (host === "db") {
+    stroke("path", { d: "M -8 -5.5 V 5.5 A 8 3.2 0 0 0 8 5.5 V -5.5" });
+    stroke("ellipse", { cx: 0, cy: -5.5, rx: 8, ry: 3.2 });
+  } else {
+    stroke("rect", { x: -8.5, y: -6.5, width: 17, height: 11, rx: 1.5 });
+    stroke("line", { x1: 0, y1: 4.5, x2: 0, y2: 7.5 });
+    stroke("line", { x1: -5, y1: 7.5, x2: 5, y2: 7.5 });
+  }
+  return group;
+}
+
 function lockIcon(pos) {
   const group = el("g", {
     class: "node-lock",
@@ -147,7 +183,7 @@ export function initMap(svg, weights) {
       cx: pos.x, cy: pos.y, r: NODE_R + 7, class: "iso-ring",
     });
     const ring = el("circle", { cx: pos.x, cy: pos.y, r: NODE_R, class: "node-ring" });
-    group.append(halo, isoRing, ring);
+    group.append(halo, isoRing, ring, hostIcon(host, pos));
     if (host === "db") group.append(lockIcon(pos));
     // Name, weight badge, and state all sit beneath the circle so no
     // text ever overlaps the ring.

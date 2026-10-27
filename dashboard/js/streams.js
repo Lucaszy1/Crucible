@@ -1,4 +1,5 @@
 // Side-by-side red and blue reasoning streams, newest cards on top.
+import { verdictChip } from "./audit.js";
 import { formatArgs, shortResult } from "./state.js";
 
 function tagFor(actor, tool, attackMap) {
@@ -11,7 +12,7 @@ function tagFor(actor, tool, attackMap) {
   return entry ? { text: entry.label, cls: "blue", title: tool } : null;
 }
 
-function card(ev, index, attackMap, onEvidence) {
+function card(ev, index, attackMap, onEvidence, audit) {
   const wrap = document.createElement("article");
   wrap.className = "card";
 
@@ -24,6 +25,10 @@ function card(ev, index, attackMap, onEvidence) {
   tool.className = "card-tool";
   tool.textContent = ev.tool || "unknown";
   head.append(num, tool);
+  if (audit) {
+    const r = audit.result || {};
+    head.append(verdictChip(r.verdict, r.score));
+  }
   const tag = tagFor(ev.actor, ev.tool, attackMap);
   if (tag) {
     const chip = document.createElement("span");
@@ -67,7 +72,7 @@ function card(ev, index, attackMap, onEvidence) {
   return wrap;
 }
 
-function fillColumn(root, countEl, events, actor, cursor, attackMap, onEvidence, emptyText) {
+function fillColumn(root, countEl, events, actor, cursor, attackMap, onEvidence, emptyText, auditsByTarget) {
   root.innerHTML = "";
   const visible = events.slice(0, cursor).map((ev, i) => ({ ev, index: i + 1 })).filter(({ ev }) => ev.actor === actor);
   countEl.textContent = String(visible.length);
@@ -79,11 +84,12 @@ function fillColumn(root, countEl, events, actor, cursor, attackMap, onEvidence,
     return;
   }
   for (const { ev, index } of visible.reverse().slice(0, 60)) {
-    root.append(card(ev, index, attackMap, onEvidence));
+    const audit = actor === "blue" && auditsByTarget ? auditsByTarget.get(ev.id) : null;
+    root.append(card(ev, index, attackMap, onEvidence, audit));
   }
 }
 
-export function renderStreams(roots, events, cursor, attackMap, onEvidence) {
-  fillColumn(roots.red, roots.redCount, events, "red", cursor, attackMap, onEvidence, "Red reasoning appears here during an exercise.");
-  fillColumn(roots.blue, roots.blueCount, events, "blue", cursor, attackMap, onEvidence, "Blue reasoning appears here during an exercise.");
+export function renderStreams(roots, events, cursor, attackMap, onEvidence, auditsByTarget) {
+  fillColumn(roots.red, roots.redCount, events, "red", cursor, attackMap, onEvidence, "Red reasoning appears here during an exercise.", null);
+  fillColumn(roots.blue, roots.blueCount, events, "blue", cursor, attackMap, onEvidence, "Blue reasoning appears here during an exercise.", auditsByTarget);
 }

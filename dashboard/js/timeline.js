@@ -14,7 +14,8 @@ export function renderTicks(strip, events, cursor, clickable, onJump) {
   events.forEach((ev, i) => {
     const tick = document.createElement("button");
     const seen = i < cursor;
-    tick.className = `tick ${ev.actor === "red" ? "red" : "blue"}${seen ? " seen" : " future"}`;
+    const side = ev.actor === "red" ? "red" : ev.actor === "auditor" ? "auditor" : "blue";
+    tick.className = `tick ${side}${seen ? " seen" : " future"}`;
     if (i === cursor - 1) tick.classList.add("current");
     tick.title = `#${i + 1} ${ev.actor} ${ev.tool}`;
     tick.setAttribute("aria-label", tick.title);
