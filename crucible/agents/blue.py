@@ -187,17 +187,35 @@ def _isolated_hosts_line(history: list) -> str:
     return "Isolated hosts: " + ", ".join(parts) + "."
 
 
+def _lessons_text(playbook: list | None) -> str:
+    """Render playbook rules under the lessons heading, or nothing."""
+    rules = [entry for entry in (playbook or []) if isinstance(entry, dict)]
+    if not rules:
+        return ""
+    lines = ["Lessons from earlier exercises:"]
+    for order, entry in enumerate(rules[:10], start=1):
+        text = str(entry.get("rule", "") or "").strip()
+        if text:
+            lines.append(f"{order}. {text}")
+    if len(lines) == 1:
+        return ""
+    return "\n".join(lines) + "\n"
+
+
 def _build_messages(turn: int, history: list,
-                    max_turns: int = _common.DEFAULT_MAX_TURNS) -> list:
+                    max_turns: int = _common.DEFAULT_MAX_TURNS,
+                    playbook: list | None = None) -> list:
     recent = _common.summarize_history(history)
     own = _common.summarize_own_history(history, ACTOR)
     last_result = _common.format_last_result(history, ACTOR)
     isolated = _isolated_hosts_line(history)
+    lessons = _lessons_text(playbook)
     remaining = max(0, int(max_turns) - int(turn) + 1)
     user_text = (
         f"This is turn {turn} of {max_turns}. "
         f"Turns remaining (including this one): {remaining}. "
         f"Call exactly one blue team tool for this turn. "
+        f"{lessons}"
         f"Your most recent tool result:\n{last_result}\n"
         f"Your previous moves:\n{own}\n"
         f"Recent exercise moves:\n{recent}\n"
@@ -233,7 +251,8 @@ class ModelBlue:
                  max_tokens: int = MAX_TOKENS, temperature: float = 0.0,
                  reasoning_effort: str | None = None,
                  max_turns: int = _common.DEFAULT_MAX_TURNS,
-                 use_cache: bool = True):
+                 use_cache: bool = True,
+                 playbook: list | None = None):
         self._client = client
         self._exercise_id = exercise_id
         self._max_tokens = max_tokens
@@ -241,6 +260,7 @@ class ModelBlue:
         self._reasoning_effort = reasoning_effort
         self._max_turns = max_turns
         self._use_cache = use_cache
+        self._playbook = playbook
         self._fallback = ScriptedBlue()
 
     def _fallback_action(self, turn: int, history: list, note: str) -> dict | None:
@@ -258,7 +278,7 @@ class ModelBlue:
         try:
             response = llm.chat(
                 ROLE,
-                _build_messages(turn, history, total),
+                _build_messages(turn, history, total, self._playbook),
                 tools=TOOL_SCHEMAS,
                 exercise_id=self._exercise_id,
                 client=self._client,

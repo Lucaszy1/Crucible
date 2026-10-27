@@ -710,3 +710,30 @@ def test_red_checklist_reports_none_when_empty():
     assert "hosts scanned: none" in user_text
     assert "hosts with no sign-in gate: none" in user_text
     assert "hosts authenticated: none" in user_text
+
+
+def test_blue_prompt_injects_playbook_lessons():
+    playbook = [{"rule": "Contain the host the evidence points at.",
+                 "episode": "camp-1"},
+                {"rule": "Check data host logs early.", "episode": "camp-2"}]
+    user_text = blue_build_messages(2, [], 20, playbook)[1]["content"]
+    assert "Lessons from earlier exercises:" in user_text
+    assert "1. Contain the host the evidence points at." in user_text
+    assert "2. Check data host logs early." in user_text
+
+
+def test_blue_prompt_omits_lessons_without_playbook():
+    assert "Lessons from earlier exercises:" not in blue_build_messages(2, [])[1]["content"]
+    assert "Lessons from earlier exercises:" not in blue_build_messages(2, [], 20, [])[1]["content"]
+
+
+def test_blue_agent_sends_playbook_to_model(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    resp = _response("Reading web logs.",
+                     [("read_logs", {"host": "web"})])
+    client = _FakeClient(resp)
+    playbook = [{"rule": "Contain quickly.", "episode": "camp-1"}]
+    ModelBlue(client=client, playbook=playbook).next_action(2, [])
+    sent = json.dumps(client.calls[0]["messages"])
+    assert "Lessons from earlier exercises:" in sent
+    assert "Contain quickly." in sent
