@@ -39,17 +39,51 @@ def _scenario_defaults() -> dict:
 
 
 class ScriptedRed:
-    """Fixed red team plan: probe, sign in twice, read the exercise secret."""
+    """Fixed red team plan: probe, sign in twice, read the exercise secret.
+
+    Under a generated spec the plan comes from the spec's derived
+    chain instead (scan the entry host, then the chain moves).
+    """
 
     actor = ACTOR
 
-    def __init__(self):
+    def __init__(self, spec=None):
         self._step = 0
         self._defaults = _scenario_defaults()
+        if spec is None:
+            spec = sandbox.active_spec()
+        self._spec = spec
+
+    def _gen_plan(self) -> list:
+        from crucible.scenarios import chain as chain_mod
+
+        entry = self._spec.get("entry_host", "")
+        plan = [{
+            "tool": "scan_host",
+            "args": {"host": entry},
+            "reasoning": "Check whether the entry host is reachable.",
+            "evidence_refs": [],
+        }]
+        plan.extend(chain_mod.chain_plan(self._spec))
+        plan.append({
+            "tool": "report_finding",
+            "args": {"text": "Protected file obtained from the data host."},
+            "reasoning": "Record what the probe sequence obtained.",
+            "evidence_refs": [],
+        })
+        return plan
 
     def next_action(self, turn: int, history: list) -> dict | None:
         """Return the next planned tool call, or None when finished."""
         del turn, history
+        if self._spec is not None:
+            plan = self._gen_plan()
+            if self._step >= len(plan):
+                return None
+            action = plan[self._step]
+            self._step += 1
+            return {"tool": action["tool"], "args": dict(action["args"]),
+                    "reasoning": action["reasoning"], "evidence_refs": []}
         plan = [
             {
                 "tool": "scan_host",

@@ -64,6 +64,21 @@ SYSTEM_PROMPT = (
     "patch_service, restore_host, and report_finding."
 )
 
+
+def system_prompt() -> str:
+    """Return the system prompt for the active scenario.
+
+    Classic text unchanged when no spec is active; under a generated
+    spec the host list and the example log id follow the spec.
+    """
+    hosts = _common.active_hosts()
+    if hosts == ("web", "app", "db", "workstation"):
+        return SYSTEM_PROMPT
+    text = SYSTEM_PROMPT.replace(
+        "only target hosts web, app, db, and workstation",
+        f"only target hosts {_common.host_sentence(hosts)}")
+    return text.replace("such as web:3", f"such as {hosts[0]}:3")
+
 ALLOWED_TOOLS = (
     "read_logs",
     "list_processes",
@@ -286,7 +301,7 @@ def _build_messages(turn: int, history: list,
         "Cite log line ids when you report or contain."
     )
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt()},
         {"role": "user", "content": user_text},
     ]
 

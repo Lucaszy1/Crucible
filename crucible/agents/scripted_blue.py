@@ -20,10 +20,15 @@ def _scenario_services() -> dict:
         scenario = {}
     services = scenario.get("services", {}) or {}
     secret = scenario.get("secret", {}) or {}
+    entry_host = scenario.get("entry_host") or "web"
+    secret_host = secret.get("host", "db")
     return {
-        "secret_host": secret.get("host", "db"),
-        "web_service": (services.get("web", {}) or {}).get("service", "webapp"),
-        "db_service": (services.get("db", {}) or {}).get("service", "fakestore"),
+        "entry_host": entry_host,
+        "secret_host": secret_host,
+        "web_service": (services.get(entry_host, {}) or {}).get(
+            "service", "webapp"),
+        "db_service": (services.get(secret_host, {}) or {}).get(
+            "service", "fakestore"),
     }
 
 
@@ -58,17 +63,18 @@ class ScriptedBlue:
         """Return the next planned tool call, or None when finished."""
         step = self._step
         self._step += 1
+        entry = self._info["entry_host"]
         if step == 0:
             return {
                 "tool": "read_logs",
-                "args": {"host": "web", "n": 50},
-                "reasoning": "Inspect recent web host logs for odd requests.",
+                "args": {"host": entry, "n": 50},
+                "reasoning": f"Inspect recent {entry} host logs for odd requests.",
                 "evidence_refs": [],
             }
         if step == 1:
             return {
                 "tool": "report_finding",
-                "args": {"text": "Odd probing seen in web logs, likely admin page checks."},
+                "args": {"text": f"Odd probing seen in {entry} logs, likely admin page checks."},
                 "reasoning": "Record the detection with supporting log lines.",
                 "evidence_refs": _evidence_from_history(history),
             }
@@ -89,8 +95,9 @@ class ScriptedBlue:
         if step == 4:
             return {
                 "tool": "patch_service",
-                "args": {"host": "web", "service": self._info["web_service"]},
-                "reasoning": "Close the exposed admin page on the web host.",
+                "args": {"host": entry,
+                         "service": self._info["web_service"]},
+                "reasoning": f"Close the exposed admin page on the {entry} host.",
                 "evidence_refs": [],
             }
         return None

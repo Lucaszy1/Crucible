@@ -41,6 +41,17 @@ ALLOWED_HOSTS = ("web", "app", "db", "workstation")
 
 DEFAULT_BUSINESS_WEIGHTS = {"web": 3, "app": 3, "db": 5, "workstation": 1}
 
+
+def _active_hosts() -> tuple:
+    """Return the hosts valid under the active scenario, classic first."""
+    try:
+        from crucible import sandbox
+
+        hosts = tuple(sandbox.active_hosts())
+    except Exception:
+        return ALLOWED_HOSTS
+    return hosts or ALLOWED_HOSTS
+
 # Substrings that mark a log line as suspicious. These name observable
 # log output from the sandbox scripts (sign-in attempts, file and
 # directory reads, admin page probes), never red's hidden reasoning.
@@ -134,14 +145,20 @@ def action_host(blue_event: dict) -> str | None:
     """Return the host a blue action concerns, if it names one."""
     args = (blue_event or {}).get("args", {}) or {}
     host = args.get("host")
-    return host if host in ALLOWED_HOSTS else None
+    return host if host in _active_hosts() else None
 
 
 def hosts_named_in(*texts: str) -> set:
     """Find sandbox host names mentioned in free text."""
+    hosts = _active_hosts()
+    if hosts == ALLOWED_HOSTS:
+        pattern = _HOST_RE
+    else:
+        pattern = re.compile(r"\b(" + "|".join(
+            re.escape(host) for host in hosts) + r")\b")
     found = set()
     for text in texts:
-        found.update(_HOST_RE.findall(str(text or "")))
+        found.update(pattern.findall(str(text or "")))
     return found
 
 
@@ -176,7 +193,7 @@ def redundant_read(blue_event: dict, prior_events: list) -> dict:
     args = (blue_event or {}).get("args", {}) or {}
     host = args.get("host")
     result = (blue_event or {}).get("result", {}) or {}
-    if host not in ALLOWED_HOSTS or result.get("ok") is not True:
+    if host not in _active_hosts() or result.get("ok") is not True:
         return {"redundant": False, "new_lines": 0}
     seen: set = set()
     had_prior = False

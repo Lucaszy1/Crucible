@@ -20,6 +20,29 @@ LAST_RESULT_LIMIT = 1500
 _EVIDENCE_RE = re.compile(r"\b(web|app|db|workstation):\d+\b")
 
 
+def active_hosts() -> tuple:
+    """Return the hosts valid under the active scenario, classic first."""
+    try:
+        from crucible import sandbox
+
+        hosts = tuple(sandbox.active_hosts())
+    except Exception:
+        return ("web", "app", "db", "workstation")
+    return hosts or ("web", "app", "db", "workstation")
+
+
+def host_sentence(hosts: tuple | None = None) -> str:
+    """Join host names the way the prompts do ('a, b, and c')."""
+    names = list(hosts if hosts is not None else active_hosts())
+    if len(names) > 2:
+        return ", ".join(names[:-1]) + f", and {names[-1]}"
+    if len(names) == 2:
+        return f"{names[0]} and {names[1]}"
+    if names:
+        return names[0]
+    return "no hosts"
+
+
 def summarize_history(history: list, limit: int = HISTORY_LIMIT) -> str:
     """Render recent events as short lines for the model prompt."""
     if not history:
@@ -217,8 +240,14 @@ def clean_reasoning(content: str, fallback: str) -> str:
 
 def extract_evidence_ids(text: str) -> list:
     """Find log line ids like web:3 in free text, deduped in order."""
+    hosts = active_hosts()
+    if hosts == ("web", "app", "db", "workstation"):
+        pattern = _EVIDENCE_RE
+    else:
+        pattern = re.compile(r"\b(" + "|".join(
+            re.escape(host) for host in hosts) + r"):\d+\b")
     ordered = []
-    for hit in _EVIDENCE_RE.finditer(str(text or "")):
+    for hit in pattern.finditer(str(text or "")):
         ref = hit.group(0)
         if ref not in ordered:
             ordered.append(ref)

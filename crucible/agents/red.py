@@ -39,6 +39,54 @@ SYSTEM_PROMPT = (
     "try_credential, read_file, list_files, and report_finding."
 )
 
+
+def system_prompt() -> str:
+    """Return the system prompt for the active scenario.
+
+    Classic text unchanged when no spec is active; under a generated
+    spec the host list and the secret host follow the spec.
+    """
+    hosts = _common.active_hosts()
+    if hosts == ("web", "app", "db", "workstation"):
+        return SYSTEM_PROMPT
+    try:
+        from crucible import sandbox
+
+        secret_host = (sandbox.load_scenario().get("secret", {}) or {}
+                       ).get("host", hosts[-1])
+    except Exception:
+        secret_host = hosts[-1]
+    text = SYSTEM_PROMPT.replace("stored on the db host",
+                                 f"stored on the {secret_host} host")
+    text = text.replace("(web, app, db, workstation)",
+                        f"({', '.join(hosts)})")
+    return text.replace("only target hosts web, app, db, and workstation",
+                        f"only target hosts {_common.host_sentence(hosts)}")
+
+
+def tool_schemas() -> list:
+    """Return the tool schemas for the active scenario.
+
+    The shared TOOL_SCHEMAS unchanged when classic; under a
+    generated spec the scan_host host description names the spec's
+    hosts instead.
+    """
+    hosts = _common.active_hosts()
+    if hosts == ("web", "app", "db", "workstation"):
+        return TOOL_SCHEMAS
+    import copy
+
+    schemas = copy.deepcopy(TOOL_SCHEMAS)
+    for entry in schemas:
+        function = entry.get("function", {})
+        if function.get("name") != "scan_host":
+            continue
+        props = function.get("parameters", {}).get("properties", {})
+        if "host" in props:
+            props["host"]["description"] = \
+                f"One of {', '.join(hosts)}."
+    return schemas
+
 ALLOWED_TOOLS = (
     "scan_host",
     "http_request",
@@ -137,7 +185,7 @@ def _build_messages(turn: int, history: list,
         "Reply text must hold a one or two sentence reasoning summary."
     )
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt()},
         {"role": "user", "content": user_text},
     ]
 
@@ -178,7 +226,7 @@ class ModelRed:
             response = llm.chat(
                 ROLE,
                 _build_messages(turn, history, total),
-                tools=TOOL_SCHEMAS,
+                tools=tool_schemas(),
                 exercise_id=self._exercise_id,
                 client=self._client,
                 use_cache=self._use_cache,
