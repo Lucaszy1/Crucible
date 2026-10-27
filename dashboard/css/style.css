@@ -203,6 +203,13 @@ select {
 .tech-name { color: var(--text); flex: 1; }
 .tech-count { color: var(--muted); font-family: var(--mono); font-size: 11px; }
 
+/* Coverage sits below the main grid so the map owns the left column. */
+.coverage { margin: 0 20px 20px; }
+.coverage-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+.coverage-grid > div { min-width: 0; }
+.coverage .mini-head { margin-top: 0; }
+.coverage .tech-list { max-height: 240px; overflow-y: auto; }
+
 /* Streams */
 .streams { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .stream-col { min-width: 0; }
@@ -306,6 +313,8 @@ select {
 @media (max-width: 1050px) {
   .grid { grid-template-columns: 1fr; }
   .stream { max-height: 360px; }
+  .coverage-grid { grid-template-columns: 1fr; }
+  .coverage { margin: 0 12px 12px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

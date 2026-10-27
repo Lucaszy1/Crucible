@@ -83,16 +83,6 @@
         <span><i class="sw" data-state="restored"></i>Restored</span>
       </div>
     </section>
-
-    <section class="panel" aria-label="Technique coverage">
-      <h2>Technique coverage</h2>
-      <h3 class="mini-head">Kill chain</h3>
-      <ol id="stageStrip" class="stages"></ol>
-      <h3 class="mini-head">Red techniques</h3>
-      <ul id="redTechList" class="tech-list"><li class="empty">No red activity yet.</li></ul>
-      <h3 class="mini-head">Blue responses</h3>
-      <ul id="blueLabelList" class="tech-list"><li class="empty">No blue activity yet.</li></ul>
-    </section>
   </div>
 
   <div class="col col-center">
@@ -138,6 +128,24 @@
     </section>
   </div>
 </main>
+
+<section class="panel coverage" aria-label="Technique coverage">
+  <h2>Technique coverage</h2>
+  <div class="coverage-grid">
+    <div>
+      <h3 class="mini-head">Kill chain</h3>
+      <ol id="stageStrip" class="stages"></ol>
+    </div>
+    <div>
+      <h3 class="mini-head">Red techniques</h3>
+      <ul id="redTechList" class="tech-list"><li class="empty">No red activity yet.</li></ul>
+    </div>
+    <div>
+      <h3 class="mini-head">Blue responses</h3>
+      <ul id="blueLabelList" class="tech-list"><li class="empty">No blue activity yet.</li></ul>
+    </div>
+  </div>
+</section>
 
 <div id="confirmOverlay" class="overlay" hidden>
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
