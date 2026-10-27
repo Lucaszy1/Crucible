@@ -1,7 +1,7 @@
 // Plain-English event sentences for the Story view. Pure functions only:
 // no DOM access, no model calls, so node can test this module. Copy
-// rules: Operations Center vocabulary, no war wording (no attack,
-// battle, enemy, kill, war), credentials never shown.
+// rules: Operations Center vocabulary, cyber defense framing,
+// credentials never shown.
 
 export function actorName(ev) {
   if (!ev) return "Someone";
