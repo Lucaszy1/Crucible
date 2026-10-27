@@ -15,7 +15,7 @@ import {
   latestByActor, logLineIds, verdictCard,
 } from "./choreography.js";
 import {
-  arenaGeometry, classicLayout, layoutHosts, nodeLabel, roleSub,
+  arenaGeometry, classicLayout, layoutHosts, nodeLabels, roleSub,
 } from "./layout.js";
 
 const RED = "#ff3b2f";
@@ -154,12 +154,13 @@ export function setArenaLayout(refs, layout) {
     edges: geo.edges.filter(([a]) => a !== "red" && a !== "blue"),
   };
   refs.nodes = {};
+  const labels = nodeLabels(clean);
   for (const [id, node] of Object.entries(geo.nodes)) {
     const role = roles[id] || "";
     const jewel = id === clean.jewel_host;
     refs.nodes[id] = makeNode(id, {
       x: node.x, y: node.y, r: node.r, kind: node.kind,
-      label: nodeLabel(id, role), sub: roleSub(role, jewel),
+      label: labels[id] || id.toUpperCase(), sub: roleSub(role, jewel),
     });
   }
 }
@@ -651,6 +652,18 @@ function drawConduits(refs) {
   }
 }
 
+// Shrink a font size until the text fits maxWidth. Dense ranges
+// shrink blocks, so labels and captions measure to fit instead of
+// spilling past the plate edge.
+function fitFont(ctx, s, font, weight, base, maxWidth, floor) {
+  ctx.font = `${weight} ${base}px ${font}`;
+  const w = ctx.measureText(s).width;
+  if (w > maxWidth && w > 0) {
+    return Math.max(floor || 12, Math.floor((base * maxWidth) / w));
+  }
+  return base;
+}
+
 function textOut(ctx, s, x, y, font, size, fill, weight, align, stroke) {
   ctx.font = `${weight || 900} ${size}px ${font}`;
   ctx.textAlign = align || "center";
@@ -833,7 +846,8 @@ function drawNode(refs, n) {
       }
     }
     const tagFs = n.label.length <= 3 ? 54 : Math.max(28, Math.round((54 * 3.2) / n.label.length));
-    textOut(ctx, n.label, 0, r * 1.12 + 34, DISP, tagFs, BONE, 900, "center");
+    const vaultFs = fitFont(ctx, n.label, DISP, 900, tagFs, r * 2.1);
+    textOut(ctx, n.label, 0, r * 1.12 + 34, DISP, vaultFs, BONE, 900, "center");
   } else {
     const s = r * 2;
     const x0 = -r;
@@ -862,11 +876,14 @@ function drawNode(refs, n) {
     // shrink to fit the block. Small blocks keep the compact size.
     const fs = n.kind === "small" ? 62
       : n.label.length <= 3 ? 78 : Math.max(34, Math.round((78 * 3.4) / n.label.length));
-    textOut(ctx, n.label, 0, -4, DISP, fs, n.flood > 0.5 ? INK : BONE, 900, "center", false);
-    ctx.font = `700 14px ${MONO}`;
+    const labelFs = fitFont(ctx, n.label, DISP, 900, fs, s * 0.92);
+    textOut(ctx, n.label, 0, -4, DISP, labelFs, n.flood > 0.5 ? INK : BONE, 900, "center", false);
+    const sub = String(n.sub || "").toUpperCase();
+    const subFs = sub ? fitFont(ctx, sub, MONO, 700, 14, s * 0.88, 10) : 14;
+    ctx.font = `700 ${subFs}px ${MONO}`;
     ctx.fillStyle = n.flood > 0.5 ? INK : "#5b6678";
     ctx.textAlign = "center";
-    ctx.fillText(String(n.sub || "").toUpperCase(), 0, r * 0.58);
+    ctx.fillText(sub, 0, r * 0.58);
   }
   // Business-weight badge, from the server config when loaded.
   const weights = refs.snap.weights || DEFAULT_WEIGHTS;

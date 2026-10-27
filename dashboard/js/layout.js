@@ -151,6 +151,33 @@ export function nodeLabel(id, role) {
   return String(id || "").toUpperCase().slice(0, 7);
 }
 
+// One label per host, unique across the range. Ranges with two
+// workstations (or two names sharing a prefix) would otherwise
+// draw the same letters twice; collisions gain a middle dot plus
+// enough of the host id to tell them apart.
+export function nodeLabels(layout) {
+  const hosts = (layout && layout.hosts) || [];
+  const taken = new Set();
+  const labels = {};
+  for (const host of hosts) {
+    const base = nodeLabel(host.id, host.role);
+    if (!taken.has(base)) {
+      taken.add(base);
+      labels[host.id] = base;
+      continue;
+    }
+    const stem = String(host.id || "").toUpperCase().replace(/[^A-Z0-9]/g, "") || "X";
+    let label = base;
+    for (let len = 2; len <= stem.length + 1; len += 1) {
+      label = `${base}·${stem.slice(0, len)}`;
+      if (!taken.has(label)) break;
+    }
+    taken.add(label);
+    labels[host.id] = label;
+  }
+  return labels;
+}
+
 // One-line role caption under the label. The classic sentence
 // roles map to the same captions as before; unknown roles show
 // themselves; the vault names its host id below instead.
@@ -174,24 +201,39 @@ export function roleSub(role, isJewel) {
   return String(role || "");
 }
 
-// Vertical slots for one column of n blocks: the classic single
-// and pair rows stay put; bigger columns spread and shrink to fit
-// a 640-tall band centered on the world middle.
-function columnSlots(n, radii) {
+// Drawn block extents in units of r: the weight badge reaches
+// 1.35r above center; the status tag reaches 1.6r below (2.1r for
+// vaults, which stack their name and tag under the dial).
+const SLOT_TOP = 1.35;
+const SLOT_BOTTOM = { vault: 2.1, standard: 1.6, small: 1.6 };
+
+// Vertical slots for one column of blocks, pitched by true drawn
+// extents (badge above, tag below) so neighbors never overlap.
+// Single blocks sit at mid world; pairs hang the second block a
+// full pitch below; bigger columns shrink blocks to fit a 700-tall
+// band centered on the world middle.
+function columnSlots(items) {
+  const n = items.length;
+  const top = (item) => SLOT_TOP * item.r;
+  const bottom = (item) => (SLOT_BOTTOM[item.kind] || SLOT_BOTTOM.standard) * item.r;
   if (n <= 0) return [];
-  if (n === 1) return [{ y: 450, r: radii[0] }];
-  if (n === 2) return [{ y: 450, r: radii[0] }, { y: 650, r: radii[1] }];
+  if (n === 1) return [{ y: 450, r: items[0].r }];
+  if (n === 2) {
+    const pitch = bottom(items[0]) + top(items[1]) + 16;
+    return [{ y: 450, r: items[0].r }, { y: Math.round(450 + pitch), r: items[1].r }];
+  }
   const gap = 16;
-  const band = 640;
-  const total = radii.reduce((sum, r) => sum + r * 2, 0) + gap * (n - 1);
+  const band = 700;
+  const height = (item) => (SLOT_TOP + (SLOT_BOTTOM[item.kind] || SLOT_BOTTOM.standard)) * item.r;
+  const total = items.reduce((sum, item) => sum + height(item), 0) + gap * (n - 1);
   const scale = Math.min(1, band / total);
-  const scaled = radii.map((r) => Math.max(34, r * scale));
-  const used = scaled.reduce((sum, r) => sum + r * 2, 0) + gap * (n - 1);
+  const scaled = items.map((item) => ({ kind: item.kind, r: Math.max(34, item.r * scale) }));
+  const used = scaled.reduce((sum, item) => sum + top(item) + bottom(item), 0) + gap * (n - 1);
   let y = 450 - used / 2;
-  return scaled.map((r) => {
-    y += r;
-    const slot = { y, r };
-    y += r + gap;
+  return scaled.map((item) => {
+    y += top(item);
+    const slot = { y, r: item.r };
+    y += bottom(item) + gap;
     return slot;
   });
 }
@@ -214,8 +256,8 @@ export function arenaGeometry(layout) {
       : [ids];
     groups.forEach((group, gi) => {
       const x = colX[segment] + (groups.length > 1 ? (gi === 0 ? -95 : 95) : 0);
-      const radii = group.map((id) => BASE_RADIUS[kinds[id]]);
-      const slots = columnSlots(group.length, radii);
+      const items = group.map((id) => ({ r: BASE_RADIUS[kinds[id]], kind: kinds[id] }));
+      const slots = columnSlots(items);
       group.forEach((id, i) => {
         nodes[id] = { x, y: slots[i].y, r: slots[i].r, kind: kinds[id] };
       });

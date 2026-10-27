@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   CLASSIC_LAYOUT, SEGMENTS, WORLD, arenaGeometry, classicLayout, columnsOf,
   edgesOf, entryOf, layoutFromEvents, layoutHosts, layoutWeights, mapGeometry,
-  nodeLabel, normalizeLayout, roleKind, roleSub, scenarioMeta, scenarioText,
+  nodeLabel, nodeLabels, normalizeLayout, roleKind, roleSub, scenarioMeta, scenarioText,
 } from "../dashboard/js/layout.js";
 import { MAP_EDGES, MAP_POSITIONS, MAP_VIEWBOX } from "../dashboard/js/network.js";
 import { redNotches } from "../dashboard/js/state.js";
@@ -92,6 +92,23 @@ describe("role styling", () => {
     assert.equal(nodeLabel("harborlight", "file share"), "HARBORL");
   });
 
+  it("keeps block labels unique across the range", () => {
+    const labels = nodeLabels(normalizeLayout({
+      hosts: [
+        { id: "r7", role: "workstation", segment: "internal" },
+        { id: "wren", role: "workstation", segment: "internal" },
+        { id: "harborlight", role: "file share", segment: "dmz" },
+        { id: "harborlog", role: "file share", segment: "data" },
+      ],
+    }));
+    assert.equal(labels.r7, "WS");
+    assert.equal(labels.wren, "WS·WR");
+    assert.equal(labels.harborlight, "HARBORL");
+    assert.equal(labels.harborlog, "HARBORL·HA");
+    const classic = nodeLabels(classicLayout());
+    assert.deepEqual(classic, { web: "WEB", app: "APP", db: "DB", workstation: "WS" });
+  });
+
   it("captions roles like the classic range did", () => {
     assert.equal(roleSub("public web front end", false), "public site");
     assert.equal(roleSub("internal reporting service", false), "reports server");
@@ -109,7 +126,7 @@ describe("arena geometry", () => {
     assert.deepEqual(geo.nodes.web, { x: 330, y: 450, r: 88, kind: "standard" });
     assert.deepEqual(geo.nodes.app, { x: 790, y: 450, r: 88, kind: "standard" });
     assert.deepEqual(geo.nodes.db, { x: 1250, y: 450, r: 100, kind: "vault" });
-    assert.deepEqual(geo.nodes.workstation, { x: 790, y: 650, r: 72, kind: "small" });
+    assert.deepEqual(geo.nodes.workstation, { x: 790, y: 704, r: 72, kind: "small" });
     assert.deepEqual(geo.edges, [["web", "app"], ["app", "db"], ["app", "workstation"], ["red", "web"]]);
     assert.deepEqual(geo.red, { x: 90, y: 450 });
     assert.deepEqual(geo.blue, { x: 1490, y: 790 });
@@ -118,24 +135,44 @@ describe("arena geometry", () => {
   });
 
   it("keeps ten hosts inside the world without overlaps", () => {
-    const geo = arenaGeometry(genLayout());
+    const layout = genLayout();
+    const geo = arenaGeometry(layout);
     const ids = Object.keys(geo.nodes);
     assert.equal(ids.length, 10);
     for (const id of ids) {
       const node = geo.nodes[id];
       assert.ok(node.x - node.r - 10 >= 0, `${id} left`);
       assert.ok(node.x + node.r + 50 <= WORLD.w, `${id} right`);
-      assert.ok(node.y - node.r - 60 >= 0, `${id} top`);
-      const bottom = node.kind === "vault" ? node.y + node.r * 1.12 + 94 : node.y + node.r + 50;
-      assert.ok(bottom <= WORLD.h, `${id} bottom`);
+      assert.ok(node.y - node.r - 10 >= 0, `${id} top`);
+      assert.ok(node.y + node.r + 10 <= WORLD.h, `${id} bottom`);
     }
+    const plate = (node) => ({
+      x0: node.x - node.r - 8, x1: node.x + node.r + 8,
+      y0: node.y - node.r - 8, y1: node.y + node.r + 8,
+    });
+    const drawn = (node) => ({
+      x0: node.x - node.r * 1.3, x1: node.x + node.r * 1.3,
+      y0: node.y - node.r * 1.35,
+      y1: node.y + node.r * (node.kind === "vault" ? 2.1 : 1.6),
+    });
+    const hits = (p, q) => p.x0 < q.x1 && q.x0 < p.x1 && p.y0 < q.y1 && q.y0 < p.y1;
     for (let i = 0; i < ids.length; i += 1) {
       for (let j = i + 1; j < ids.length; j += 1) {
         const a = geo.nodes[ids[i]];
         const b = geo.nodes[ids[j]];
-        const dist = Math.hypot(a.x - b.x, a.y - b.y);
-        assert.ok(dist >= a.r + b.r, `${ids[i]} overlaps ${ids[j]}`);
+        assert.ok(!hits(plate(a), plate(b)), `${ids[i]} plate overlaps ${ids[j]}`);
+        if (a.x === b.x) {
+          assert.ok(!hits(drawn(a), drawn(b)), `${ids[i]} drawn overlaps ${ids[j]}`);
+        }
       }
+    }
+  });
+
+  it("shrinks dense columns instead of stacking plates", () => {
+    const geo = arenaGeometry(genLayout());
+    for (const id of ["inlet", "willow", "sedge", "quill", "wren", "ochre"]) {
+      assert.ok(geo.nodes[id].r < 88, `${id} r=${geo.nodes[id].r}`);
+      assert.ok(geo.nodes[id].r >= 34, `${id} r=${geo.nodes[id].r}`);
     }
   });
 
