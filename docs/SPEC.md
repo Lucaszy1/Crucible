@@ -100,9 +100,9 @@ Every tool call emits an event: id, timestamp, actor, tool, args, result, reason
 
 Per exercise: time to detect, time to contain, hosts compromised, secret exfiltrated yes or no, blue actions justified percentage (from auditor), tokens spent. Learning curve chart across exercises is the hero visual. Exercises run at most 40 events, which is 20 moves per team. Exercises end as soon as the secret is read.
 
-Availability cost: each host carries a business weight from sandbox/scenario.json (web 3, app 3, db 5, workstation 1). Every turn a host stays isolated or under patch adds its weight to downtime_cost. The down set starts empty. A successful isolate_host or patch_service marks that host down. A successful restore_host clears it. Each event adds the weights of the hosts down after that event, so the isolating or patching turn itself counts. Downtime counts only up to the secret read when it occurs, else the exercise end. Failed actions change nothing, and a host down for both reasons counts once per turn.
+Availability cost: each host carries a business weight from sandbox/scenario.json (web 3, app 3, db 5, workstation 1). Every turn a host stays isolated or under patch adds its weight to downtime_cost. The down set starts empty. A successful isolate_host or patch_service marks that host down. A successful restore_host clears it. Each event adds the weights of the hosts down after that event, so the isolating or patching turn itself counts. Downtime counts only up to the secret read when it occurs, else the exercise end. Failed actions change nothing, and a host down for both reasons counts once per turn. Downtime pct is downtime_cost as a percent of maximum weighted uptime, where maximum is the weight sum times the number of events counted.
 
-Blue score: SECRET_PROTECTED_POINTS is 40. When the secret was read, blue_score is 0. Otherwise blue_score is max(0, 40 minus downtime_cost). High isolation or long patch windows therefore lower the score even when the secret stays protected.
+Blue score: 0 to 100. When the secret was read, blue_score is 0. Otherwise blue_score is 100 minus downtime pct, so a quiet exercise scores 100 and broad or long outages score lower even when the secret stays protected.
 
 ## 10. Schedule
 

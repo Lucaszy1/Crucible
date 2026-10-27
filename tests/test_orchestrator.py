@@ -304,7 +304,8 @@ def test_score_downtime_counts_isolated_turns():
     ]
     score = orchestrator.score_events(history)
     assert score["downtime_cost"] == 9
-    assert score["blue_score"] == 31
+    assert score["downtime_pct"] == 18.75
+    assert score["blue_score"] == 81.25
     assert score["outcome"] == "blue_held"
 
 
@@ -318,7 +319,8 @@ def test_score_patch_counts_and_restore_clears():
     ]
     score = orchestrator.score_events(history)
     assert score["downtime_cost"] == 10
-    assert score["blue_score"] == 30
+    assert score["downtime_pct"] == 16.67
+    assert score["blue_score"] == 83.33
 
 
 def test_score_patch_service_counts_downtime():
@@ -329,7 +331,8 @@ def test_score_patch_service_counts_downtime():
     ]
     score = orchestrator.score_events(history)
     assert score["downtime_cost"] == 10
-    assert score["blue_score"] == 30
+    assert score["downtime_pct"] == 27.78
+    assert score["blue_score"] == 72.22
 
 
 def test_score_downtime_ignores_failed_actions():
@@ -340,7 +343,8 @@ def test_score_downtime_ignores_failed_actions():
     ]
     score = orchestrator.score_events(history)
     assert score["downtime_cost"] == 0
-    assert score["blue_score"] == 40
+    assert score["downtime_pct"] == 0.0
+    assert score["blue_score"] == 100.0
 
 
 def test_score_blue_score_zero_when_secret_read():
@@ -354,16 +358,73 @@ def test_score_blue_score_zero_when_secret_read():
     assert score["secret_exfiltrated"] is True
     assert score["blue_score"] == 0
     assert score["downtime_cost"] == 10
+    assert score["downtime_pct"] == 27.78
 
 
-def test_score_blue_score_floors_at_zero():
+def test_score_blue_score_scales_with_downtime_pct():
     history = [_event("red", "scan_host", {"ok": True}, 1)]
     history.append(_evt_host("blue", "isolate_host", "db", True, 2))
     for index in range(3, 10):
         history.append(_event("red", "scan_host", {"ok": True}, index))
     score = orchestrator.score_events(history)
     assert score["downtime_cost"] == 5 * 8
-    assert score["blue_score"] == 0
+    assert score["downtime_pct"] == 37.04
+    assert score["blue_score"] == 62.96
+
+
+def test_score_blue_score_tracks_full_outage():
+    history = [
+        _evt_host("blue", "isolate_host", "web", True, 1),
+        _evt_host("blue", "isolate_host", "app", True, 2),
+        _evt_host("blue", "isolate_host", "db", True, 3),
+        _evt_host("blue", "isolate_host", "workstation", True, 4),
+    ]
+    score = orchestrator.score_events(history)
+    assert score["downtime_cost"] == 3 + 6 + 11 + 12
+    assert score["downtime_pct"] == 66.67
+    assert score["blue_score"] == 33.33
+    full = [
+        _evt_host("blue", "isolate_host", "web", True, 1),
+        _evt_host("blue", "isolate_host", "app", True, 2),
+        _evt_host("blue", "isolate_host", "db", True, 3),
+        _evt_host("blue", "isolate_host", "workstation", True, 4),
+        _event("red", "scan_host", {"ok": True}, 5),
+        _event("red", "scan_host", {"ok": True}, 6),
+    ]
+    full_score = orchestrator.score_events(full)
+    assert full_score["downtime_cost"] == 3 + 6 + 11 + 12 + 12 + 12
+    assert full_score["downtime_pct"] == 77.78
+    assert full_score["blue_score"] == 22.22
+
+
+def test_score_stays_in_range_on_long_outage():
+    history = []
+    for host in ("web", "app", "db", "workstation"):
+        history.append(_evt_host("blue", "isolate_host", host, True, len(history) + 1))
+    for index in range(5, 9):
+        history.append(_event("red", "scan_host", {"ok": True}, index))
+    score = orchestrator.score_events(history)
+    assert 0 <= score["blue_score"] <= 100
+    assert 0 <= score["downtime_pct"] <= 100
+    assert score["blue_score"] == round(100 - score["downtime_pct"], 2)
+
+
+def test_score_quiet_exercise_scores_hundred():
+    history = [
+        _event("red", "scan_host", {"ok": True}, 1),
+        _event("blue", "read_logs", {"ok": True}, 2),
+    ]
+    score = orchestrator.score_events(history)
+    assert score["downtime_cost"] == 0
+    assert score["downtime_pct"] == 0.0
+    assert score["blue_score"] == 100.0
+
+
+def test_score_empty_exercise_scores_hundred():
+    score = orchestrator.score_events([])
+    assert score["downtime_cost"] == 0
+    assert score["downtime_pct"] == 0.0
+    assert score["blue_score"] == 100.0
 
 
 def test_score_accepts_weight_override():
@@ -373,7 +434,8 @@ def test_score_accepts_weight_override():
     ]
     score = orchestrator.score_events(history, business_weights={"web": 7})
     assert score["downtime_cost"] == 7
-    assert score["blue_score"] == 33
+    assert score["downtime_pct"] == 21.88
+    assert score["blue_score"] == 78.12
 
 
 def test_business_weights_match_scenario():
@@ -382,7 +444,7 @@ def test_business_weights_match_scenario():
                                             "workstation": 1}
     assert orchestrator.DEFAULT_BUSINESS_WEIGHTS == {"web": 3, "app": 3, "db": 5,
                                                      "workstation": 1}
-    assert orchestrator.SECRET_PROTECTED_POINTS == 40
+    assert orchestrator.BLUE_SCORE_MAX == 100
 
 
 def test_score_downtime_stops_at_secret_read():
@@ -397,6 +459,7 @@ def test_score_downtime_stops_at_secret_read():
     score = orchestrator.score_events(history)
     assert score["secret_exfiltrated"] is True
     assert score["downtime_cost"] == 6
+    assert score["downtime_pct"] == 16.67
     assert score["blue_score"] == 0
 
 
@@ -408,4 +471,5 @@ def test_score_downtime_counts_app_weight():
     ]
     score = orchestrator.score_events(history)
     assert score["downtime_cost"] == 6
-    assert score["blue_score"] == 34
+    assert score["downtime_pct"] == 16.67
+    assert score["blue_score"] == 83.33

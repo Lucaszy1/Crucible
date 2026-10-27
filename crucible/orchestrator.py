@@ -18,7 +18,7 @@ CONTAINMENT_TOOLS = ("isolate_host", "patch_service", "restore_host", "block_ip"
 MAX_TURNS = 40
 
 DEFAULT_BUSINESS_WEIGHTS = {"web": 3, "app": 3, "db": 5, "workstation": 1}
-SECRET_PROTECTED_POINTS = 40
+BLUE_SCORE_MAX = 100
 
 _DISPATCH = {
     "scan_host": tools.scan_host,
@@ -165,6 +165,35 @@ def _events_for_downtime(event_list: list) -> list:
     return list(event_list or [])
 
 
+def _downtime_pct(downtime_cost: int, weights: dict, num_events: int) -> float:
+    """Return downtime as a percent of maximum weighted uptime.
+
+    Maximum is the sum of business weights times the number of events
+    counted. Zero events or zero total weight yields 0.0.
+    """
+    try:
+        total_weight = 0
+        for host in weights or {}:
+            try:
+                total_weight += int(weights.get(host, 0) or 0)
+            except (TypeError, ValueError):
+                continue
+    except (TypeError, AttributeError):
+        total_weight = 0
+    try:
+        count = max(0, int(num_events))
+    except (TypeError, ValueError):
+        count = 0
+    maximum = total_weight * count
+    if maximum <= 0:
+        return 0.0
+    try:
+        raw = float(downtime_cost) / maximum * 100.0
+    except (TypeError, ValueError):
+        return 0.0
+    return round(min(100.0, max(0.0, raw)), 2)
+
+
 def score_events(event_list: list, business_weights: dict | None = None) -> dict:
     """Score an exercise from its events.
 
@@ -177,9 +206,10 @@ def score_events(event_list: list, business_weights: dict | None = None) -> dict
     was read, blue_held when it was not read and blue acted, else
     stalemate. Downtime cost sums host business weights for every turn
     each host stays isolated or under patch, counting only up to the
-    secret read when it occurs, else the exercise end. Blue score is the
-    protected secret value minus downtime cost, floored at zero, and zero
-    when the secret was read.
+    secret read when it occurs, else the exercise end. Downtime pct is
+    that cost as a percent of maximum weighted uptime (weight sum times
+    events counted). Blue score is 0 when the secret was read, else 100
+    minus downtime pct, so a fully quiet exercise scores 100.
     """
     compromised = _compromised_hosts(event_list)
     secret_read = _secret_exfiltrated(event_list)
@@ -236,11 +266,13 @@ def score_events(event_list: list, business_weights: dict | None = None) -> dict
         outcome = "stalemate"
 
     weights = _business_weights(business_weights)
-    downtime_cost = _downtime_cost(_events_for_downtime(event_list), weights)
+    counted = _events_for_downtime(event_list)
+    downtime_cost = _downtime_cost(counted, weights)
+    downtime_pct = _downtime_pct(downtime_cost, weights, len(counted))
     if secret_read:
         blue_score = 0
     else:
-        blue_score = max(0, SECRET_PROTECTED_POINTS - downtime_cost)
+        blue_score = round(max(0.0, BLUE_SCORE_MAX - downtime_pct), 2)
 
     return {
         "time_to_detect": time_to_detect,
@@ -252,6 +284,7 @@ def score_events(event_list: list, business_weights: dict | None = None) -> dict
         "outcome": outcome,
         "total_events": len(event_list),
         "downtime_cost": downtime_cost,
+        "downtime_pct": downtime_pct,
         "blue_score": blue_score,
     }
 
