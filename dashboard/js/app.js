@@ -20,8 +20,11 @@ import { initThoughtHeads, renderThoughts, setThoughtsCollapsed } from "./though
 import { endCardVisible, hideEndCard, initEndCard, setEndNext, showEndCard } from "./endcard.js";
 import {
   arenaNotify, cancelArena, firstAccessStinger, flashArenaHost, glitchStinger,
-  initArena, renderArenaStatic, setArenaActive, toggleArenaSound,
+  initArena, renderArenaStatic, setArenaActive, setArenaLayout, toggleArenaSound,
 } from "./arena.js";
+import {
+  classicLayout, layoutFromEvents, layoutHosts, layoutWeights, scenarioMeta, scenarioText,
+} from "./layout.js";
 
 const REPLAY_INTERVAL_MS = 1200;
 const LOBBY_FETCH_POOL = 6;
@@ -147,6 +150,8 @@ const store = {
   speed: 1,
   timer: null,
   weights: { web: 3, app: 3, db: 5, workstation: 1 },
+  layout: null,
+  scenario: "classic",
   attackMap: null,
   spend: null,
   finalScore: null,
@@ -221,8 +226,20 @@ function latestLaneEvent(slice) {
 
 function onEvidenceRef(ref) {
   focusEvidenceRef(ref);
-  renderEvidence({ chips: els.chips, tabs: els.tabs, viewer: els.viewer }, store.events, store.cursor);
+  renderEvidence({ chips: els.chips, tabs: els.tabs, viewer: els.viewer }, store.events, store.cursor,
+    layoutHosts(store.layout || classicLayout()));
   switchTab("details");
+}
+
+// Apply one exercise's range layout: arena geometry, map, weights,
+// and the scenario label. Old logs without a layout render the
+// classic range exactly as before.
+function applyLayout(layout, meta) {
+  store.layout = layout && layout.hosts ? layout : classicLayout();
+  store.scenario = scenarioText(meta || { id: "classic" });
+  store.weights = { ...layoutWeights(store.layout) };
+  if (arenaRefs) setArenaLayout(arenaRefs, store.layout);
+  mapRefs = initMap(els.map, store.weights, store.layout);
 }
 
 function scoreEls() {
@@ -245,7 +262,9 @@ function renderPresent(slice) {
 
 function render(animate) {
   const slice = store.events.slice(0, store.cursor);
-  const states = reduceHostStates(slice);
+  const layout = store.layout || classicLayout();
+  const hosts = layoutHosts(layout);
+  const states = reduceHostStates(slice, hosts);
   updateMap(mapRefs, states, slice, animate);
   const display = store.events.length > 0 ? displayOutcome(store.events) : null;
   const arenaStates = renderArenaStatic(
@@ -253,6 +272,7 @@ function render(animate) {
     {
       weights: store.weights, finalScore: store.finalScore, label: store.label,
       display: display ? { label: display.label, line: outcomeLine(display.key) } : null,
+      layout,
     },
     !animate,
   );
@@ -296,6 +316,7 @@ function render(animate) {
     (pos) => jump(pos), store.mode !== "replay");
   store.thoughtState = renderThoughts(thoughtPanels(), slice, {
     reduced: reducedMotion(),
+    hosts,
     onFlash: (host) => flashArenaHost(arenaRefs, host),
   }, store.thoughtState);
   renderTechniques(
@@ -305,7 +326,7 @@ function render(animate) {
   renderScoreboard(scoreEls(), store.events, store.cursor, store.weights, store.spend, store.finalScore);
   renderScoreboard(arenaScoreEls(), store.events, store.cursor, store.weights, store.spend, store.finalScore);
   renderScoreDetails(scoreEls(), store.events, store.cursor, store.weights, store.spend, store.finalScore);
-  renderEvidence({ chips: els.chips, tabs: els.tabs, viewer: els.viewer }, store.events, store.cursor);
+  renderEvidence({ chips: els.chips, tabs: els.tabs, viewer: els.viewer }, store.events, store.cursor, hosts);
   els.eventCount.textContent = `${store.events.length} event${store.events.length === 1 ? "" : "s"}`;
 }
 
@@ -420,6 +441,9 @@ async function openExercise(runId, opts) {
     return;
   }
   if (store.runId !== runId) return;
+  // The first event carries the range layout and scenario identity;
+  // read them before the system events are filtered out of the moves.
+  applyLayout(layoutFromEvents(data.events || []), scenarioMeta(data.events || []));
   // System events are harness notes, not moves: skip them everywhere.
   store.events = (data.events || []).filter((ev) => ev && ev.actor !== "system");
   store.replayScore = data.score || null;
@@ -441,6 +465,8 @@ async function openExercise(runId, opts) {
     { root: els.slate, title: els.slateTitle, hosts: els.slateHosts, count: els.slateCount },
     {
       label: runId,
+      hosts: layoutHosts(store.layout || classicLayout()),
+      roles: Object.fromEntries(((store.layout || {}).hosts || []).map((host) => [host.id, host.role])),
       reduced: reducedMotion(),
       onDone: () => {
         store.opening = null;
@@ -470,6 +496,7 @@ async function beginRun(agents) {
     store.finalScore = null;
     store.firstAuthIndex = null;
     store.firstAccessShown = false;
+    applyLayout(classicLayout(), { id: "classic" });
     if (data.warning) notice(data.warning, false);
     store.liveSource = openLive(onLiveMessage, onLiveError);
     render(false);
@@ -499,6 +526,7 @@ function beginFakeLive(path) {
   store.finalScore = null;
   store.firstAuthIndex = null;
   store.firstAccessShown = false;
+  applyLayout(classicLayout(), { id: "classic" });
   const translate = (msg) => {
     if (msg && msg.event) onLiveMessage({ type: "event", event: msg.event });
     else if (msg && msg.done) onLiveMessage({ type: "done", score: msg.score });
@@ -515,7 +543,17 @@ function firstAuthPosition() {
 
 function onLiveMessage(msg) {
   if (msg.type === "event" && msg.event) {
-    if (msg.event.actor === "system") return;
+    // System events carry the range layout on the live stream; read
+    // it before they are skipped like everywhere else. The layout
+    // always precedes the first move, so only pre-move events apply.
+    if (msg.event.actor === "system") {
+      const args = msg.event.args || {};
+      if (args.scenario_layout && store.events.length === 0) {
+        applyLayout(layoutFromEvents([msg.event]), scenarioMeta([msg.event]));
+        render(false);
+      }
+      return;
+    }
     if (store.mode === "booting") {
       const name = store.liveExerciseId ? `Live exercise ${store.liveExerciseId}` : "Live exercise";
       setMode("live", name);
@@ -619,9 +657,13 @@ function armLabel(memory) {
 async function classifyRun(run, armByEpisode) {
   try {
     const data = await fetchRun(run.id);
-    const events = (data.events || []).filter((ev) => ev && ev.actor !== "system");
+    const full = data.events || [];
+    const layout = layoutFromEvents(full);
+    const hosts = layoutHosts(layout);
+    const weights = layoutWeights(layout);
+    const events = full.filter((ev) => ev && ev.actor !== "system");
     const out = displayOutcome(events);
-    const score = data.score || scoreEvents(events, store.weights);
+    const score = data.score || scoreEvents(events, weights);
     const lane = events.filter((ev) => ev.actor === "red" || ev.actor === "blue");
     return {
       id: run.id,
@@ -630,8 +672,10 @@ async function classifyRun(run, armByEpisode) {
       blueScore: typeof score.blue_score === "number" ? score.blue_score : null,
       moves: lane.length,
       arm: armLabel(armByEpisode.get(run.id)),
-      blocks: reduceHostStates(events),
+      blocks: reduceHostStates(events, hosts),
       flags: runFlags(run.id, events),
+      layout,
+      scenario: scenarioText(scenarioMeta(full)),
     };
   } catch {
     return {
@@ -643,6 +687,8 @@ async function classifyRun(run, armByEpisode) {
       arm: armLabel(armByEpisode.get(run.id)),
       blocks: reduceHostStates([]),
       flags: ["test"],
+      layout: classicLayout(),
+      scenario: "classic",
     };
   }
 }

@@ -4,9 +4,17 @@
 // name the log lines the move cited; hovering one flashes the host.
 import { describeEvent } from "./story.js";
 
-const REF_ID = /^(web|app|db|workstation):\d+$/;
+const CLASSIC_REF_ID = /^(web|app|db|workstation):\d+$/;
 const TYPE_MS = 12;
 const TYPE_BUDGET_MS = 2600;
+
+// Evidence refs name a range host and line: upland:12. Hosts come
+// from the exercise layout; without one the classic four apply.
+function refPattern(hosts) {
+  if (!Array.isArray(hosts) || hosts.length === 0) return CLASSIC_REF_ID;
+  const safe = hosts.map((host) => String(host).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return new RegExp(`^(${safe.join("|")}):\\d+$`);
+}
 
 function latestFor(slice, actor) {
   for (let i = slice.length - 1; i >= 0; i -= 1) {
@@ -21,9 +29,10 @@ function thoughtText(ev) {
   return raw !== "" ? raw : describeEvent(ev);
 }
 
-function thoughtRefs(ev) {
+function thoughtRefs(ev, hosts) {
   if (!ev || !Array.isArray(ev.evidence_refs)) return [];
-  return ev.evidence_refs.filter((ref) => REF_ID.test(String(ref))).slice(0, 5);
+  const pattern = refPattern(hosts);
+  return ev.evidence_refs.filter((ref) => pattern.test(String(ref))).slice(0, 5);
 }
 
 function typeInto(textEl, text, reduced, state) {
@@ -60,7 +69,7 @@ function renderPanel(panel, slice, actor, opts, state) {
     }
     return;
   }
-  for (const ref of thoughtRefs(ev)) {
+  for (const ref of thoughtRefs(ev, opts && opts.hosts)) {
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "thought-chip";

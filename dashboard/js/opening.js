@@ -39,10 +39,13 @@ export function playOpening(els, opts) {
   if (els.title) els.title.textContent = `Exercise ${o.label || ""}`.trim();
   if (els.hosts) {
     els.hosts.innerHTML = "";
-    for (const host of HOSTS) {
+    const names = Array.isArray(o.hosts) && o.hosts.length > 0 ? o.hosts : HOSTS;
+    const roles = (o && o.roles) || {};
+    for (const host of names) {
       const chip = document.createElement("span");
       chip.className = "slate-host";
       chip.textContent = host;
+      if (roles[host]) chip.title = `${host} · ${roles[host]}`;
       els.hosts.append(chip);
     }
   }

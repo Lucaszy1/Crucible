@@ -1,15 +1,32 @@
 // Exercise lobby: cards sorted featured-first with honest outcomes.
 // Rendering only; ranking, flags and outcomes come from state.js.
-import { HOSTS } from "./state.js";
+import { classicLayout, columnsOf } from "./layout.js";
 
 const FLAG_LABEL = { test: "test", fallback: "fallback", scripted: "scripted" };
 
-function dot(host, blocks) {
+function dot(host, blocks, jewel) {
   const wrap = document.createElement("span");
   wrap.className = "lobby-dot";
   wrap.dataset.state = (blocks && blocks[host]) || "clean";
+  if (host === jewel) wrap.dataset.jewel = "1";
   wrap.title = `${host}: ${wrap.dataset.state}`;
   return wrap;
+}
+
+// Mini range thumbnail: one column per segment, one dot per host.
+function thumbnail(layout, blocks) {
+  const clean = layout && layout.hosts ? layout : classicLayout();
+  const thumb = document.createElement("span");
+  thumb.className = "lobby-thumb";
+  thumb.title = `Range: ${clean.hosts.map((host) => host.id).join(", ")}`;
+  for (const column of columnsOf(clean)) {
+    if (column.length === 0) continue;
+    const col = document.createElement("span");
+    col.className = "lobby-col";
+    for (const host of column) col.append(dot(host, blocks, clean.jewel_host));
+    thumb.append(col);
+  }
+  return thumb;
 }
 
 function card(model, callbacks) {
@@ -31,7 +48,7 @@ function card(model, callbacks) {
   const meta = document.createElement("p");
   meta.className = "lobby-meta";
   const score = model.blueScore === null || model.blueScore === undefined ? "--" : model.blueScore;
-  meta.textContent = `Score ${score} · ${model.moves} moves`;
+  meta.textContent = `Score ${score} · ${model.moves} moves · ${model.scenario || "classic"}`;
   if (model.arm) {
     const arm = document.createElement("span");
     arm.className = "lobby-arm";
@@ -41,9 +58,8 @@ function card(model, callbacks) {
 
   const foot = document.createElement("div");
   foot.className = "lobby-foot";
-  const states = document.createElement("span");
-  states.className = "lobby-states";
-  for (const host of HOSTS) states.append(dot(host, model.blocks));
+  const states = thumbnail(model.layout, model.blocks);
+  states.classList.add("lobby-states");
   const play = document.createElement("button");
   play.type = "button";
   play.className = "btn small primary";

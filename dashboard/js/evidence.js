@@ -3,6 +3,13 @@ import { HOSTS } from "./state.js";
 
 let activeHost = "web";
 let focusRef = null;
+let knownHosts = [...HOSTS];
+
+function useHosts(hosts) {
+  knownHosts = Array.isArray(hosts) && hosts.length > 0 ? [...hosts] : [...HOSTS];
+  if (!knownHosts.includes(activeHost)) activeHost = knownHosts[0];
+  return knownHosts;
+}
 
 export function setActiveHost(host) {
   activeHost = host;
@@ -11,12 +18,12 @@ export function setActiveHost(host) {
 export function focusEvidenceRef(ref) {
   focusRef = ref;
   const [host] = String(ref).split(":");
-  if (host && HOSTS.includes(host)) activeHost = host;
+  if (host && knownHosts.includes(host)) activeHost = host;
 }
 
 // Merge every read_logs window per host, newest line text wins per id.
-export function collectLogs(events, cursor) {
-  const perHost = new Map(HOSTS.map((host) => [host, new Map()]));
+export function collectLogs(events, cursor, hosts) {
+  const perHost = new Map(useHosts(hosts).map((host) => [host, new Map()]));
   for (const ev of events.slice(0, cursor)) {
     if (ev.tool !== "read_logs" || (ev.result || {}).ok !== true) continue;
     const lines = (ev.result || {}).lines || [];
@@ -39,7 +46,8 @@ export function citedRefs(events, cursor) {
   return refs.slice(-12).reverse();
 }
 
-export function renderEvidence(els, events, cursor) {
+export function renderEvidence(els, events, cursor, hosts) {
+  const names = useHosts(hosts);
   const refs = citedRefs(events, cursor);
   els.chips.innerHTML = "";
   if (refs.length === 0) {
@@ -54,14 +62,14 @@ export function renderEvidence(els, events, cursor) {
     chip.textContent = ref;
     chip.addEventListener("click", () => {
       focusEvidenceRef(ref);
-      renderEvidence(els, events, cursor);
+      renderEvidence(els, events, cursor, names);
     });
     els.chips.append(chip);
   }
 
-  const perHost = collectLogs(events, cursor);
+  const perHost = collectLogs(events, cursor, names);
   els.tabs.innerHTML = "";
-  for (const host of HOSTS) {
+  for (const host of names) {
     const tab = document.createElement("button");
     tab.textContent = host;
     tab.className = activeHost === host ? "active" : "";
@@ -69,7 +77,7 @@ export function renderEvidence(els, events, cursor) {
     tab.addEventListener("click", () => {
       activeHost = host;
       focusRef = null;
-      renderEvidence(els, events, cursor);
+      renderEvidence(els, events, cursor, names);
     });
     els.tabs.append(tab);
   }

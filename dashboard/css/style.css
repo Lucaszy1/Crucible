@@ -696,7 +696,10 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
 }
 .lobby-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: auto; }
 .lobby-states { display: flex; gap: 5px; }
+.lobby-thumb { display: inline-flex; gap: 5px; align-items: end; }
+.lobby-col { display: inline-flex; flex-direction: column; gap: 4px; }
 .lobby-dot { width: 11px; height: 11px; border-radius: 50%; background: var(--node-clean); }
+.lobby-dot[data-jewel="1"] { outline: 2px solid var(--amber); outline-offset: 1px; }
 .lobby-dot[data-state="probed"] { background: var(--node-probed); }
 .lobby-dot[data-state="signed-in"] { background: var(--node-signed-in); }
 .lobby-dot[data-state="compromised"] { background: var(--node-compromised); }
