@@ -25,6 +25,15 @@ GEN_SPEC_FILE = SANDBOX_DIR / "spec.gen.json"
 # The only hosts agents may touch. Enforced here in code.
 ALLOWED_HOSTS = ("web", "app", "db", "workstation")
 
+# Classic segments for the dashboard layout. Generated specs carry
+# their own segments; the classic range predates the field.
+CLASSIC_SEGMENTS = {
+    "web": "dmz",
+    "app": "internal",
+    "db": "data",
+    "workstation": "internal",
+}
+
 # Active generated spec, or None for the classic scenario. Set by the
 # CLIs around a scenario's episodes; everything below follows it.
 _ACTIVE_SPEC: dict | None = None
@@ -53,6 +62,46 @@ def active_compose_file() -> Path:
     if _ACTIVE_SPEC is None:
         return COMPOSE_FILE
     return GEN_COMPOSE_FILE
+
+
+def scenario_layout() -> dict:
+    """Return the blue-visible range structure for the dashboard.
+
+    Host ids, roles, segments, links, business weights, and the
+    crown jewel host only. No vulnerabilities, accounts, passwords,
+    or file paths. The classic range emits the same shape.
+    """
+    if _ACTIVE_SPEC is not None:
+        hosts = []
+        for host in _ACTIVE_SPEC.get("hosts", []):
+            hosts.append({
+                "id": host.get("name", ""),
+                "role": host.get("role", ""),
+                "segment": host.get("segment", "internal"),
+                "links": list(host.get("links", []) or []),
+                "weight": host.get("weight", 1),
+            })
+        return {
+            "scenario_id": _ACTIVE_SPEC.get("scenario_id", ""),
+            "hosts": hosts,
+            "jewel_host": (_ACTIVE_SPEC.get("jewel", {}) or {}).get(
+                "host", ""),
+        }
+    inventory = blue_inventory()
+    hosts = []
+    for name, entry in (inventory.get("hosts", {}) or {}).items():
+        hosts.append({
+            "id": name,
+            "role": (entry or {}).get("role", ""),
+            "segment": CLASSIC_SEGMENTS.get(name, "internal"),
+            "links": list((entry or {}).get("connected_to", []) or []),
+            "weight": (entry or {}).get("weight", 1),
+        })
+    return {
+        "scenario_id": "classic",
+        "hosts": hosts,
+        "jewel_host": inventory.get("crown_jewel_host", ""),
+    }
 
 
 class AllowlistError(ValueError):

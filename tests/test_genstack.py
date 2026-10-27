@@ -623,6 +623,68 @@ def test_run_exercise_rejects_bad_scenario(capsys):
     assert "difficulty" in capsys.readouterr().err
 
 
+# -- scenario layout for the dashboard ---------------------------------
+
+
+def test_scenario_layout_classic_shape():
+    sandbox.set_active_spec(None)
+    layout = sandbox.scenario_layout()
+    assert layout["scenario_id"] == "classic"
+    assert layout["jewel_host"] == "db"
+    by_id = {host["id"]: host for host in layout["hosts"]}
+    assert set(by_id) == {"web", "app", "db", "workstation"}
+    for host in layout["hosts"]:
+        assert set(host) == {"id", "role", "segment", "links", "weight"}
+    assert by_id["web"]["segment"] == "dmz"
+    assert by_id["db"]["segment"] == "data"
+    assert by_id["db"]["weight"] == 5
+    assert set(layout) == {"scenario_id", "hosts", "jewel_host"}
+
+
+def test_scenario_layout_generated_matches_spec_no_leaks(spec):
+    sandbox.set_active_spec(spec)
+    try:
+        layout = sandbox.scenario_layout()
+    finally:
+        sandbox.set_active_spec(None)
+    assert layout["scenario_id"] == spec["scenario_id"]
+    assert layout["jewel_host"] == spec["jewel"]["host"]
+    assert [host["id"] for host in layout["hosts"]] == \
+        [host["name"] for host in spec["hosts"]]
+    for entry, raw in zip(layout["hosts"], spec["hosts"]):
+        assert entry["role"] == raw["role"]
+        assert entry["segment"] == raw["segment"]
+        assert entry["weight"] == raw["weight"]
+        assert sorted(entry["links"]) == sorted(raw["links"])
+    blob = json.dumps(layout)
+    assert "password" not in blob
+    assert "reveals" not in blob
+    assert "page_path" not in blob
+    assert "account" not in blob
+    for step in spec["path"]:
+        for key in ("account", "reveals_account", "password",
+                    "reveals_password"):
+            if key in step:
+                assert step[key] not in blob
+
+
+def test_first_event_carries_scenario_layout(tmp_path, monkeypatch):
+    from crucible.agents.scripted_blue import ScriptedBlue
+    from crucible.agents.scripted_red import ScriptedRed
+
+    monkeypatch.setattr(tools, "begin_episode",
+                        lambda: {"ok": True, "attempts": 1, "checks": {}})
+    monkeypatch.setattr(orchestrator, "run_tool",
+                        lambda name, args: {"ok": True})
+    sandbox.set_active_spec(None)
+    result = orchestrator.run_exercise(
+        ScriptedRed(), ScriptedBlue(), max_turns=2,
+        run_path=tmp_path / "layout.jsonl")
+    layout = result["events"][0]["args"]["scenario_layout"]
+    assert layout == sandbox.scenario_layout()
+    assert layout["scenario_id"] == "classic"
+
+
 # -- classic regression --------------------------------------------------
 
 

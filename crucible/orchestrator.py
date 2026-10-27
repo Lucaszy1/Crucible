@@ -77,6 +77,20 @@ def _agent_accepts_alerts(agent) -> bool:
     return "alerts" in params
 
 
+def _scenario_layout() -> dict:
+    """Load the blue-visible range layout for the dashboard.
+
+    Defaults to an empty mapping on any load trouble so dashboard
+    garnish never breaks an exercise; old readers ignore it.
+    """
+    try:
+        from crucible import sandbox
+
+        return sandbox.scenario_layout()
+    except Exception:
+        return {}
+
+
 def _sensor_context() -> tuple:
     """Load the inventory context the sensor rules need.
 
@@ -718,6 +732,7 @@ def run_exercise(
         "scenario_id": info.get("scenario_id", "classic"),
         "scenario_seed": info.get("seed"),
         "scenario_difficulty": info.get("difficulty"),
+        "scenario_layout": _scenario_layout(),
     }
     if seed is not None:
         first_args["seed"] = str(seed)
