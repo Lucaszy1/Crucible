@@ -5,7 +5,7 @@
 // Transient effects spawn only while stepping forward in real time;
 // scrubbing rebuilds the static snapshot with no leftovers.
 import {
-  DEFAULT_WEIGHTS, HOSTS, hostBlocks, pressureValue,
+  DEFAULT_WEIGHTS, HOSTS, hostBlocks, motionReduced, pressureValue,
   redProgress, reduceHostStates, scoreEvents, secretRead, shortResult,
 } from "./state.js";
 import { describeEvent } from "./story.js";
@@ -59,14 +59,9 @@ const SRC = { red: { x: 90, y: 450 }, blue: { x: 1490, y: 790 } };
 const EDGES = [["web", "app"], ["app", "db"], ["app", "workstation"], ["red", "web"]];
 const CAM_HOME = { x: 800, y: 450, z: 1 };
 
-function reducedMotion() {
-  try {
-    return typeof window !== "undefined" && Boolean(window.matchMedia) &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  } catch {
-    return false;
-  }
-}
+// Single motion switch shared with the app shell, so ?motion=full
+// previews the full show even where the OS asks for reduced motion.
+const reducedMotion = motionReduced;
 
 function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v;
@@ -168,6 +163,7 @@ export function initArena(canvas) {
     trauma: 0, hitstopUntil: 0,
     latencyEma: 16, clock: 0, floorDrift: 0,
     active: true, raf: 0, lastT: 0, firstFrame: true,
+    ambient: { dots: [], next: 0 }, idle: true,
   };
   const ro = typeof ResizeObserver === "function" ? new ResizeObserver(() => fitCanvas(refs)) : null;
   if (ro && canvas) {
@@ -312,8 +308,26 @@ function update(refs, dt) {
     refs.clock += dt;
     refs.floorDrift += dt * 0.3;
   }
+  // Idle means no event is animating: the queue, the delayed beats
+  // and every transient list are empty. Ambient motion only breathes
+  // in that gap, and freezes entirely under reduced motion.
+  const idle = !refs.playing && refs.queue.length === 0 &&
+    refs.pending.length === 0 && refs.transients.length === 0 &&
+    refs.bursts.length === 0;
+  refs.idle = idle;
   const t = now();
-  if (t > refs.focusUntil) refs.camTarget = { ...CAM_HOME };
+  if (t > refs.focusUntil) {
+    if (idle && !reduced) {
+      refs.camTarget = {
+        x: CAM_HOME.x + Math.sin(refs.clock * 0.13) * 34,
+        y: CAM_HOME.y + Math.cos(refs.clock * 0.1) * 22,
+        z: 1 + Math.sin(refs.clock * 0.07) * 0.018,
+      };
+    } else {
+      refs.camTarget = { ...CAM_HOME };
+    }
+  }
+  if (!reduced) stepAmbient(refs, dt, idle);
   const k = 1 - Math.exp(-dt * 2.6);
   refs.cam.x += (refs.camTarget.x - refs.cam.x) * k;
   refs.cam.y += (refs.camTarget.y - refs.cam.y) * k;
@@ -396,6 +410,64 @@ function progressOf(item) {
   return clamp(item.t / item.ttl, 0, 1);
 }
 
+// Ambient drift: small dim gray dots coasting along open conduits
+// while nothing animates. Capped at four, slow, and visually far
+// from the bright red and blue event packets.
+const AMBIENT_COL = "#6b7690";
+const AMBIENT_MAX = 4;
+
+function stepAmbient(refs, dt, idle) {
+  const amb = refs.ambient;
+  for (let i = amb.dots.length - 1; i >= 0; i -= 1) {
+    const dot = amb.dots[i];
+    dot.t += dt;
+    if (dot.t >= dot.ttl) amb.dots.splice(i, 1);
+  }
+  if (!idle) return;
+  amb.next -= dt;
+  if (amb.next > 0 || amb.dots.length >= AMBIENT_MAX) return;
+  amb.next = 1.1 + Math.random() * 1.2;
+  const open = EDGES.filter(([a, b]) => !conduitCut(refs, a, b));
+  if (open.length === 0) return;
+  const [a, b] = open[Math.floor(Math.random() * open.length)];
+  const A = nodePos(refs, a);
+  const B = nodePos(refs, b);
+  const flip = Math.random() < 0.5;
+  amb.dots.push({
+    x0: flip ? B.x : A.x, y0: flip ? B.y : A.y,
+    x1: flip ? A.x : B.x, y1: flip ? A.y : B.y,
+    t: 0, ttl: 2.6 + Math.random() * 1.6,
+  });
+}
+
+function drawAmbient(refs) {
+  const { ctx } = refs;
+  ctx.save();
+  for (const dot of refs.ambient.dots) {
+    const p = clamp(dot.t / dot.ttl, 0, 1);
+    const fade = Math.sin(p * Math.PI);
+    ctx.globalAlpha = 0.3 * fade;
+    ctx.fillStyle = AMBIENT_COL;
+    const x = dot.x0 + (dot.x1 - dot.x0) * p;
+    const y = dot.y0 + (dot.y1 - dot.y0) * p;
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, 6.283);
+    ctx.fill();
+    ctx.globalAlpha = 0.14 * fade;
+    ctx.beginPath();
+    ctx.arc(x - (dot.x1 - dot.x0) * 0.03, y - (dot.y1 - dot.y0) * 0.03, 3, 0, 6.283);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// Two-thump heartbeat in [0, 1]: a strong beat plus its echo.
+function heartbeat(phase) {
+  const beat = Math.max(0, Math.sin(phase));
+  const echo = Math.max(0, Math.sin(phase - 0.9));
+  return beat * beat * 0.7 + echo * echo * 0.3;
+}
+
 function draw(refs) {
   const { ctx, geom } = refs;
   if (!ctx) return;
@@ -451,6 +523,7 @@ function draw(refs) {
   const sy = reduced ? 0 : (Math.random() - 0.5) * refs.trauma;
   ctx.setTransform(dpr * z, 0, 0, dpr * z, dpr * (cx - refs.cam.x * z + sx), dpr * (cy - refs.cam.y * z + sy));
   drawConduits(refs);
+  drawAmbient(refs);
   drawEmblems(refs);
   for (const key of ["web", "app", "workstation", "db"]) drawNode(refs, refs.nodes[key]);
   for (const key of HOSTS) drawShield(refs, refs.nodes[key]);
@@ -614,7 +687,11 @@ function drawNode(refs, n) {
   }
   ctx.save();
   ctx.translate(n.x + jx, n.y + jy);
-  const bob = 1 + 0.012 * Math.sin(refs.clock * 2 + n.x) + 0.13 * n.pop;
+  // Resting hosts breathe with a faint heartbeat; event pops ride on top.
+  const heart = refs.idle && !reducedMotion()
+    ? heartbeat(refs.clock * 2.2 + n.x * 0.01 + n.y * 0.013) * 0.022
+    : 0;
+  const bob = 1 + 0.012 * Math.sin(refs.clock * 2 + n.x) + 0.13 * n.pop + heart;
   ctx.scale(bob, bob);
   // Rotating platform rings.
   ctx.save();
@@ -1740,6 +1817,33 @@ function pump(refs) {
   next();
 }
 
+// Thought-stream chip hover: flash the cited log's host once.
+export function flashArenaHost(refs, host) {
+  if (!refs || !host || !refs.nodes[host]) return;
+  const n = refs.nodes[host];
+  n.flicker = 0.6;
+  ringAt(refs, n.x, n.y, BONE, n.r * 2.4, 700, 6, 0);
+}
+
+// One brief stinger the first time red signs in during an exercise.
+export function firstAccessStinger(refs, host) {
+  if (!refs) return;
+  const n = host && refs.nodes[host] ? refs.nodes[host] : { x: 800, y: 450, r: 88 };
+  textAt(refs, "FIRST ACCESS", n.x, n.y - n.r - 80, { c: RED, kind: "burst", ttl: 1800 });
+  ringAt(refs, n.x, n.y, RED, 560, 1000, 14, 0);
+  if (reducedMotion()) return;
+  burstAt(refs, n.x, n.y, RED, 30, 640, 0);
+  impactAt(refs, n.x, n.y, BONE, { shake: 14, hit: 90 });
+}
+
+// Climax stinger for a Secret exposed end card: red and gold glitch.
+export function glitchStinger(refs) {
+  if (!refs || reducedMotion()) return;
+  glitchCanvas(refs);
+  flash(refs, GOLD, 0.35);
+  shake(refs, 18);
+}
+
 // Scrub, jump or view switch: drop everything transient immediately.
 export function cancelArena(refs) {
   if (!refs) return;
@@ -1752,6 +1856,10 @@ export function cancelArena(refs) {
   refs.transients.length = 0;
   refs.bursts.length = 0;
   refs.speedLines.length = 0;
+  if (refs.ambient) {
+    refs.ambient.dots.length = 0;
+    refs.ambient.next = 0;
+  }
   refs.flash = null;
   refs.trauma = 0;
   refs.camTarget = { ...CAM_HOME };
@@ -1893,8 +2001,10 @@ export function renderArenaStatic(refs, events, cursor, opts, instant) {
   let caption = "Four hosts. One secret.";
   let sub = list.length === 0 ? "No exercise loaded." : "Waiting for the first move.";
   if (ended) {
-    caption = OUTCOME_TEXT[o.finalScore.outcome] || "Exercise over.";
-    sub = `Final score ${Math.round(score)} after ${at} moves.`;
+    // Honest end line: the display outcome plus its plain sentence.
+    const display = o.display || null;
+    caption = display ? `Exercise over: ${display.label}.` : (OUTCOME_TEXT[o.finalScore.outcome] || "Exercise over.");
+    sub = display ? display.line : `Final score ${Math.round(score)} after ${at} moves.`;
   } else if (latest) {
     tag = latest.actor === "red" ? "RED" : "BLUE";
     tone = latest.actor === "red" ? "red" : "blue";

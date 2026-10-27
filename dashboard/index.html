@@ -32,15 +32,6 @@
           </select>
         </div>
         <div class="control-group">
-          <label for="replaySelect">Replay a past run</label>
-          <div class="pop-row">
-            <select id="replaySelect">
-              <option value="">Loading past runs…</option>
-            </select>
-            <button id="replayBtn" class="btn">Load</button>
-          </div>
-        </div>
-        <div class="control-group">
           <span class="group-label" id="speedLabel">Replay speed</span>
           <div class="seg" role="group" aria-labelledby="speedLabel" id="speedSeg">
             <button data-speed="0.5" aria-pressed="false">0.5x</button>
@@ -64,13 +55,32 @@
 <div id="notice" class="notice" hidden></div>
 
 <nav class="tabs-main" aria-label="Views">
-  <button id="tabArena" class="active" aria-selected="true" title="Arena (A)">Arena</button>
+  <button id="tabLobby" class="active" aria-selected="true" title="Lobby (L)">Lobby</button>
+  <button id="tabArena" aria-selected="false" title="Arena (A)">Arena</button>
   <button id="tabStory" aria-selected="false" title="Story (S)">Story</button>
   <button id="tabDetails" aria-selected="false">Details</button>
   <button id="tabLearn" aria-selected="false">Learning</button>
 </nav>
 
-<div id="arenaView">
+<div id="lobbyView">
+<main class="lobby-wrap">
+  <section class="panel lobby-head" aria-label="Lobby controls">
+    <div class="lobby-title">
+      <h2>Exercise lobby</h2>
+      <p id="lobbySub" class="empty">Loading past exercises…</p>
+    </div>
+    <div class="lobby-actions">
+      <button id="surpriseBtn" class="btn" title="Open a random featured exercise">Surprise me</button>
+      <label class="check" title="Open the next featured exercise when one ends"><input type="checkbox" id="autoplayBox"> Autoplay next</label>
+      <label class="check" title="Include test, fallback and scripted runs"><input type="checkbox" id="showAllBox"> Show all runs</label>
+      <button id="liveBtn" class="btn primary">Start live exercise</button>
+    </div>
+  </section>
+  <div id="lobbyGrid" class="lobby-grid" aria-label="Past exercises"></div>
+</main>
+</div>
+
+<div id="arenaView" hidden>
 <main class="arena-wrap">
   <section class="arena-stage" id="arenaStage" aria-label="Exercise arena">
     <div class="arena-canvas-wrap">
@@ -107,6 +117,39 @@
         <div id="arenaCapTag" class="system">EXERCISE</div>
         <div id="arenaCapBody"><div id="arenaCapText">Four hosts. One secret.</div><div id="arenaCapSub"></div></div>
       </div>
+      <aside id="thoughtRed" class="thought red" aria-label="Red thought stream">
+        <button id="thoughtRedHead" class="thought-head" aria-expanded="true">Red thought</button>
+        <p id="thoughtRedText" class="thought-text"></p>
+        <div id="thoughtRedChips" class="thought-chips"></div>
+      </aside>
+      <aside id="thoughtBlue" class="thought blue" aria-label="Blue thought stream">
+        <button id="thoughtBlueHead" class="thought-head" aria-expanded="true">Blue thought</button>
+        <p id="thoughtBlueText" class="thought-text"></p>
+        <div id="thoughtBlueChips" class="thought-chips"></div>
+      </aside>
+      <div id="slate" class="slate" hidden>
+        <div class="slate-eyebrow">Crucible Operations Center</div>
+        <h2 id="slateTitle">Exercise</h2>
+        <div class="slate-vs"><span class="r">RED</span><span class="vs">vs</span><span class="b">BLUE</span></div>
+        <div id="slateHosts" class="slate-hosts"></div>
+        <p class="slate-file">One protected file</p>
+        <div id="slateCount" class="slate-count">3</div>
+        <p class="slate-skip">Space or Enter skips</p>
+      </div>
+      <div id="endCard" class="end-veil" hidden>
+        <div class="end-eyebrow" id="endEyebrow">Exercise complete</div>
+        <h2 id="endTitle">Contained</h2>
+        <div class="end-score" id="endScore">Blue score --</div>
+        <div class="end-stats" id="endStats"></div>
+        <p class="end-line" id="endLine"></p>
+        <p class="end-next" id="endNext" hidden></p>
+        <div class="end-btns">
+          <button id="endReplay" class="btn pri" type="button">Replay</button>
+          <button id="endNextBtn" class="btn" type="button">Next exercise</button>
+          <button id="endLobbyBtn" class="btn" type="button">Back to lobby</button>
+        </div>
+        <p class="end-skip">Esc closes</p>
+      </div>
     </div>
     <div class="arena-bottom">
       <div class="score-strip arena-scores" aria-label="Score summary">
@@ -122,6 +165,7 @@
         <button id="soundBtn" class="btn ghost small" title="Toggle sound (M)" aria-pressed="false">Sound off</button>
       </div>
     </div>
+    <div id="moveStrip" class="move-strip" role="group" aria-label="Move timeline"></div>
   </section>
 </main>
 </div>

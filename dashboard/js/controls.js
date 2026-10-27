@@ -1,22 +1,5 @@
-// Control bar wiring: run, replay select, speed, confirm dialog.
-
-export function fillRuns(select, runs) {
-  select.innerHTML = "";
-  if (!runs || runs.length === 0) {
-    const opt = document.createElement("option");
-    opt.value = "";
-    opt.textContent = "No past runs yet";
-    select.append(opt);
-    return;
-  }
-  for (const run of runs) {
-    const opt = document.createElement("option");
-    opt.value = run.id;
-    const score = run.blue_score === null || run.blue_score === undefined ? "--" : run.blue_score;
-    opt.textContent = `${run.id} (${run.events} events, ${run.outcome || "?"}, score ${score})`;
-    select.append(opt);
-  }
-}
+// Control bar wiring: run, speed, confirm dialog. Past runs moved to
+// the lobby; this module keeps server status and the start flow.
 
 export function setServer(els, state, label) {
   els.light.dataset.state = state;
@@ -51,9 +34,6 @@ export function showConfirm(els, spend, capped, onConfirm) {
 
 export function initControls(els, deps) {
   els.run.addEventListener("click", () => deps.onRun(els.agents.value));
-  els.replayBtn.addEventListener("click", () => {
-    if (els.replay.value) deps.onReplay(els.replay.value);
-  });
   els.speedSeg.querySelectorAll("button").forEach((btn) => {
     btn.addEventListener("click", () => {
       els.speedSeg.querySelectorAll("button").forEach((other) => {

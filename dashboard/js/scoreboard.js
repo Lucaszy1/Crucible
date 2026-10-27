@@ -1,12 +1,8 @@
 // Scoreboard: three big numbers on the Story view, everything else
 // (banner, detection, containment, cost meter) in the Details tab.
-import { scoreEvents } from "./state.js";
-
-const OUTCOME_LABEL = {
-  red_succeeded: "Red Succeeded",
-  blue_held: "Blue Held",
-  stalemate: "Stalemate",
-};
+// Outcome words always come from displayOutcome: a quiet exercise
+// reads No intrusion, never a blue victory.
+import { displayOutcome, scoreEvents } from "./state.js";
 
 function fmtDelay(value) {
   return value === null || value === undefined ? "--" : `${value} events`;
@@ -17,28 +13,20 @@ function fmtContain(value) {
 }
 
 function figures(events, cursor, weights, finalScore) {
-  const live = scoreEvents(events.slice(0, cursor), weights);
+  const slice = events.slice(0, cursor);
+  const live = scoreEvents(slice, weights);
   const ended = Boolean(finalScore);
   const shown = ended ? finalScore : live;
-  let outcome;
-  if (ended) {
-    outcome = shown.outcome === "red_succeeded" ? "Breached"
-      : shown.outcome === "blue_held" ? "Held"
-      : "Stalemate";
-  } else if (live.secret_exfiltrated) {
-    outcome = "Breached";
-  } else if (live.outcome === "blue_held") {
-    outcome = "Holding";
-  } else {
-    outcome = "Live";
-  }
-  return { live, ended, shown, outcome };
+  if (slice.length === 0) return { live, ended, shown, outcome: "--", tone: "" };
+  const display = displayOutcome(slice);
+  return { live, ended, shown, outcome: display.label, tone: display.tone };
 }
 
 export function renderScoreboard(els, events, cursor, weights, spend, finalScore) {
-  const { shown, outcome, ended } = figures(events, cursor, weights, finalScore);
+  const { shown, outcome, ended, tone } = figures(events, cursor, weights, finalScore);
   void spend;
   els.outcome.textContent = outcome;
+  els.outcome.dataset.tone = tone || "";
   els.downtime.textContent = `${Number(shown.downtime_pct || 0).toFixed(2)}%`;
   els.blue.textContent = ended ? String(shown.blue_score ?? "--") : "--";
 }
@@ -49,9 +37,10 @@ export function renderScoreDetails(els, events, cursor, weights, spend, finalSco
   els.contain.textContent = fmtContain(shown.time_to_contain);
 
   if (ended) {
+    const display = displayOutcome(events);
     els.banner.hidden = false;
-    els.banner.textContent = OUTCOME_LABEL[shown.outcome] || shown.outcome;
-    els.banner.className = `banner ${shown.outcome === "red_succeeded" ? "red" : shown.outcome === "blue_held" ? "blue" : "stalemate"}`;
+    els.banner.textContent = display.label;
+    els.banner.className = `banner ${display.tone === "red" ? "red" : display.tone === "blue" ? "blue" : display.tone === "amber" ? "amber" : "stalemate"}`;
   } else {
     els.banner.hidden = true;
   }

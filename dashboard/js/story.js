@@ -127,8 +127,13 @@ const OUTCOME_SENTENCE = {
 };
 
 // Header status sentence: latest red/blue activity, or the final outcome.
-export function statusSentence({ latest, ended, outcome, mode }) {
-  if (ended) return OUTCOME_SENTENCE[outcome] || "Exercise over.";
+// Callers pass the honest display label when the exercise ends; the
+// server-outcome sentences stay as the fallback.
+export function statusSentence({ latest, ended, outcome, mode, display }) {
+  if (ended) {
+    if (display) return `Exercise over: ${display}.`;
+    return OUTCOME_SENTENCE[outcome] || "Exercise over.";
+  }
   if (mode === "booting") return "Starting the range…";
   if (!latest) {
     if (mode === "live" || mode === "replay") return "Waiting for the first move…";

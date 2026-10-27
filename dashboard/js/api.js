@@ -49,8 +49,11 @@ export async function startExercise(agents, exerciseId) {
 }
 
 // Open the live event stream. Returns the EventSource for closing.
-export function openLive(onMessage, onError) {
-  const source = new EventSource("/api/live");
+// The path override replays an archived run through the same live
+// rendering path (for example /api/stream/day3b-1?speed=8); callers
+// translate that feed's payload shape before handling it.
+export function openLive(onMessage, onError, path) {
+  const source = new EventSource(path || "/api/live");
   source.onmessage = (msg) => {
     try {
       onMessage(JSON.parse(msg.data));

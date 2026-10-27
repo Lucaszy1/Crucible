@@ -1,19 +1,31 @@
-// Operations Center bootstrap: Story view, render loop, tabs, themes.
+// Operations Center bootstrap: lobby, arena show flow, tabs, themes.
 import { fetchAttackMap, fetchCampaign, fetchCampaigns, fetchConfig, fetchRun, fetchRuns, fetchStatus, openLive, startExercise } from "./api.js";
 import { fillCampaignSelects, renderLearn } from "./learn.js";
-import { reduceHostStates } from "./state.js";
+import {
+  autoplayQueue, displayOutcome, endCardStats, eventHost, motionReduced, outcomeLine,
+  rankFeatured, reduceHostStates, runFlags, scoreEvents,
+} from "./state.js";
 import { describeEvent, statusSentence } from "./story.js";
 import { initMap, updateMap } from "./network.js";
 import { renderFeed } from "./feed.js";
-import { renderTransport } from "./timeline.js";
+import { renderStrip, renderTransport, stripModel } from "./timeline.js";
 import { renderTechniques } from "./techniques.js";
 import { reduceAudits, renderAuditor } from "./audit.js";
 import { renderScoreboard, renderScoreDetails } from "./scoreboard.js";
 import { focusEvidenceRef, renderEvidence } from "./evidence.js";
-import { fillRuns, initControls, serverStatus, setServer, showConfirm } from "./controls.js";
-import { arenaNotify, cancelArena, initArena, renderArenaStatic, setArenaActive, toggleArenaSound } from "./arena.js";
+import { initControls, serverStatus, setServer, showConfirm } from "./controls.js";
+import { renderLobby } from "./lobby.js";
+import { playOpening } from "./opening.js";
+import { initThoughtHeads, renderThoughts, setThoughtsCollapsed } from "./thoughts.js";
+import { endCardVisible, hideEndCard, initEndCard, setEndNext, showEndCard } from "./endcard.js";
+import {
+  arenaNotify, cancelArena, firstAccessStinger, flashArenaHost, glitchStinger,
+  initArena, renderArenaStatic, setArenaActive, toggleArenaSound,
+} from "./arena.js";
 
 const REPLAY_INTERVAL_MS = 1200;
+const LOBBY_FETCH_POOL = 6;
+const ADVANCE_SECONDS = 8;
 
 const els = {
   mode: document.getElementById("modeBadge"),
@@ -47,10 +59,18 @@ const els = {
   auditChips: document.getElementById("auditChips"),
   auditCost: document.getElementById("auditCost"),
   auditSummary: document.getElementById("auditSummary"),
+  tabLobby: document.getElementById("tabLobby"),
   tabArena: document.getElementById("tabArena"),
   tabStory: document.getElementById("tabStory"),
   tabDetails: document.getElementById("tabDetails"),
   tabLearn: document.getElementById("tabLearn"),
+  lobbyView: document.getElementById("lobbyView"),
+  lobbyGrid: document.getElementById("lobbyGrid"),
+  lobbySub: document.getElementById("lobbySub"),
+  surpriseBtn: document.getElementById("surpriseBtn"),
+  autoplayBox: document.getElementById("autoplayBox"),
+  showAllBox: document.getElementById("showAllBox"),
+  liveBtn: document.getElementById("liveBtn"),
   arenaView: document.getElementById("arenaView"),
   arenaCanvas: document.getElementById("arenaCanvas"),
   arenaOutcome: document.getElementById("arenaOutcome"),
@@ -61,6 +81,29 @@ const els = {
   arenaScrubber: document.getElementById("arenaScrubber"),
   arenaPosition: document.getElementById("arenaPosition"),
   soundBtn: document.getElementById("soundBtn"),
+  moveStrip: document.getElementById("moveStrip"),
+  slate: document.getElementById("slate"),
+  slateTitle: document.getElementById("slateTitle"),
+  slateHosts: document.getElementById("slateHosts"),
+  slateCount: document.getElementById("slateCount"),
+  thoughtRed: document.getElementById("thoughtRed"),
+  thoughtRedHead: document.getElementById("thoughtRedHead"),
+  thoughtRedText: document.getElementById("thoughtRedText"),
+  thoughtRedChips: document.getElementById("thoughtRedChips"),
+  thoughtBlue: document.getElementById("thoughtBlue"),
+  thoughtBlueHead: document.getElementById("thoughtBlueHead"),
+  thoughtBlueText: document.getElementById("thoughtBlueText"),
+  thoughtBlueChips: document.getElementById("thoughtBlueChips"),
+  endCard: document.getElementById("endCard"),
+  endEyebrow: document.getElementById("endEyebrow"),
+  endTitle: document.getElementById("endTitle"),
+  endScore: document.getElementById("endScore"),
+  endStats: document.getElementById("endStats"),
+  endLine: document.getElementById("endLine"),
+  endNext: document.getElementById("endNext"),
+  endReplay: document.getElementById("endReplay"),
+  endNextBtn: document.getElementById("endNextBtn"),
+  endLobbyBtn: document.getElementById("endLobbyBtn"),
   storyView: document.getElementById("storyView"),
   detailsView: document.getElementById("detailsView"),
   learnView: document.getElementById("learnView"),
@@ -80,8 +123,6 @@ const els = {
 const controls = {
   agents: document.getElementById("agentsSelect"),
   run: document.getElementById("runBtn"),
-  replay: document.getElementById("replaySelect"),
-  replayBtn: document.getElementById("replayBtn"),
   speedSeg: document.getElementById("speedSeg"),
   light: document.getElementById("serverLight"),
   label: document.getElementById("serverLabel"),
@@ -99,6 +140,7 @@ const confirm = {
 
 const store = {
   mode: "idle", // idle | live | replay
+  runId: null,
   events: [],
   cursor: 0,
   playing: false,
@@ -110,9 +152,35 @@ const store = {
   finalScore: null,
   label: "No exercise loaded",
   liveSource: null,
-  animateNext: false,
+  liveExerciseId: null,
   arenaCursor: 0,
+  firstAuthIndex: null,
+  firstAccessShown: false,
+  opening: null,
+  advance: null,
+  presentLoop: false,
+  thoughtState: null,
+  lobby: { runs: [], cards: [], showAll: false, autoplay: false, armByEpisode: new Map(), loading: true },
 };
+
+function thoughtPanels() {
+  return {
+    red: { root: els.thoughtRed, head: els.thoughtRedHead, text: els.thoughtRedText, chips: els.thoughtRedChips },
+    blue: { root: els.thoughtBlue, head: els.thoughtBlueHead, text: els.thoughtBlueText, chips: els.thoughtBlueChips },
+  };
+}
+
+function endEls() {
+  return {
+    root: els.endCard, eyebrow: els.endEyebrow, title: els.endTitle, score: els.endScore,
+    stats: els.endStats, line: els.endLine, nextUp: els.endNext,
+    replay: els.endReplay, next: els.endNextBtn, lobby: els.endLobbyBtn,
+  };
+}
+
+function reducedMotion() {
+  return motionReduced();
+}
 
 let mapRefs = null;
 let arenaRefs = null;
@@ -179,15 +247,25 @@ function render(animate) {
   const slice = store.events.slice(0, store.cursor);
   const states = reduceHostStates(slice);
   updateMap(mapRefs, states, slice, animate);
+  const display = store.events.length > 0 ? displayOutcome(store.events) : null;
   const arenaStates = renderArenaStatic(
     arenaRefs, store.events, store.cursor,
-    { weights: store.weights, finalScore: store.finalScore, label: store.label }, !animate,
+    {
+      weights: store.weights, finalScore: store.finalScore, label: store.label,
+      display: display ? { label: display.label, line: outcomeLine(display.key) } : null,
+    },
+    !animate,
   );
   if (animate && store.cursor > 0) {
     const ev = store.events[store.cursor - 1];
     if (ev && store.arenaCursor !== store.cursor) {
       store.arenaCursor = store.cursor;
       arenaNotify(arenaRefs, ev, arenaStates.states, store.speed);
+      if (!store.firstAccessShown && store.firstAuthIndex !== null &&
+        store.cursor - 1 === store.firstAuthIndex) {
+        store.firstAccessShown = true;
+        firstAccessStinger(arenaRefs, eventHost(ev));
+      }
     }
   } else {
     store.arenaCursor = store.cursor;
@@ -201,6 +279,7 @@ function render(animate) {
     latest: latestLaneEvent(slice),
     ended: Boolean(store.finalScore),
     outcome: store.finalScore?.outcome,
+    display: store.finalScore && display ? display.label : null,
     mode: store.mode,
   });
   renderAuditor(
@@ -213,6 +292,12 @@ function render(animate) {
     store.cursor, store.events.length, store.playing, canScrub,
   );
   renderTransport(arenaTransportEls(), store.cursor, store.events.length, store.playing, canScrub);
+  renderStrip(els.moveStrip, stripModel(store.events, store.cursor, audits.byTarget),
+    (pos) => jump(pos), store.mode !== "replay");
+  store.thoughtState = renderThoughts(thoughtPanels(), slice, {
+    reduced: reducedMotion(),
+    onFlash: (host) => flashArenaHost(arenaRefs, host),
+  }, store.thoughtState);
   renderTechniques(
     { stages: els.stages, redTech: els.redTech, blueTech: els.blueTech },
     store.attackMap, store.events, store.cursor,
@@ -232,10 +317,20 @@ function stopTimer() {
   store.playing = false;
 }
 
+function cancelAdvance() {
+  if (!store.advance) return;
+  clearTimeout(store.advance.timer);
+  clearInterval(store.advance.ticker);
+  store.advance = null;
+  setEndNext(endEls(), "");
+}
+
 function tickReplay() {
   if (store.cursor >= store.events.length) {
     stopTimer();
+    if (store.replayScore) store.finalScore = store.replayScore;
     render(false);
+    showEndCardFor("replay");
     return;
   }
   store.cursor += 1;
@@ -246,9 +341,15 @@ function playReplay() {
   if (store.mode !== "replay" || store.events.length === 0) return;
   if (store.cursor >= store.events.length) {
     store.cursor = 0;
+    store.firstAccessShown = false;
+    store.finalScore = null;
+    hideEndCard(endEls());
+    cancelAdvance();
     cancelArena(arenaRefs);
   }
   stopTimer();
+  hideEndCard(endEls());
+  cancelAdvance();
   store.playing = true;
   store.timer = setInterval(tickReplay, REPLAY_INTERVAL_MS / store.speed);
   render(false);
@@ -262,9 +363,13 @@ function pauseReplay() {
 function jump(index) {
   if (store.mode !== "replay") return;
   cancelArena(arenaRefs);
+  hideEndCard(endEls());
+  cancelAdvance();
   store.cursor = Math.max(0, Math.min(store.events.length, index));
-  store.finalScore = store.cursor >= store.events.length ? store.finalScore : null;
-  if (store.replayScore && store.cursor >= store.events.length) store.finalScore = store.replayScore;
+  if (store.firstAuthIndex !== null && store.cursor - 1 < store.firstAuthIndex) {
+    store.firstAccessShown = false;
+  }
+  store.finalScore = store.cursor >= store.events.length ? store.replayScore : null;
   render(false);
 }
 
@@ -275,39 +380,82 @@ function closeLive() {
   }
 }
 
-async function loadReplay(runId, autoplay) {
+function destroyOpening() {
+  if (store.opening) {
+    store.opening.destroy();
+    store.opening = null;
+  }
+}
+
+// Opening an exercise for playback: slate, countdown, then motion.
+// Scrub and jump never pass through here, so the slate plays once.
+async function openExercise(runId, opts) {
+  const o = opts || {};
+  destroyOpening();
+  hideEndCard(endEls());
+  cancelAdvance();
   closeLive();
   stopTimer();
   cancelArena(arenaRefs);
   notice("");
   setMode("replay", `Replaying ${runId}`);
+  switchTab("arena");
+  store.runId = runId;
   store.events = [];
   store.cursor = 0;
   store.finalScore = null;
   store.replayScore = null;
+  store.firstAuthIndex = null;
+  store.firstAccessShown = false;
+  store.thoughtState = null;
+  setThoughtsCollapsed(thoughtPanels(), window.innerWidth < 800);
   render(false);
+  let data;
   try {
-    const data = await fetchRun(runId);
-    // System events are harness notes, not moves: skip them everywhere.
-    store.events = (data.events || []).filter((ev) => ev && ev.actor !== "system");
-    store.replayScore = data.score || null;
-    store.cursor = 0;
-    if (autoplay) {
-      playReplay();
-    } else {
-      store.cursor = store.events.length;
-      store.finalScore = store.replayScore;
-      render(false);
-    }
+    data = await fetchRun(runId);
   } catch (err) {
     notice(`Could not load run ${runId}: ${err.message}`, true);
     setMode("idle", "No exercise loaded");
+    switchTab("lobby");
+    return;
   }
+  if (store.runId !== runId) return;
+  // System events are harness notes, not moves: skip them everywhere.
+  store.events = (data.events || []).filter((ev) => ev && ev.actor !== "system");
+  store.replayScore = data.score || null;
+  store.cursor = 0;
+  store.firstAuthIndex = store.events.findIndex(
+    (ev) => ev.actor === "red" && ev.tool === "try_credential" && (ev.result || {}).authenticated === true,
+  );
+  if (store.firstAuthIndex < 0) store.firstAuthIndex = null;
+  render(false);
+  if (o.at !== undefined && o.at !== null) {
+    const pos = o.at === "end" ? store.events.length : Number(o.at) || 0;
+    store.cursor = Math.max(0, Math.min(store.events.length, pos));
+    store.finalScore = store.cursor >= store.events.length ? store.replayScore : null;
+    render(false);
+    if (store.cursor >= store.events.length) showEndCardFor("replay");
+    return;
+  }
+  store.opening = playOpening(
+    { root: els.slate, title: els.slateTitle, hosts: els.slateHosts, count: els.slateCount },
+    {
+      label: runId,
+      reduced: reducedMotion(),
+      onDone: () => {
+        store.opening = null;
+        if (store.runId === runId) playReplay();
+      },
+    },
+  );
 }
 
 async function beginRun(agents) {
   closeLive();
   stopTimer();
+  destroyOpening();
+  hideEndCard(endEls());
+  cancelAdvance();
   cancelArena(arenaRefs);
   notice("");
   controls.run.disabled = true;
@@ -315,9 +463,13 @@ async function beginRun(agents) {
     const data = await startExercise(agents);
     store.liveExerciseId = data.exercise_id;
     setMode("booting", `Booting range for ${data.exercise_id}`);
+    switchTab("arena");
+    store.runId = null;
     store.events = [];
     store.cursor = 0;
     store.finalScore = null;
+    store.firstAuthIndex = null;
+    store.firstAccessShown = false;
     if (data.warning) notice(data.warning, false);
     store.liveSource = openLive(onLiveMessage, onLiveError);
     render(false);
@@ -326,6 +478,39 @@ async function beginRun(agents) {
   } finally {
     controls.run.disabled = false;
   }
+}
+
+// Archived run through the live rendering path, without Docker and
+// without starting an exercise. Only used with an explicit ?live=
+// feed address for verification and demos.
+function beginFakeLive(path) {
+  closeLive();
+  stopTimer();
+  destroyOpening();
+  hideEndCard(endEls());
+  cancelAdvance();
+  cancelArena(arenaRefs);
+  notice("");
+  setMode("live", `Live feed ${path}`);
+  switchTab("arena");
+  store.runId = null;
+  store.events = [];
+  store.cursor = 0;
+  store.finalScore = null;
+  store.firstAuthIndex = null;
+  store.firstAccessShown = false;
+  const translate = (msg) => {
+    if (msg && msg.event) onLiveMessage({ type: "event", event: msg.event });
+    else if (msg && msg.done) onLiveMessage({ type: "done", score: msg.score });
+  };
+  store.liveSource = openLive(translate, onLiveError, path);
+  render(false);
+}
+
+function firstAuthPosition() {
+  return store.events.findIndex(
+    (ev) => ev.actor === "red" && ev.tool === "try_credential" && (ev.result || {}).authenticated === true,
+  );
 }
 
 function onLiveMessage(msg) {
@@ -337,6 +522,10 @@ function onLiveMessage(msg) {
     }
     store.events.push(msg.event);
     store.cursor = store.events.length;
+    if (store.firstAuthIndex === null) {
+      const at = firstAuthPosition();
+      store.firstAuthIndex = at < 0 ? null : at;
+    }
     render(true);
   } else if (msg.type === "done") {
     store.finalScore = msg.score || null;
@@ -347,6 +536,7 @@ function onLiveMessage(msg) {
     refreshRuns(false);
     pollStatus();
     render(false);
+    showEndCardFor("live");
   } else if (msg.type === "error") {
     notice(`Exercise failed: ${msg.text || "unknown error"}`, true);
     if (store.events.length === 0) setMode("idle", "No exercise loaded");
@@ -380,25 +570,150 @@ function onRunRequest(agents) {
   beginRun("scripted");
 }
 
-async function refreshRuns(autoselect) {
+// Featured lobby order, minus hidden runs unless Show all is on.
+function visibleCards() {
+  const cards = store.lobby.showAll
+    ? store.lobby.cards
+    : store.lobby.cards.filter((card) => !card.flags || card.flags.length === 0);
+  return rankFeatured(cards);
+}
+
+function nextFeaturedId() {
+  const ids = visibleCards().map((card) => card.id);
+  const queue = autoplayQueue(ids, store.runId);
+  return queue.length > 0 ? queue[0] : null;
+}
+
+function showEndCardFor() {
+  const stats = endCardStats(store.events, store.finalScore, store.weights);
+  const audits = reduceAudits(store.events, store.events.length);
+  const nextId = nextFeaturedId();
+  showEndCard(endEls(), stats, audits.summary.justifiedPct, nextId);
+  if (stats.key === "secret-exposed") glitchStinger(arenaRefs);
+  const auto = store.presentLoop || (store.lobby.autoplay && store.mode === "replay");
+  if (auto && nextId) scheduleAdvance(nextId);
+}
+
+function scheduleAdvance(nextId) {
+  cancelAdvance();
+  let left = ADVANCE_SECONDS;
+  const tick = () => {
+    setEndNext(endEls(), `Next: ${nextId} in ${left}s`);
+    left -= 1;
+  };
+  tick();
+  const ticker = setInterval(tick, 1000);
+  const timer = setTimeout(() => {
+    cancelAdvance();
+    openExercise(nextId);
+  }, ADVANCE_SECONDS * 1000);
+  store.advance = { timer, ticker };
+}
+
+function armLabel(memory) {
+  if (memory === "on") return "Memory on";
+  if (memory === "off") return "Memory off";
+  return null;
+}
+
+async function classifyRun(run, armByEpisode) {
+  try {
+    const data = await fetchRun(run.id);
+    const events = (data.events || []).filter((ev) => ev && ev.actor !== "system");
+    const out = displayOutcome(events);
+    const score = data.score || scoreEvents(events, store.weights);
+    const lane = events.filter((ev) => ev.actor === "red" || ev.actor === "blue");
+    return {
+      id: run.id,
+      outcomeKey: out.key,
+      outcome: { label: out.label, tone: out.tone },
+      blueScore: typeof score.blue_score === "number" ? score.blue_score : null,
+      moves: lane.length,
+      arm: armLabel(armByEpisode.get(run.id)),
+      blocks: reduceHostStates(events),
+      flags: runFlags(run.id, events),
+    };
+  } catch {
+    return {
+      id: run.id,
+      outcomeKey: "stalemate",
+      outcome: { label: "Unreadable", tone: "gray" },
+      blueScore: null,
+      moves: 0,
+      arm: armLabel(armByEpisode.get(run.id)),
+      blocks: reduceHostStates([]),
+      flags: ["test"],
+    };
+  }
+}
+
+function paintLobby() {
+  const ranked = rankFeatured(store.lobby.cards);
+  renderLobby(els.lobbyGrid, els.lobbySub, {
+    cards: ranked,
+    showAll: store.lobby.showAll,
+    loading: store.lobby.loading,
+  }, { onPlay: (id) => openExercise(id) });
+}
+
+async function refreshRuns() {
+  store.lobby.loading = true;
+  store.lobby.cards = [];
+  paintLobby();
+  let runs = [];
   try {
     const data = await fetchRuns();
-    fillRuns(controls.replay, data.runs || []);
-    const params = new URLSearchParams(window.location.search);
-    const wanted = params.get("run");
-    if (wanted && (data.runs || []).some((run) => run.id === wanted)) {
-      controls.replay.value = wanted;
-      if (autoselect) loadReplay(wanted, true);
-      return;
-    }
-    if (autoselect && data.runs && data.runs.length > 0) {
-      controls.replay.value = data.runs[0].id;
-      loadReplay(data.runs[0].id, false);
-    }
+    runs = data.runs || [];
   } catch (err) {
-    fillRuns(controls.replay, []);
+    store.lobby.loading = false;
     notice(`Could not list past runs: ${err.message}`, true);
+    paintLobby();
+    return;
   }
+  store.lobby.runs = runs;
+  const armByEpisode = new Map();
+  try {
+    const campaigns = await fetchCampaigns();
+    for (const item of campaigns.campaigns || []) {
+      try {
+        const detail = await fetchCampaign(item.name);
+        for (const row of detail.episodes || []) {
+          if (row.episode) armByEpisode.set(row.episode, detail.memory);
+        }
+      } catch {
+        // One unreadable campaign never blocks the lobby.
+      }
+    }
+  } catch {
+    // Campaigns are optional garnish on the cards.
+  }
+  store.lobby.armByEpisode = armByEpisode;
+  const queue = [...runs];
+  const workers = [];
+  const pump = async () => {
+    while (queue.length > 0) {
+      const run = queue.shift();
+      const card = await classifyRun(run, armByEpisode);
+      store.lobby.cards.push(card);
+      paintLobby();
+    }
+  };
+  for (let i = 0; i < Math.min(LOBBY_FETCH_POOL, Math.max(1, queue.length)); i += 1) {
+    workers.push(pump());
+  }
+  await Promise.all(workers);
+  store.lobby.loading = false;
+  paintLobby();
+}
+
+function surprise() {
+  const cards = visibleCards();
+  if (cards.length === 0) {
+    notice("No exercises to open yet.", false);
+    return;
+  }
+  const pick = cards[Math.floor(Math.random() * cards.length)];
+  openExercise(pick.id);
 }
 
 async function pollStatus() {
@@ -408,6 +723,7 @@ async function pollStatus() {
     const status = serverStatus(spend);
     setServer(controls, status.state, status.label);
     controls.run.disabled = status.runDisabled;
+    els.liveBtn.disabled = status.runDisabled;
     if (!spend.running && spend.last_warning && store.mode === "idle") {
       notice(spend.last_warning, false);
     }
@@ -420,6 +736,7 @@ async function pollStatus() {
 }
 
 const TABS = {
+  lobby: ["tabLobby", "lobbyView"],
   arena: ["tabArena", "arenaView"],
   story: ["tabStory", "storyView"],
   details: ["tabDetails", "detailsView"],
@@ -427,13 +744,14 @@ const TABS = {
 };
 
 function switchTab(name) {
-  const active = TABS[name] ? name : "arena";
+  const active = TABS[name] ? name : "lobby";
   for (const [key, [tabId, viewId]] of Object.entries(TABS)) {
     const on = key === active;
     els[tabId].classList.toggle("active", on);
     els[tabId].setAttribute("aria-selected", String(on));
     els[viewId].hidden = !on;
   }
+  if (active === "lobby" && store.playing) pauseReplay();
   if (active === "learn" && !store.learnLoaded) {
     store.learnLoaded = true;
     loadLearning();
@@ -483,8 +801,19 @@ function toggleTheme() {
 
 function setPresent(on) {
   document.body.classList.toggle("present", on);
+  store.presentLoop = on;
   els.presentBtn.textContent = on ? "Exit present" : "Present";
-  if (on) switchTab("arena");
+  if (on) {
+    switchTab("arena");
+    // Presentation mode loops the featured lobby from the top.
+    if (store.mode === "idle" || (store.mode === "replay" && store.cursor >= store.events.length)) {
+      const cards = visibleCards();
+      if (cards.length > 0 && store.runId !== cards[0].id) openExercise(cards[0].id);
+      else if (cards.length > 0 && store.cursor >= store.events.length) playReplay();
+    }
+  } else {
+    cancelAdvance();
+  }
 }
 
 function toggleSound() {
@@ -502,14 +831,36 @@ function setSettings(open) {
   els.settingsBtn.setAttribute("aria-expanded", String(open));
 }
 
-// Shortcuts: P toggles presentation, A/S switch views, M toggles
-// arena sound, arrows and space drive replay.
+function loadBool(key, fallback) {
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw === null ? fallback : raw === "1";
+  } catch {
+    return fallback;
+  }
+}
+
+function saveBool(key, value) {
+  try {
+    window.localStorage.setItem(key, value ? "1" : "0");
+  } catch {
+    // Private browsing: the toggle just won't persist.
+  }
+}
+
+// Shortcuts: P presents and loops, L opens the lobby, A/S switch
+// views, M toggles arena sound, arrows and space drive replay.
 function onShortcut(ev) {
   if (ev.defaultPrevented) return;
   const tag = (ev.target && ev.target.tagName) || "";
   if (["INPUT", "SELECT", "TEXTAREA", "BUTTON"].includes(tag)) return;
   if (!confirm.overlay.hidden) return;
   if (ev.key === "Escape") {
+    if (endCardVisible(endEls())) {
+      hideEndCard(endEls());
+      cancelAdvance();
+      return;
+    }
     if (document.body.classList.contains("present")) setPresent(false);
     setSettings(false);
     return;
@@ -517,6 +868,11 @@ function onShortcut(ev) {
   if (ev.key === "p" || ev.key === "P") {
     ev.preventDefault();
     togglePresent();
+    return;
+  }
+  if (ev.key === "l" || ev.key === "L") {
+    ev.preventDefault();
+    switchTab("lobby");
     return;
   }
   if (ev.key === "a" || ev.key === "A") {
@@ -550,6 +906,18 @@ function onShortcut(ev) {
   }
 }
 
+function applySpeed(speed) {
+  const value = Number(speed);
+  if (!Number.isFinite(value) || value <= 0) return;
+  store.speed = Math.min(16, value);
+  controls.speedSeg.querySelectorAll("button").forEach((btn) => {
+    const on = Number(btn.dataset.speed) === store.speed;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-pressed", String(on));
+  });
+  if (store.playing) playReplay();
+}
+
 async function boot() {
   let theme = "light";
   try {
@@ -558,6 +926,10 @@ async function boot() {
     // Private browsing: fall back to the light theme.
   }
   setTheme(theme === "dark" ? "dark" : "light");
+  store.lobby.showAll = loadBool("crucible-show-all", false);
+  store.lobby.autoplay = loadBool("crucible-autoplay", false);
+  els.showAllBox.checked = store.lobby.showAll;
+  els.autoplayBox.checked = store.lobby.autoplay;
   try {
     const config = await fetchConfig();
     if (config.business_weights) store.weights = config.business_weights;
@@ -573,12 +945,27 @@ async function boot() {
   }
   initControls(controls, {
     onRun: onRunRequest,
-    onReplay: (runId) => loadReplay(runId, true),
-    onSpeed: (speed) => {
-      store.speed = speed;
-      if (store.playing) playReplay();
-    },
+    onSpeed: (speed) => applySpeed(speed),
   });
+  initThoughtHeads(thoughtPanels());
+  setThoughtsCollapsed(thoughtPanels(), window.innerWidth < 800);
+  initEndCard(endEls(), {
+    onReplay: () => {
+      hideEndCard(endEls());
+      cancelAdvance();
+      cancelArena(arenaRefs);
+      store.cursor = 0;
+      store.firstAccessShown = false;
+      store.finalScore = null;
+      playReplay();
+    },
+    onNext: () => {
+      const next = nextFeaturedId();
+      if (next) openExercise(next);
+    },
+    onLobby: () => switchTab("lobby"),
+  });
+  els.tabLobby.addEventListener("click", () => switchTab("lobby"));
   els.tabArena.addEventListener("click", () => switchTab("arena"));
   els.tabStory.addEventListener("click", () => switchTab("story"));
   els.tabDetails.addEventListener("click", () => switchTab("details"));
@@ -587,6 +974,17 @@ async function boot() {
   els.ctlSelect.addEventListener("change", drawLearning);
   els.themeBtn.addEventListener("click", toggleTheme);
   els.presentBtn.addEventListener("click", togglePresent);
+  els.liveBtn.addEventListener("click", () => onRunRequest(controls.agents.value));
+  els.surpriseBtn.addEventListener("click", surprise);
+  els.showAllBox.addEventListener("change", () => {
+    store.lobby.showAll = els.showAllBox.checked;
+    saveBool("crucible-show-all", store.lobby.showAll);
+    paintLobby();
+  });
+  els.autoplayBox.addEventListener("change", () => {
+    store.lobby.autoplay = els.autoplayBox.checked;
+    saveBool("crucible-autoplay", store.lobby.autoplay);
+  });
   els.settingsBtn.addEventListener("click", (click) => {
     click.stopPropagation();
     setSettings(els.settingsPop.hidden);
@@ -601,10 +999,29 @@ async function boot() {
   els.arenaScrubber.addEventListener("input", () => jump(Number(els.arenaScrubber.value)));
   els.soundBtn.addEventListener("click", toggleSound);
   document.addEventListener("keydown", onShortcut);
+  switchTab("lobby");
   render(false);
-  await refreshRuns(true);
+  const params = new URLSearchParams(window.location.search);
+  const speed = params.get("speed");
+  if (speed) applySpeed(speed);
+  const livePath = params.get("live");
+  const wanted = params.get("run");
+  const view = params.get("view");
+  const at = params.get("at");
+  refreshRuns();
   await pollStatus();
   setInterval(pollStatus, 5000);
+  if (livePath) {
+    beginFakeLive(livePath);
+    return;
+  }
+  if (wanted) {
+    // Deep links open at once; the lobby keeps classifying behind.
+    // Unknown ids fall back to the lobby with a notice inside open.
+    openExercise(wanted, at === null ? {} : { at });
+    return;
+  }
+  if (view && TABS[view]) switchTab(view);
 }
 
 boot();
