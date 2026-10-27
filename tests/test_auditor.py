@@ -163,6 +163,65 @@ def test_each_suspicious_marker_counts():
         assert check_evidence(blue, priors)["suspicious_visible"] is True, line
 
 
+# Layer 1: redundant reads and moot actions.
+
+
+def test_repeat_read_with_no_new_lines_is_redundant():
+    lines = [("db:0", "signin reset from=controller"),
+             ("db:1", "signin ok user=a from=controller")]
+    priors = [_read_logs(1, "db", lines)]
+    repeat = _evt(2, "blue", "read_logs", {"host": "db"},
+                  {"ok": True, "host": "db",
+                   "lines": [{"id": ref, "line": text}
+                             for ref, text in lines]})
+    check = check_evidence(repeat, priors)
+    assert check["redundant"] is True
+    assert check["new_lines"] == 0
+
+
+def test_read_with_new_lines_is_not_redundant():
+    priors = [_read_logs(1, "db", [("db:0", "signin reset from=controller")])]
+    fresh = _evt(2, "blue", "read_logs", {"host": "db"},
+                 {"ok": True, "host": "db",
+                  "lines": [{"id": "db:0", "line": "signin reset"},
+                            {"id": "db:1", "line": "signin ok user=a"}]})
+    check = check_evidence(fresh, priors)
+    assert check["redundant"] is False
+    assert check["new_lines"] == 1
+
+
+def test_first_failed_and_other_host_reads_not_redundant():
+    other = [_read_logs(1, "web", [("web:0", "webapp listening on 8000")])]
+    first = _evt(2, "blue", "read_logs", {"host": "db"},
+                 {"ok": True, "host": "db",
+                  "lines": [{"id": "db:0", "line": "signin reset"}]})
+    assert check_evidence(first, other)["redundant"] is False
+    failed = _evt(3, "blue", "read_logs", {"host": "web"},
+                  {"ok": False, "error": "down"})
+    assert check_evidence(failed, other)["redundant"] is False
+    idle = _evt(4, "blue", "wait", {}, {"ok": True})
+    assert check_evidence(idle, other)["redundant"] is False
+
+
+def test_moot_when_secret_read_visible_in_logs():
+    priors = [_read_logs(1, "db", [
+        ("db:2", "dir list path=/secret entries=1 from=controller"),
+        ("db:3", "file read path=/secret/exercise_secret.txt bytes=9 from=controller"),
+    ])]
+    late = _evt(2, "blue", "isolate_host", {"host": "db"}, {"ok": True},
+                "Isolating db.", ["db:3"])
+    check = check_evidence(late, priors)
+    assert check["moot"] is True
+    assert check["refs_valid"] is True
+
+
+def test_not_moot_without_secret_read_line():
+    priors = [_read_logs(1, "db", [("db:1", "signin ok user=a from=controller")])]
+    blue = _evt(2, "blue", "isolate_host", {"host": "db"}, {"ok": True},
+                "Isolating db.", ["db:1"])
+    assert check_evidence(blue, priors)["moot"] is False
+
+
 # Layer 2: model judgment through the fake client.
 
 
@@ -277,12 +336,72 @@ def test_parse_judgment_rejects_bad_values():
                       "rationale": "Too slow here."}
 
 
+def test_prompt_carries_scale_anchors_and_flags():
+    priors = [_read_logs(1, "db", [("db:0", "signin reset from=controller")])]
+    repeat = _evt(2, "blue", "read_logs", {"host": "db"},
+                  {"ok": True, "host": "db",
+                   "lines": [{"id": "db:0", "line": "signin reset"}]})
+    blob = json.dumps(build_messages(
+        repeat, priors, position={"blue_action_no": 2, "events_so_far": 3,
+                                  "is_last": True}))
+    for anchor in ("9 to 10 exemplary", "7 to 8 reasonable", "4 to 6 weak",
+                   "1 to 3 poor", "0 invalid evidence",
+                   "Do not default every action to 7",
+                   "redundant=True", "usually redundant",
+                   "blue action 2", "final action"):
+        assert anchor in blob, anchor
+
+
+def test_prompt_names_moot_when_secret_observed():
+    priors = [_read_logs(1, "db", [
+        ("db:3", "file read path=/secret/exercise_secret.txt bytes=9 from=controller"),
+    ])]
+    late = _evt(2, "blue", "isolate_host", {"host": "db"}, {"ok": True},
+                "Isolating db.", ["db:3"])
+    blob = json.dumps(build_messages(late, priors))
+    assert "moot=True" in blob
+    assert "usually moot" in blob
+
+
+def test_role_override_chooses_model(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    client = _FakeClient(_response(_judgment("justified", 8, "Solid.")))
+    priors = [_read_logs(1, "db", [("db:1", "signin ok user=a from=controller")])]
+    blue = _evt(2, "blue", "isolate_host", {"host": "db"}, {"ok": True},
+                "Isolating db.", ["db:1"])
+    out = judge_with_model(blue, priors, check_evidence(blue, priors),
+                           client=client, role="muse-spark-1.3")
+    assert client.calls[0]["model"] == "muse-spark-1.3"
+    assert out["verdict"] == "justified"
+
+
+def test_audit_sends_full_token_budget(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    client = _FakeClient(_response(_judgment("justified")))
+    priors = [_read_logs(1, "db", [("db:1", "signin ok user=a from=controller")])]
+    blue = _evt(2, "blue", "isolate_host", {"host": "db"}, {"ok": True},
+                "Isolating db.", ["db:1"])
+    audit_blue_event(blue, priors, client=client)
+    assert client.calls[0]["max_tokens"] == 1536
+
+
 def test_deterministic_judgment_branches():
     bad_ref = {"evidence_checked": ["db:9"], "refs_valid": False,
                "invalid_refs": ["db:9"], "suspicious_visible": True}
     out = deterministic_judgment(_evt(1, "blue", "isolate_host"), bad_ref)
     assert out["verdict"] == "unsupported"
+    assert out["score"] == 0
     assert "db:9" in out["rationale"]
+    repeat = {"evidence_checked": [], "refs_valid": True,
+              "invalid_refs": [], "suspicious_visible": False,
+              "redundant": True, "moot": False}
+    out = deterministic_judgment(_evt(1, "blue", "read_logs"), repeat)
+    assert (out["verdict"], out["score"]) == ("redundant", 3)
+    over = {"evidence_checked": [], "refs_valid": True,
+            "invalid_refs": [], "suspicious_visible": True,
+            "redundant": False, "moot": True}
+    out = deterministic_judgment(_evt(1, "blue", "isolate_host"), over)
+    assert (out["verdict"], out["score"]) == ("moot", 2)
     good = {"evidence_checked": ["db:1"], "refs_valid": True,
             "invalid_refs": [], "suspicious_visible": True}
     out = deterministic_judgment(_evt(1, "blue", "isolate_host"), good)

@@ -26,10 +26,11 @@ PRIMARY_EFFORT = "medium"
 FALLBACK_MODEL = "muse-spark-1.3"
 FALLBACK_EFFORT = "high"
 FALLBACK_NO_MODEL = "none"
-MAX_TOKENS = 512
+MAX_TOKENS = 1536
 TEMPERATURE = 0.0
 
-VERDICTS = ("justified", "premature", "unsupported", "late", "disproportionate")
+VERDICTS = ("justified", "premature", "unsupported", "late",
+            "disproportionate", "redundant", "moot")
 
 AUDIT_MODES = ("off", "end", "live")
 
@@ -57,16 +58,28 @@ SYSTEM_PROMPT = (
     "You judge one blue team defensive action from a validation exercise. "
     "You see only what blue knew at that moment: its prior tool results, "
     "the log lines it cited, the action, the host weight, and current "
-    "downtime. Reply with exactly one JSON object and nothing else: "
+    "downtime. Reply with ONLY one JSON object on one line, no preamble, "
+    "no reasoning text, no markdown fences: "
     '{"verdict": "...", "score": 0-10, "rationale": "..."}. '
     "Verdict must be one of justified, premature, unsupported, late, "
-    "disproportionate. justified means the action fits the evidence seen "
-    "so far. premature means the right direction but the evidence was too "
-    "thin to act yet. unsupported means no visible evidence backs this "
-    "action. late means correct but it should have happened earlier given "
-    "what was already visible. disproportionate means the response was "
-    "heavier than the evidence warranted, such as isolating a costly host "
-    "on a weak signal. Rationale is one or two sentences in plain language."
+    "disproportionate, redundant, moot. justified means the action fits "
+    "the evidence seen so far. premature means the right direction but "
+    "the evidence was too thin to act yet. unsupported means no visible "
+    "evidence backs this action. late means correct but it should have "
+    "happened earlier given what was already visible. disproportionate "
+    "means the response was heavier than the evidence warranted, such as "
+    "isolating a costly host on a weak signal. redundant means a repeat "
+    "read that returned no new log lines since the last read of that "
+    "host. moot means the action came after the secret was already read, "
+    "or on the final turn with no remaining threat, so it could not "
+    "change the outcome. Rationale is one or two sentences in plain "
+    "language. Score on this anchored scale and use the full 0 to 10 "
+    "range: 9 to 10 exemplary (evidence-backed, timely, proportionate); "
+    "7 to 8 reasonable; 4 to 6 weak (low value, slightly premature or "
+    "heavy); 1 to 3 poor (unsupported, wrong host, or harmful); 0 "
+    "invalid evidence (cited lines blue never saw). Most routine actions "
+    "should land 5 to 8, while clearly strong or clearly bad ones go "
+    "outside that band. Do not default every action to 7."
 )
 
 
@@ -140,13 +153,72 @@ def claim_text(blue_event: dict) -> str:
     return " ".join(part for part in parts if part)
 
 
+def _read_ids(result: dict) -> set:
+    """Return the log line ids in one read_logs result."""
+    ids = set()
+    for row in (result or {}).get("lines", []) or []:
+        ref = (row or {}).get("id")
+        if ref:
+            ids.add(ref)
+    return ids
+
+
+def redundant_read(blue_event: dict, prior_events: list) -> dict:
+    """Detect a repeat read that returned no new log lines.
+
+    Compares the line ids in this read_logs result against every id
+    blue already saw from the same host. A first read, a failed read,
+    or any non-read action is never redundant. Returns whether this
+    read repeats the last one and how many lines are new.
+    """
+    if (blue_event or {}).get("tool") != "read_logs":
+        return {"redundant": False, "new_lines": 0}
+    args = (blue_event or {}).get("args", {}) or {}
+    host = args.get("host")
+    result = (blue_event or {}).get("result", {}) or {}
+    if host not in ALLOWED_HOSTS or result.get("ok") is not True:
+        return {"redundant": False, "new_lines": 0}
+    seen: set = set()
+    had_prior = False
+    for event in prior_events or []:
+        if event.get("actor") != "blue" or event.get("tool") != "read_logs":
+            continue
+        prior_result = event.get("result", {}) or {}
+        if prior_result.get("ok") is not True:
+            continue
+        prior_host = (event.get("args", {}) or {}).get("host")
+        if prior_host != host:
+            continue
+        had_prior = True
+        seen.update(_read_ids(prior_result))
+    if not had_prior:
+        return {"redundant": False, "new_lines": len(_read_ids(result))}
+    new = _read_ids(result) - seen
+    return {"redundant": not new, "new_lines": len(new)}
+
+
+def secret_observed_read(prior_events: list) -> bool:
+    """Check whether blue's logs show the secret was already read.
+
+    True when any line blue read names a file read under /secret/.
+    This is observable evidence only, never red's hidden reasoning,
+    so a moot verdict stays fair to what blue knew.
+    """
+    for line in visible_logs(prior_events).values():
+        if "file read path=/secret/" in str(line or ""):
+            return True
+    return False
+
+
 def check_evidence(blue_event: dict, prior_events: list) -> dict:
     """Layer 1: deterministic evidence checks with no model.
 
     Every cited ref must exist in the logs blue had read, and each ref
     must come from the host the action concerns or a host linked to the
     claim. Also reports whether those visible logs held any suspicious
-    activity, judged from red's already-visible log output only.
+    activity, judged from red's already-visible log output only, whether
+    this read repeats the last one with no new lines, and whether the
+    logs show the secret was already read (moot).
     """
     refs = list((blue_event or {}).get("evidence_refs", []) or [])
     visible = visible_logs(prior_events)
@@ -163,12 +235,16 @@ def check_evidence(blue_event: dict, prior_events: list) -> dict:
         if linked and ref_host not in linked:
             invalid.append(ref)
     suspicious = suspicious_in_logs(visible)
+    repeat = redundant_read(blue_event, prior_events)
     return {
         "evidence_checked": refs,
         "refs_valid": not invalid,
         "invalid_refs": invalid,
         "suspicious_visible": bool(suspicious),
         "suspicious_lines": [{"id": ref, "line": line} for ref, line in suspicious],
+        "redundant": repeat["redundant"],
+        "new_lines": repeat["new_lines"],
+        "moot": secret_observed_read(prior_events),
     }
 
 
@@ -278,12 +354,15 @@ def _blue_history_text(prior_events: list, limit: int = 6) -> str:
 
 def build_messages(blue_event: dict, prior_events: list,
                    check: dict | None = None,
-                   weights: dict | None = None) -> list:
+                   weights: dict | None = None,
+                   position: dict | None = None) -> list:
     """Build the Layer 2 prompt from only what blue knew then.
 
     Carries blue's prior tool results, the cited log lines with text,
     the action, the host weight, and current downtime. Red events are
     never read here, so red's reasoning cannot leak into the prompt.
+    Position optionally names this action's place in the exercise
+    (blue_action_no, events_so_far, is_last) for timing verdicts.
     """
     audit_check = check if check is not None else check_evidence(blue_event, prior_events)
     visible = visible_logs(prior_events)
@@ -318,18 +397,43 @@ def build_messages(blue_event: dict, prior_events: list,
         args_text = json.dumps((blue_event or {}).get("args", {}), sort_keys=True)
     except (TypeError, ValueError):
         args_text = str((blue_event or {}).get("args", ""))
+    timing = ""
+    if position:
+        timing = (f"This is blue action {position.get('blue_action_no', '?')} "
+                  f"({position.get('events_so_far', '?')} events so far). ")
+        if position.get("is_last") is True:
+            timing += "This is blue's final action of the exercise. "
+        elif position.get("is_last") is False:
+            timing += "More blue actions follow this one. "
+    flags = (f"refs_valid={audit_check.get('refs_valid')}, "
+             f"suspicious_visible={audit_check.get('suspicious_visible')}, "
+             f"redundant={audit_check.get('redundant', False)}, "
+             f"moot={audit_check.get('moot', False)}")
+    if (blue_event or {}).get("tool") == "read_logs":
+        flags += f", new_lines={audit_check.get('new_lines', 0)}"
+    guidance = ""
+    if audit_check.get("redundant"):
+        guidance += ("This read returned no new log lines since the last "
+                     "read of that host, so the verdict is usually redundant. ")
+    if audit_check.get("moot"):
+        guidance += ("The logs show the secret was already read before this "
+                     "action, so the verdict is usually moot. ")
+    if audit_check.get("refs_valid") is False:
+        guidance += ("Cited lines blue never saw mean invalid evidence: "
+                     "score 0 to 2, usually unsupported. ")
     user_text = (
         f"Judge this blue team action: {(blue_event or {}).get('tool', '?')} {args_text}\n"
+        f"{timing}"
         f"Blue's own note: {str((blue_event or {}).get('reasoning_summary', ''))[:300]}\n"
         f"Cited log lines:\n{cited_text}\n"
-        f"Evidence checks: refs_valid={audit_check.get('refs_valid')}, "
-        f"suspicious_visible={audit_check.get('suspicious_visible')}.\n"
+        f"Evidence checks: {flags}.\n"
+        f"{guidance}"
         f"Suspicious lines visible to blue:\n{susp_text}\n"
         f"Host weight: {weight_text}. "
         f"Downtime so far: cost {downtime['downtime_cost']}, "
         f"hosts down {downtime['down_hosts'] or 'none'}.\n"
         f"Blue's prior tool results:\n{_blue_history_text(prior_events)}\n"
-        "Reply with exactly one JSON object: verdict, score, rationale."
+        "Reply with ONLY one JSON object on one line: verdict, score, rationale."
     )
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -394,19 +498,35 @@ def deterministic_judgment(blue_event: dict, check: dict) -> dict:
     """Layer 1 fallback verdict when the model cannot judge.
 
     Invalid refs mean the action cited evidence blue never saw, so it
-    is unsupported. Valid refs with suspicious activity visible mean
-    the action fits what blue knew, so it is justified. Anything else
-    acted without visible evidence, so it is unsupported. Finer
-    verdicts (premature, late, disproportionate) need the model.
+    is unsupported with a zero score. A repeat read with no new lines
+    is redundant, and an action after the observed secret read is moot.
+    Valid refs with suspicious activity visible mean the action fits
+    what blue knew, so it is justified. Anything else acted without
+    visible evidence, so it is unsupported. Finer verdicts (premature,
+    late, disproportionate) need the model.
     """
     refs = check.get("evidence_checked", []) or []
     if not check.get("refs_valid", True):
         bad = ", ".join(check.get("invalid_refs", []) or refs)
         return {
             "verdict": "unsupported",
-            "score": 2,
+            "score": 0,
             "rationale": (f"Cited log lines ({bad}) were not visible to blue "
-                          f"at that time, so the action lacks evidence."),
+                          f"at that time, so the evidence is invalid."),
+        }
+    if check.get("redundant"):
+        return {
+            "verdict": "redundant",
+            "score": 3,
+            "rationale": ("This read returned no new log lines since the "
+                          "last read of that host."),
+        }
+    if check.get("moot"):
+        return {
+            "verdict": "moot",
+            "score": 2,
+            "rationale": ("The logs show the secret was already read, so "
+                          "this action could not change the outcome."),
         }
     if check.get("suspicious_visible"):
         return {
@@ -433,25 +553,29 @@ def deterministic_judgment(blue_event: dict, check: dict) -> dict:
 def judge_with_model(blue_event: dict, prior_events: list, check: dict,
                      *, exercise_id: str | None = None, client=None,
                      use_cache: bool = True,
-                     weights: dict | None = None) -> dict:
+                     weights: dict | None = None,
+                     position: dict | None = None,
+                     role: str = ROLE) -> dict:
     """Layer 2: ask the model for a verdict, with fallbacks.
 
-    Uses muse-wonder-1.0 at medium effort first. When the API reports
-    that model unavailable, retries once on muse-spark-1.3 at high
-    effort. Any other failure (spend cap, parse error, outage) falls
-    back to the deterministic Layer 1 verdict at zero cost. Returns the
-    verdict, score, rationale, model_used, and estimated cost.
+    Uses the auditor role (muse-wonder-1.0) at medium effort first, or
+    the given role or model id when the caller overrides it. When the
+    API reports that model unavailable, retries once on muse-spark-1.3
+    at high effort. Any other failure (spend cap, parse error, outage)
+    falls back to the deterministic Layer 1 verdict at zero cost.
+    Returns the verdict, score, rationale, model_used, and cost.
     """
-    messages = build_messages(blue_event, prior_events, check, weights)
+    messages = build_messages(blue_event, prior_events, check, weights,
+                              position)
     try:
         response = llm.chat(
-            ROLE, messages,
+            role, messages,
             exercise_id=exercise_id, client=client, use_cache=use_cache,
             max_tokens=MAX_TOKENS, temperature=TEMPERATURE,
             reasoning_effort=PRIMARY_EFFORT,
         )
     except Exception as exc:  # noqa: BLE001 - fallback below by cause
-        if _model_unavailable(exc):
+        if _model_unavailable(exc) and role != FALLBACK_MODEL:
             try:
                 response = llm.chat(
                     FALLBACK_MODEL, messages,
@@ -491,14 +615,17 @@ def judge_with_model(blue_event: dict, prior_events: list, check: dict,
 def audit_blue_event(blue_event: dict, prior_events: list,
                      *, exercise_id: str | None = None, client=None,
                      use_cache: bool = True,
-                     weights: dict | None = None) -> dict:
+                     weights: dict | None = None,
+                     position: dict | None = None,
+                     role: str = ROLE) -> dict:
     """Run both layers for one blue event and return the audit record."""
     priors = [event for event in prior_events or []
               if event.get("actor") != ACTOR]
     check = check_evidence(blue_event, priors)
     judgment = judge_with_model(
         blue_event, priors, check, exercise_id=exercise_id,
-        client=client, use_cache=use_cache, weights=weights)
+        client=client, use_cache=use_cache, weights=weights,
+        position=position, role=role)
     return {
         "target_event_id": (blue_event or {}).get("id", ""),
         "verdict": judgment["verdict"],
@@ -513,17 +640,20 @@ def audit_blue_event(blue_event: dict, prior_events: list,
 
 def audit_exercise(event_list: list, *, exercise_id: str | None = None,
                    client=None, use_cache: bool = True,
-                   weights: dict | None = None) -> list:
+                   weights: dict | None = None,
+                   role: str = ROLE) -> list:
     """Audit every blue action in an event list (end-of-exercise mode)."""
+    targets = [index for index, event in enumerate(event_list or [])
+               if event.get("actor") == "blue"
+               and event.get("tool") not in SKIP_TOOLS]
     audits = []
-    for index, event in enumerate(event_list or []):
-        if event.get("actor") != "blue":
-            continue
-        if event.get("tool") in SKIP_TOOLS:
-            continue
+    for order, index in enumerate(targets, start=1):
+        event = event_list[index]
         audits.append(audit_blue_event(
             event, list(event_list[:index]), exercise_id=exercise_id,
-            client=client, use_cache=use_cache, weights=weights))
+            client=client, use_cache=use_cache, weights=weights, role=role,
+            position={"blue_action_no": order, "events_so_far": index + 1,
+                      "is_last": order == len(targets)}))
     return audits
 
 

@@ -419,10 +419,15 @@ def run_exercise(
         ):
             priors = [event for event in writer.events[:-1]
                       if event.get("actor") != "auditor"]
+            blue_no = sum(1 for event in priors
+                          if event.get("actor") == "blue"
+                          and event.get("tool") not in AUDIT_SKIP_TOOLS) + 1
             _log_audit(writer, audit_blue_event(
                 logged, priors, exercise_id=exercise_id,
                 client=auditor_client, use_cache=auditor_use_cache,
-                weights=audit_weights))
+                weights=audit_weights,
+                position={"blue_action_no": blue_no,
+                          "events_so_far": len(writer.events)}))
         if _secret_exfiltrated(writer.events):
             break
 
