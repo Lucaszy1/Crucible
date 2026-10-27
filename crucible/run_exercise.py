@@ -56,6 +56,9 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
+SPEND_CAP_MARKER = "daily model spend cap reached"
+
+
 def _count_driven_vs_fallback(event_list: list) -> tuple:
     """Split logged turns into model-driven and baseline fallback counts."""
     fallback = sum(
@@ -64,6 +67,32 @@ def _count_driven_vs_fallback(event_list: list) -> tuple:
         if "using baseline" in str(event.get("reasoning_summary", "")).lower()
     )
     return len(event_list or []) - fallback, fallback
+
+
+def _spend_cap_hit(event_list: list) -> bool:
+    """Check whether any turn fell back because the spend cap blocked it."""
+    return any(
+        SPEND_CAP_MARKER in str(event.get("reasoning_summary", "")).lower()
+        for event in (event_list or [])
+    )
+
+
+def _warn_spend_cap() -> None:
+    """Print a loud warning with the spend limit and amount used."""
+    try:
+        limit = float(llm.daily_limit_usd())
+    except (TypeError, ValueError):
+        limit = float(llm.DEFAULT_DAILY_LIMIT_USD)
+    try:
+        used = float(llm.spent_today())
+    except (TypeError, ValueError, OSError):
+        used = 0.0
+    print(
+        f"WARNING: daily model spend cap reached: "
+        f"${used:.2f} of ${limit:.2f} used; "
+        f"turns fell back to scripted baseline, not model calls.",
+        file=sys.stderr,
+    )
 
 
 def _summary(score: dict) -> list:
@@ -177,6 +206,8 @@ def main(argv=None) -> int:
     cost = exercise_cost_since(spend_start)
     print(f"Estimated cost: ${cost:.4f}")
     print(f"Log: {result['run_path']}")
+    if _spend_cap_hit(result["events"]):
+        _warn_spend_cap()
     if args.strict and fallback:
         print(
             f"Strict mode: {fallback} turn(s) fell back to baseline.",

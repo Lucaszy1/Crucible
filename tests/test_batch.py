@@ -176,3 +176,67 @@ def test_batch_mean_handles_no_detections(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "Mean detection delay: no detections" in out
     assert "Mean blue_score: 40.00" in out
+
+
+def _cap_event():
+    return _evt(
+        "Model call failed "
+        "(daily model spend cap reached: $5.00 of $5.00 used), "
+        "using baseline."
+    )
+
+
+def _cap_score():
+    return {"outcome": "stalemate", "detection_delay": None,
+            "time_to_contain": None, "downtime_cost": 0, "blue_score": 40}
+
+
+def test_batch_strict_flag_parses():
+    assert batch.parse_args(["--count", "1", "--prefix", "x"]).strict is False
+    args = batch.parse_args(["--count", "1", "--prefix", "x", "--strict"])
+    assert args.strict is True
+
+
+def test_batch_warns_on_spend_cap(tmp_path, monkeypatch, capsys):
+    _stub_common(monkeypatch, tmp_path)
+    monkeypatch.setenv("LLM_DAILY_LIMIT_USD", "5")
+    monkeypatch.setattr(llm, "spent_today", lambda *a, **k: 5.0)
+
+    def fake_exercise(red, blue, max_turns=30, run_path=None, exercise_id=None):
+        return {"events": [_cap_event()], "score": _cap_score(),
+                "run_path": str(tmp_path / "x.jsonl")}
+
+    monkeypatch.setattr(orchestrator, "run_exercise", fake_exercise)
+    monkeypatch.setattr(batch.orchestrator, "run_exercise", fake_exercise)
+    assert batch.main(["--count", "2", "--agents", "model",
+                       "--prefix", "cap"]) == 0
+    err = capsys.readouterr().err
+    assert "WARNING" in err
+    assert "spend cap" in err.lower()
+    assert "$5.00 of $5.00" in err
+    assert (tmp_path / "runs" / "batch-cap.csv").exists()
+
+
+def test_batch_strict_aborts_on_spend_cap(tmp_path, monkeypatch, capsys):
+    seen = _stub_common(monkeypatch, tmp_path)
+    monkeypatch.setenv("LLM_DAILY_LIMIT_USD", "5")
+    monkeypatch.setattr(llm, "spent_today", lambda *a, **k: 5.0)
+    ran = []
+
+    def fake_exercise(red, blue, max_turns=30, run_path=None, exercise_id=None):
+        ran.append(exercise_id)
+        return {"events": [_cap_event()], "score": _cap_score(),
+                "run_path": str(tmp_path / "x.jsonl")}
+
+    monkeypatch.setattr(orchestrator, "run_exercise", fake_exercise)
+    monkeypatch.setattr(batch.orchestrator, "run_exercise", fake_exercise)
+    assert batch.main(["--count", "3", "--agents", "model",
+                       "--prefix", "halt", "--strict"]) == 2
+    assert ran == ["halt-1"]
+    assert seen["stopped"] is True
+    err = capsys.readouterr().err
+    assert "WARNING" in err
+    assert "$5.00 of $5.00" in err
+    assert "aborting batch" in err.lower()
+    assert "scripted games as model games" in err.lower()
+    assert not (tmp_path / "runs" / "batch-halt.csv").exists()

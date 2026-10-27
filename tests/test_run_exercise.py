@@ -203,3 +203,39 @@ def test_exercise_cost_for_id_filters(tmp_path, monkeypatch):
     assert run_exercise.exercise_cost_for_id("keep") == 0.05
     assert run_exercise.exercise_cost_for_id(None) == 0.0
     assert run_exercise.exercise_cost_for_id("missing") == 0.0
+
+
+def _cap_event():
+    return _evt(
+        "Model call failed "
+        "(daily model spend cap reached: $5.00 of $5.00 used), "
+        "using baseline. Baseline move: probe web."
+    )
+
+
+def test_spend_cap_hit_detects_marker():
+    assert run_exercise._spend_cap_hit([_cap_event()]) is True
+    assert run_exercise._spend_cap_hit([_evt("Probing first.")]) is False
+    assert run_exercise._spend_cap_hit([]) is False
+
+
+def test_runner_warns_on_spend_cap(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("LLM_DAILY_LIMIT_USD", "5")
+    monkeypatch.setattr(llm, "spent_today", lambda *a, **k: 5.0)
+    _stubbed_run_with_events(monkeypatch, tmp_path, [_cap_event()])
+    assert run_exercise.main(["--agents", "model"]) == 0
+    err = capsys.readouterr().err
+    assert "WARNING" in err
+    assert "spend cap" in err.lower()
+    assert "$5.00 of $5.00" in err
+    assert "scripted baseline" in err.lower()
+
+
+def test_runner_strict_still_fails_on_spend_cap(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("LLM_DAILY_LIMIT_USD", "5")
+    monkeypatch.setattr(llm, "spent_today", lambda *a, **k: 5.0)
+    _stubbed_run_with_events(monkeypatch, tmp_path, [_cap_event()])
+    assert run_exercise.main(["--agents", "model", "--strict"]) == 2
+    err = capsys.readouterr().err
+    assert "WARNING" in err
+    assert "$5.00 of $5.00" in err

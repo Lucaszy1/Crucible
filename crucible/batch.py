@@ -64,6 +64,11 @@ def parse_args(argv=None):
         action="store_true",
         help="Skip the on-disk model response cache for this batch",
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Abort the batch if the spend cap forces scripted fallback",
+    )
     return parser.parse_args(argv)
 
 
@@ -125,6 +130,16 @@ def main(argv=None) -> int:
                 max_turns=args.max_turns,
                 exercise_id=exercise_id,
             )
+            if run_exercise._spend_cap_hit(result.get("events", [])):
+                run_exercise._warn_spend_cap()
+                if args.strict and args.agents == "model":
+                    print(
+                        f"Strict mode: spend cap hit on {exercise_id}; "
+                        f"aborting batch instead of recording scripted "
+                        f"games as model games.",
+                        file=sys.stderr,
+                    )
+                    return 2
             score = result.get("score", {}) or {}
             cost = run_exercise.exercise_cost_since(spend_start)
             model_turns, fallback_turns = run_exercise._count_driven_vs_fallback(
