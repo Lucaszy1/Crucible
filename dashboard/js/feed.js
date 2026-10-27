@@ -122,13 +122,12 @@ function item(ev, index, attackMap, onEvidence, audit) {
   return wrap;
 }
 
-export function renderFeed(root, events, cursor, attackMap, onEvidence, auditsByTarget, limit = 60) {
+export function renderFeed(root, events, cursor, attackMap, onEvidence, auditsByTarget, opts = {}) {
   root.innerHTML = "";
   const lane = events.slice(0, cursor)
     .map((ev, i) => ({ ev, index: i + 1 }))
     .filter(({ ev }) => ev.actor === "red" || ev.actor === "blue")
-    .reverse()
-    .slice(0, limit);
+    .reverse();
   if (lane.length === 0) {
     const idle = document.createElement("p");
     idle.className = "empty";
@@ -146,4 +145,6 @@ export function renderFeed(root, events, cursor, attackMap, onEvidence, auditsBy
       root.append(item(ev, index, attackMap, onEvidence, audit));
     }
   }
+  // Newest renders on top, so live autoscroll pins the panel there.
+  if (opts.autoscroll) root.scrollTop = 0;
 }

@@ -158,7 +158,9 @@ function render(animate) {
   const states = reduceHostStates(slice);
   updateMap(mapRefs, states, slice, animate);
   const audits = reduceAudits(store.events, store.cursor);
-  renderFeed(els.feed, store.events, store.cursor, store.attackMap, onEvidenceRef, audits.byTarget);
+  renderFeed(els.feed, store.events, store.cursor, store.attackMap, onEvidenceRef, audits.byTarget, {
+    autoscroll: store.mode === "live",
+  });
   renderPresent(slice);
   els.status.textContent = statusSentence({
     latest: latestLaneEvent(slice),

@@ -22,13 +22,15 @@ function figures(events, cursor, weights, finalScore) {
   const shown = ended ? finalScore : live;
   let outcome;
   if (ended) {
-    outcome = OUTCOME_LABEL[shown.outcome] || shown.outcome;
+    outcome = shown.outcome === "red_succeeded" ? "Breached"
+      : shown.outcome === "blue_held" ? "Held"
+      : "Stalemate";
   } else if (live.secret_exfiltrated) {
-    outcome = "Red Succeeded";
+    outcome = "Breached";
   } else if (live.outcome === "blue_held") {
-    outcome = "Blue holding";
+    outcome = "Holding";
   } else {
-    outcome = "Under way";
+    outcome = "Live";
   }
   return { live, ended, shown, outcome };
 }
