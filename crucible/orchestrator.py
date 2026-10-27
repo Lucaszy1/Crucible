@@ -11,6 +11,15 @@ from __future__ import annotations
 import inspect
 
 from crucible import events, tools
+from crucible.agents.auditor import (
+    AUDIT_MODES,
+    SKIP_TOOLS as AUDIT_SKIP_TOOLS,
+    audit_blue_event,
+    audit_exercise as audit_blue_events,
+    audit_reasoning,
+    audit_result,
+    summarize_audits,
+)
 from crucible.agents.scripted_blue import ScriptedBlue
 from crucible.agents.scripted_red import ScriptedRed
 
@@ -209,12 +218,16 @@ def score_events(event_list: list, business_weights: dict | None = None) -> dict
     secret read when it occurs, else the exercise end. Downtime pct is
     that cost as a percent of maximum weighted uptime (weight sum times
     events counted). Blue score is 0 when the secret was read, else 100
-    minus downtime pct, so a fully quiet exercise scores 100.
+    minus downtime pct, so a fully quiet exercise scores 100. Auditor
+    events never shift positions or downtime: detection, containment,
+    and downtime count over red and blue events only, while the audit
+    metrics summarize the auditor events separately.
     """
-    compromised = _compromised_hosts(event_list)
-    secret_read = _secret_exfiltrated(event_list)
+    scoring = [event for event in (event_list or []) if event.get("actor") != "auditor"]
+    compromised = _compromised_hosts(scoring)
+    secret_read = _secret_exfiltrated(scoring)
     first_compromise_at = None
-    for index, event in enumerate(event_list, start=1):
+    for index, event in enumerate(scoring, start=1):
         if event.get("actor") != "red":
             continue
         result = event.get("result", {}) or {}
@@ -228,13 +241,13 @@ def score_events(event_list: list, business_weights: dict | None = None) -> dict
                 break
 
     first_red_at = None
-    for index, event in enumerate(event_list, start=1):
+    for index, event in enumerate(scoring, start=1):
         if event.get("actor") == "red":
             first_red_at = index
             break
 
     time_to_detect = None
-    for index, event in enumerate(event_list, start=1):
+    for index, event in enumerate(scoring, start=1):
         if event.get("actor") != "blue" or event.get("tool") != "report_finding":
             continue
         if (event.get("result", {}) or {}).get("ok") is True:
@@ -247,7 +260,7 @@ def score_events(event_list: list, business_weights: dict | None = None) -> dict
 
     time_to_contain = None
     if compromised and first_compromise_at is not None:
-        for index, event in enumerate(event_list, start=1):
+        for index, event in enumerate(scoring, start=1):
             if index < first_compromise_at:
                 continue
             if event.get("actor") != "blue":
@@ -260,13 +273,13 @@ def score_events(event_list: list, business_weights: dict | None = None) -> dict
 
     if secret_read:
         outcome = "red_succeeded"
-    elif _blue_acted(event_list):
+    elif _blue_acted(scoring):
         outcome = "blue_held"
     else:
         outcome = "stalemate"
 
     weights = _business_weights(business_weights)
-    counted = _events_for_downtime(event_list)
+    counted = _events_for_downtime(scoring)
     downtime_cost = _downtime_cost(counted, weights)
     downtime_pct = _downtime_pct(downtime_cost, weights, len(counted))
     if secret_read:
@@ -274,6 +287,7 @@ def score_events(event_list: list, business_weights: dict | None = None) -> dict
     else:
         blue_score = round(max(0.0, BLUE_SCORE_MAX - downtime_pct), 2)
 
+    audit = _audit_metrics(event_list)
     return {
         "time_to_detect": time_to_detect,
         "detection_delay": detection_delay,
@@ -282,11 +296,50 @@ def score_events(event_list: list, business_weights: dict | None = None) -> dict
         "compromised_hosts": sorted(compromised),
         "secret_exfiltrated": secret_read,
         "outcome": outcome,
-        "total_events": len(event_list),
+        "total_events": len(scoring),
         "downtime_cost": downtime_cost,
         "downtime_pct": downtime_pct,
         "blue_score": blue_score,
+        "justified_pct": audit["justified_pct"],
+        "unsupported_count": audit["unsupported_count"],
+        "invalid_refs_count": audit["invalid_refs_count"],
+        "mean_audit_score": audit["mean_audit_score"],
     }
+
+
+def _audit_metrics(event_list: list) -> dict:
+    """Aggregate auditor events into the four summary metrics.
+
+    Reads verdict, score, refs_valid, and cost from each auditor event
+    result. Logs without audits report None pct and score with zero
+    counts, so every score carries the same keys.
+    """
+    audits = []
+    for event in event_list or []:
+        if event.get("actor") != "auditor":
+            continue
+        result = event.get("result", {}) or {}
+        audits.append(
+            {
+                "verdict": result.get("verdict"),
+                "score": result.get("score"),
+                "refs_valid": result.get("refs_valid"),
+                "estimated_cost_usd": result.get("estimated_cost_usd", 0.0),
+            }
+        )
+    return summarize_audits(audits)
+
+
+def _log_audit(writer, audit: dict) -> dict:
+    """Append one audit record as an actor=auditor event."""
+    return writer.log(
+        actor="auditor",
+        tool="audit",
+        args={"target_event_id": audit.get("target_event_id", "")},
+        result=audit_result(audit),
+        reasoning_summary=audit_reasoning(audit),
+        evidence_refs=list(audit.get("evidence_checked", []) or []),
+    )
 
 
 def run_exercise(
@@ -295,6 +348,9 @@ def run_exercise(
     max_turns: int = MAX_TURNS,
     run_path=None,
     exercise_id: str | None = None,
+    audit: str = "off",
+    auditor_client=None,
+    auditor_use_cache: bool = True,
 ) -> dict:
     """Run one full exercise with alternating red and blue moves.
 
@@ -305,19 +361,29 @@ def run_exercise(
     team) so model exercises stay bounded. Agent errors are logged as
     events and the loop moves on, so an exercise never hangs on one bad
     turn.
+
+    Audit modes: off skips judging, end audits every blue action after
+    the loop, live audits each blue action right after it is logged.
+    Agents never see auditor events; scoring ignores them for positions
+    and downtime but summarizes them as audit metrics. The result adds
+    an audit_summary with the mode, the metrics, and the audit cost.
     """
+    if audit not in AUDIT_MODES:
+        raise ValueError(f"audit must be one of {', '.join(AUDIT_MODES)}: {audit!r}")
     red = red_agent if red_agent is not None else ScriptedRed()
     blue = blue_agent if blue_agent is not None else ScriptedBlue()
     tools.reset_state()
     writer = events.EventWriter(run_path if run_path else events.new_run_path(exercise_id))
+    audit_weights = _business_weights()
 
     turns_used = 0
     idle_rounds = 0
     capped_turns = max(1, min(int(max_turns), MAX_TURNS))
     for slot in range(capped_turns):
         agent = red if slot % 2 == 0 else blue
+        visible = [event for event in writer.events if event.get("actor") != "auditor"]
         try:
-            action = _next_action(agent, slot + 1, writer.events, capped_turns)
+            action = _next_action(agent, slot + 1, visible, capped_turns)
         except Exception as exc:
             idle_rounds = 0
             turns_used += 1
@@ -338,7 +404,7 @@ def run_exercise(
         idle_rounds = 0
         turns_used += 1
         result = run_tool(action.get("tool", ""), action.get("args", {}))
-        writer.log(
+        logged = writer.log(
             actor=getattr(agent, "actor", "unknown"),
             tool=action.get("tool", ""),
             args=action.get("args", {}),
@@ -346,9 +412,42 @@ def run_exercise(
             reasoning_summary=action.get("reasoning", ""),
             evidence_refs=action.get("evidence_refs", []),
         )
+        if (
+            audit == "live"
+            and logged.get("actor") == "blue"
+            and logged.get("tool") not in AUDIT_SKIP_TOOLS
+        ):
+            priors = [event for event in writer.events[:-1]
+                      if event.get("actor") != "auditor"]
+            _log_audit(writer, audit_blue_event(
+                logged, priors, exercise_id=exercise_id,
+                client=auditor_client, use_cache=auditor_use_cache,
+                weights=audit_weights))
         if _secret_exfiltrated(writer.events):
             break
 
+    if audit == "end":
+        for record in audit_blue_events(
+            writer.events, exercise_id=exercise_id, client=auditor_client,
+            use_cache=auditor_use_cache, weights=audit_weights,
+        ):
+            _log_audit(writer, record)
+
     score = score_events(writer.events)
     score["turns_used"] = turns_used
-    return {"events": writer.events, "score": score, "run_path": str(writer.path)}
+    summary = summarize_audits(
+        [
+            {
+                "verdict": (event.get("result", {}) or {}).get("verdict"),
+                "score": (event.get("result", {}) or {}).get("score"),
+                "refs_valid": (event.get("result", {}) or {}).get("refs_valid"),
+                "estimated_cost_usd": (event.get("result", {}) or {}).get(
+                    "estimated_cost_usd", 0.0),
+            }
+            for event in writer.events
+            if event.get("actor") == "auditor"
+        ]
+    )
+    summary["mode"] = audit
+    return {"events": writer.events, "score": score, "run_path": str(writer.path),
+            "audit_summary": summary}

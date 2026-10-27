@@ -332,3 +332,164 @@ def test_summarize_audits_metrics():
     assert empty["mean_audit_score"] is None
     assert empty["unsupported_count"] == 0
     assert empty["invalid_refs_count"] == 0
+
+
+# Orchestrator wiring: audit modes, event shape, score metrics.
+
+
+class _OneShotBlue:
+    actor = "blue"
+
+    def __init__(self, actions):
+        self._actions = list(actions)
+
+    def next_action(self, turn, history):
+        if not self._actions:
+            return None
+        return self._actions.pop(0)
+
+
+class _IdleRed:
+    actor = "red"
+
+    def next_action(self, turn, history):
+        return None
+
+
+def _run_tools(monkeypatch):
+    from crucible import orchestrator
+
+    def fake_run_tool(name, args):
+        if name == "read_logs":
+            return {"ok": True, "host": "db",
+                    "lines": [{"id": "db:1",
+                               "line": "signin ok user=a from=controller"}]}
+        if name == "report_finding":
+            return {"ok": True, "id": "finding-1"}
+        return {"ok": True}
+
+    monkeypatch.setattr(orchestrator, "run_tool", fake_run_tool)
+
+
+def test_end_mode_appends_auditor_events(tmp_path, monkeypatch):
+    from crucible import orchestrator
+
+    _isolated_llm(tmp_path, monkeypatch)
+    _run_tools(monkeypatch)
+    client = _FakeClient(_response(_judgment("justified", 9, "Fits well.")))
+    blue = _OneShotBlue([
+        {"tool": "read_logs", "args": {"host": "db"}, "reasoning": "look",
+         "evidence_refs": []},
+        {"tool": "report_finding", "args": {"text": "Sign-in on db"},
+         "reasoning": "tell", "evidence_refs": ["db:1"]},
+    ])
+    result = orchestrator.run_exercise(
+        _IdleRed(), blue, max_turns=4, run_path=tmp_path / "audit.jsonl",
+        exercise_id="ex-end", audit="end", auditor_client=client)
+    audits = [event for event in result["events"]
+              if event.get("actor") == "auditor"]
+    assert len(audits) == 2
+    assert len(client.calls) == 2
+    for event in audits:
+        result_payload = event["result"]
+        assert event["tool"] == "audit"
+        assert result_payload["target_event_id"].startswith("evt-")
+        assert result_payload["verdict"] == "justified"
+        assert result_payload["score"] == 9
+        assert result_payload["rationale"] == "Fits well."
+        assert isinstance(result_payload["refs_valid"], bool)
+        assert result_payload["model_used"] == "muse-wonder-1.0"
+        assert event["args"]["target_event_id"] == result_payload["target_event_id"]
+    assert result["score"]["justified_pct"] == 100.0
+    assert result["score"]["mean_audit_score"] == 9.0
+    assert result["score"]["unsupported_count"] == 0
+    assert result["score"]["invalid_refs_count"] == 0
+    assert result["audit_summary"]["mode"] == "end"
+    assert result["audit_summary"]["audit_count"] == 2
+    assert result["audit_summary"]["justified_pct"] == 100.0
+
+
+def test_live_mode_interleaves_and_hides_from_agents(tmp_path, monkeypatch):
+    from crucible import orchestrator
+
+    _isolated_llm(tmp_path, monkeypatch)
+    _run_tools(monkeypatch)
+    client = _FakeClient(_response(_judgment("premature", 5, "Too soon.")))
+    seen_lengths = []
+
+    class _WatchBlue(_OneShotBlue):
+        def next_action(self, turn, history):
+            seen_lengths.append(len(history))
+            assert all(event.get("actor") != "auditor" for event in history)
+            return super().next_action(turn, history)
+
+    blue = _WatchBlue([
+        {"tool": "read_logs", "args": {"host": "db"}, "reasoning": "look",
+         "evidence_refs": []},
+    ])
+    result = orchestrator.run_exercise(
+        _IdleRed(), blue, max_turns=4, run_path=tmp_path / "live.jsonl",
+        exercise_id="ex-live", audit="live", auditor_client=client)
+    actors = [event["actor"] for event in result["events"]]
+    assert actors == ["blue", "auditor"]
+    assert result["events"][1]["result"]["verdict"] == "premature"
+    assert result["audit_summary"]["mode"] == "live"
+    assert result["score"]["time_to_detect"] is None
+
+
+def test_off_mode_writes_no_audits(tmp_path, monkeypatch):
+    from crucible import orchestrator
+
+    _isolated_llm(tmp_path, monkeypatch)
+    _run_tools(monkeypatch)
+    client = _FakeClient(_response(_judgment("justified")))
+    blue = _OneShotBlue([
+        {"tool": "read_logs", "args": {"host": "db"}, "reasoning": "look",
+         "evidence_refs": []},
+    ])
+    result = orchestrator.run_exercise(
+        _IdleRed(), blue, max_turns=4, run_path=tmp_path / "off.jsonl",
+        audit="off", auditor_client=client)
+    assert all(event.get("actor") != "auditor" for event in result["events"])
+    assert len(client.calls) == 0
+    assert result["score"]["justified_pct"] is None
+    assert result["score"]["mean_audit_score"] is None
+    assert result["audit_summary"]["mode"] == "off"
+    assert result["audit_summary"]["audit_count"] == 0
+
+
+def test_bad_audit_mode_raises(tmp_path):
+    from crucible import orchestrator
+
+    with pytest.raises(ValueError):
+        orchestrator.run_exercise(_IdleRed(), _IdleRed(), max_turns=2,
+                                  run_path=tmp_path / "bad.jsonl",
+                                  audit="sometimes")
+
+
+def test_auditor_events_do_not_shift_scoring():
+    from crucible import orchestrator
+
+    history = [
+        _evt(1, "red", "scan_host", {"host": "web"}),
+        _evt(2, "blue", "read_logs", {"host": "web"}, {"ok": True}),
+        _evt(3, "red", "try_credential", {"host": "db"},
+             {"ok": True, "host": "db", "authenticated": True}),
+        _evt(4, "blue", "report_finding", {"text": "x"},
+             {"ok": True, "id": "finding-1"}),
+    ]
+    plain = orchestrator.score_events(history)
+    audit_event = _evt(5, "auditor", "audit", {"target_event_id": "evt-0002"},
+                       {"ok": True, "target_event_id": "evt-0002",
+                        "verdict": "justified", "score": 8,
+                        "rationale": "Fine.", "evidence_checked": [],
+                        "refs_valid": True, "model_used": "muse-wonder-1.0",
+                        "estimated_cost_usd": 0.01})
+    mixed = [history[0], history[1], audit_event, history[2], history[3]]
+    scored = orchestrator.score_events(mixed)
+    for key in ("time_to_detect", "detection_delay", "time_to_contain",
+                "outcome", "downtime_cost", "downtime_pct", "blue_score",
+                "total_events"):
+        assert scored[key] == plain[key], key
+    assert scored["justified_pct"] == 100.0
+    assert scored["mean_audit_score"] == 8.0
