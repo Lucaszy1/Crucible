@@ -64,12 +64,62 @@
 <div id="notice" class="notice" hidden></div>
 
 <nav class="tabs-main" aria-label="Views">
-  <button id="tabStory" class="active" aria-selected="true">Story</button>
+  <button id="tabArena" class="active" aria-selected="true">Arena</button>
+  <button id="tabStory" aria-selected="false">Story</button>
   <button id="tabDetails" aria-selected="false">Details</button>
   <button id="tabLearn" aria-selected="false">Learning</button>
 </nav>
 
-<div id="storyView">
+<div id="arenaView">
+<main class="arena-wrap">
+  <section class="arena-stage" id="arenaStage" aria-label="Exercise arena">
+    <div class="arena-pressure" aria-label="Contest pressure">
+      <span class="arena-pressure-label left">Red progress <b id="arenaRedPct">0%</b></span>
+      <div class="arena-pressure-track" aria-hidden="true">
+        <div id="arenaRedBar" class="arena-pressure-red" style="width:0%"></div>
+        <div id="arenaBlueBar" class="arena-pressure-blue" style="width:0%"></div>
+      </div>
+      <span class="arena-pressure-label right">Blue containment <b id="arenaBluePct">0%</b></span>
+    </div>
+    <div class="arena-mid">
+      <div class="arena-console red" aria-label="Attacker console">
+        <h3>Attacker</h3>
+        <p id="arenaRedLine" class="arena-line">Red is waiting.</p>
+      </div>
+      <div class="arena-center">
+        <svg id="arenaSvg" viewBox="0 0 640 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Range contest state"></svg>
+        <div id="arenaVignette" class="arena-vignette" hidden></div>
+        <div id="arenaBanner" class="arena-banner" hidden></div>
+      </div>
+      <div class="arena-console blue" aria-label="Defender console">
+        <h3>Defender</h3>
+        <p id="arenaBlueLine" class="arena-line">Blue is waiting.</p>
+        <div id="arenaVerdict" class="arena-verdict" hidden>
+          <span id="arenaVerdictIcon" aria-hidden="true"></span>
+          <span id="arenaVerdictWord"></span>
+        </div>
+      </div>
+    </div>
+    <p id="arenaCaption" class="arena-caption">No exercise loaded.</p>
+    <div class="arena-bottom">
+      <div class="score-strip arena-scores" aria-label="Score summary">
+        <dl class="score-big"><dt>Outcome</dt><dd id="arenaOutcome">—</dd></dl>
+        <dl class="score-big"><dt>Blue score</dt><dd id="arenaBlue">—</dd></dl>
+        <dl class="score-big"><dt>Downtime</dt><dd id="arenaDowntime">—</dd></dl>
+      </div>
+      <div class="arena-transport">
+        <button id="arenaPlay" class="btn small" title="Play (Space)" disabled>Play</button>
+        <button id="arenaPause" class="btn small" title="Pause (Space)" disabled>Pause</button>
+        <input id="arenaScrubber" type="range" min="0" max="0" value="0" step="1" aria-label="Arena event scrubber" disabled>
+        <span id="arenaPosition" class="position">0 / 0</span>
+        <button id="soundBtn" class="btn ghost small" title="Toggle sound (M)" aria-pressed="false">Sound off</button>
+      </div>
+    </div>
+  </section>
+</main>
+</div>
+
+<div id="storyView" hidden>
 <main class="story-grid">
   <div class="story-main">
     <section class="panel map-panel" aria-label="Network map">
