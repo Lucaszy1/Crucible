@@ -51,6 +51,15 @@ def test_every_host_tool_rejects_off_range_hosts():
                 tool(bad)
 
 
+def test_allowlist_includes_app_host():
+    assert "app" in sandbox.ALLOWED_HOSTS
+    assert sandbox.check_host("app") == "app"
+    scenario = sandbox.load_scenario()
+    assert "app" in scenario["hosts"]
+    assert scenario["services"]["app"]["service"] == "reportapi"
+    assert "/srv/app/" in scenario["readable_roots"]
+
+
 def test_scan_reports_down_host(monkeypatch):
     monkeypatch.setattr(sandbox, "is_running", lambda host: False)
     out = tools.scan_host("web")

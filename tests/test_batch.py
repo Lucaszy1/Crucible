@@ -50,7 +50,7 @@ def test_batch_args_parse():
     args = batch.parse_args(["--count", "1", "--prefix", "x"])
     assert args.agents == "scripted"
     assert args.no_cache is False
-    assert args.max_turns == 30
+    assert args.max_turns == 40
 
 
 def test_batch_rejects_zero_count(tmp_path, monkeypatch, capsys):

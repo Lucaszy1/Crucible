@@ -16,11 +16,14 @@ from crucible import sandbox, tools
 
 ROOT = Path(__file__).resolve().parent.parent
 DB = ROOT / "sandbox" / "db"
+APP = ROOT / "sandbox" / "app"
 WS = ROOT / "sandbox" / "workstation"
 SH = shutil.which("sh") or "/bin/sh"
 
 DB_SCRIPTS = ["signin.sh", "rotate-signin.sh", "reset-signin.sh",
               "read-file.sh", "list-files.sh"]
+APP_SCRIPTS = ["signin.sh", "rotate-signin.sh", "reset-signin.sh",
+               "read-file.sh", "list-files.sh"]
 WS_SCRIPTS = ["signin.sh", "read-file.sh", "list-files.sh"]
 TWIN_WRAPPERS = ["read-file.sh", "list-files.sh"]
 
@@ -42,7 +45,8 @@ def clean_state():
 
 
 def test_gate_scripts_pass_syntax_check():
-    for directory, names in ((DB, DB_SCRIPTS), (WS, WS_SCRIPTS)):
+    for directory, names in ((DB, DB_SCRIPTS), (APP, APP_SCRIPTS),
+                             (WS, WS_SCRIPTS)):
         for name in names:
             done = subprocess.run(
                 [SH, "-n", str(directory / name)],
@@ -61,7 +65,9 @@ def test_workstation_wrappers_match_db_twins():
     for name in TWIN_WRAPPERS:
         db_text = (DB / name).read_text(encoding="utf-8")
         ws_text = (WS / name).read_text(encoding="utf-8")
+        app_text = (APP / name).read_text(encoding="utf-8")
         assert _without_sync_line(db_text) == _without_sync_line(ws_text), name
+        assert _without_sync_line(db_text) == _without_sync_line(app_text), name
 
 
 def test_workstation_signin_logs_attempt_and_reports_no_gate(tmp_path):
@@ -131,7 +137,7 @@ def test_db_signin_keeps_user_to_one_log_line(tmp_path):
 def test_db_rotate_and_reset_log_outcomes(tmp_path):
     pass_file = tmp_path / "toy_pass"
     log_file = tmp_path / "toy.log"
-    pass_file.write_text("changeme", encoding="utf-8")
+    pass_file.write_text("dbops-fake-19", encoding="utf-8")
     env = {"TOY_PASS_FILE": str(pass_file), "TOY_LOG_FILE": str(log_file)}
     rotated = run_script(DB / "rotate-signin.sh", ["controller"], env)
     assert rotated.stdout.strip() == "ROTATED_OK"
@@ -140,11 +146,51 @@ def test_db_rotate_and_reset_log_outcomes(tmp_path):
     env["TOY_USER_FILE"] = str(user_file)
     reset = run_script(DB / "reset-signin.sh", ["controller"], env)
     assert reset.stdout.strip() == "RESET_OK"
-    assert pass_file.read_text(encoding="utf-8") == "changeme"
+    assert pass_file.read_text(encoding="utf-8") == "dbops-fake-19"
+    assert user_file.read_text(encoding="utf-8") == "dbops"
     assert log_file.read_text(encoding="utf-8").splitlines() == [
         "signin rotated from=controller",
         "signin reset from=controller",
     ]
+
+
+def test_app_signin_and_reset_use_shipped_default(tmp_path):
+    user_file = tmp_path / "toy_user"
+    pass_file = tmp_path / "toy_pass"
+    log_file = tmp_path / "toy.log"
+    user_file.write_text("svc-report", encoding="utf-8")
+    pass_file.write_text("password", encoding="utf-8")
+    env = {
+        "TOY_USER_FILE": str(user_file),
+        "TOY_PASS_FILE": str(pass_file),
+        "TOY_LOG_FILE": str(log_file),
+    }
+    good = run_script(APP / "signin.sh", ["svc-report", "password", "controller"], env)
+    assert good.stdout.strip() == "AUTH_OK"
+    bad = run_script(APP / "signin.sh", ["svc-report", "wrong", "controller"], env)
+    assert bad.stdout.strip() == "AUTH_FAIL"
+    rotated = run_script(APP / "rotate-signin.sh", ["controller"], env)
+    assert rotated.stdout.strip() == "ROTATED_OK"
+    reset = run_script(APP / "reset-signin.sh", ["controller"], env)
+    assert reset.stdout.strip() == "RESET_OK"
+    assert user_file.read_text(encoding="utf-8") == "svc-report"
+    assert pass_file.read_text(encoding="utf-8") == "password"
+    lines = log_file.read_text(encoding="utf-8").splitlines()
+    assert lines == [
+        "signin ok user=svc-report from=controller",
+        "signin fail user=svc-report from=controller",
+        "signin rotated from=controller",
+        "signin reset from=controller",
+    ]
+
+
+def test_app_config_holds_db_signin():
+    text = (APP / "config.ini").read_text(encoding="utf-8")
+    scenario = sandbox.load_scenario()
+    db_default = scenario["shipped_defaults"]["db"]
+    assert "dbops" in text
+    assert db_default["pass"] in text
+    assert "fake" in text.lower()
 
 
 def test_db_rotate_and_reset_without_gate_log_none(tmp_path):

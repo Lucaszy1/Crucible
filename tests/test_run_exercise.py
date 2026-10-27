@@ -39,7 +39,7 @@ def test_runner_scripted_flag(tmp_path, monkeypatch, capsys):
     assert run_exercise.main(["--agents", "scripted"]) == 0
     assert seen["red"] == ScriptedRed.__name__
     assert seen["blue"] == ScriptedBlue.__name__
-    assert seen["max_turns"] == 30
+    assert seen["max_turns"] == 40
     assert seen["stopped"] is True
     out = capsys.readouterr().out
     assert "agents=scripted" in out

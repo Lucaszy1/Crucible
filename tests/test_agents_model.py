@@ -398,10 +398,25 @@ def test_red_prompt_states_objective_and_pacing():
     assert "password" in RED_PROMPT
     assert "root" in RED_PROMPT
     assert "toor" in RED_PROMPT
+    assert "service accounts with password" in RED_PROMPT
     assert "hints worth acting on" in RED_PROMPT
     assert "no sign-in gate" in RED_PROMPT
     assert "do not try more credentials" in RED_PROMPT
     assert "act on the host it names" in RED_PROMPT
+    assert "svc-report" not in RED_PROMPT
+    assert "dbops" not in RED_PROMPT
+    assert "config.ini" not in RED_PROMPT
+
+
+def test_prompts_cover_app_host_without_answers():
+    assert "app" in RED_PROMPT
+    assert "app" in BLUE_PROMPT
+    for prompt in (RED_PROMPT, BLUE_PROMPT):
+        assert "svc-report" not in prompt
+        assert "dbops" not in prompt
+        assert "config.ini" not in prompt
+        assert "dbops-fake-19" not in prompt
+    assert _common.extract_evidence_ids("see app:3 for proof") == ["app:3"]
 
 
 def test_blue_prompt_states_detect_report_contain():
@@ -445,6 +460,7 @@ def test_blue_prompt_contain_immediately_on_host_activity():
 def test_blue_prompt_check_data_host_early_and_restore_after():
     assert "most likely heading toward" in BLUE_PROMPT
     assert "data host" in BLUE_PROMPT
+    assert "app and data hosts" in BLUE_PROMPT
     assert "worth doing early" in BLUE_PROMPT
     assert "consider restore_host" in BLUE_PROMPT
     assert "once red has stopped" in BLUE_PROMPT
@@ -512,15 +528,15 @@ def test_exercise_turn_cap(tmp_path, monkeypatch):
     run_path = tmp_path / "capped.jsonl"
     result = orchestrator.run_exercise(_Always(), _AlwaysBlue(), max_turns=50,
                                        run_path=run_path)
-    assert len(result["events"]) == 30
-    assert result["score"]["turns_used"] == 30
+    assert len(result["events"]) == 40
+    assert result["score"]["turns_used"] == 40
 
 
-def test_default_turn_cap_is_thirty():
-    assert orchestrator.MAX_TURNS == 30
-    assert _common.DEFAULT_MAX_TURNS == 30
+def test_default_turn_cap_is_forty():
+    assert orchestrator.MAX_TURNS == 40
+    assert _common.DEFAULT_MAX_TURNS == 40
     messages = red_build_messages(1, [])
-    assert "turn 1 of 30" in messages[1]["content"].lower()
+    assert "turn 1 of 40" in messages[1]["content"].lower()
 
 
 def _red_event(tool, args, result, index=1):

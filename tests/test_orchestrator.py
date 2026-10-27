@@ -173,17 +173,75 @@ def test_turn_loop_alternates_and_writes_jsonl(tmp_path, monkeypatch):
     monkeypatch.setattr(orchestrator, "run_tool", fake_run_tool)
     run_path = tmp_path / "exercise.jsonl"
     result = orchestrator.run_exercise(ScriptedRed(), ScriptedBlue(),
-                                       max_turns=10, run_path=run_path)
+                                       max_turns=20, run_path=run_path)
     actors = [entry["actor"] for entry in result["events"]]
-    assert actors == ["red", "blue"] * 5
+    assert actors == ["red", "blue"] * 5 + ["red", "red"]
+    assert len(result["events"]) == 12
     assert result["score"]["secret_exfiltrated"] is True
     assert result["score"]["time_to_detect"] is not None
     assert result["score"]["time_to_contain"] is not None
+    assert result["score"]["turns_used"] == 12
     assert run_path.exists()
     assert events.read_events(run_path) == result["events"]
     blue_report = next(entry for entry in result["events"]
                        if entry["actor"] == "blue" and entry["tool"] == "report_finding")
     assert blue_report["evidence_refs"] == ["web:0"]
+
+
+def test_run_stops_as_soon_as_secret_read(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_run_tool(name, args):
+        calls.append(name)
+        if name == "read_file":
+            return {"ok": True, "host": "db", "path": args["path"]}
+        return {"ok": True}
+
+    class _QuickRed:
+        actor = "red"
+
+        def next_action(self, turn, history):
+            if turn > 1:
+                return {"tool": "scan_host", "args": {"host": "web"},
+                        "reasoning": "extra", "evidence_refs": []}
+            return {"tool": "read_file",
+                    "args": {"host": "db", "path": "/secret/exercise_secret.txt"},
+                    "reasoning": "grab secret", "evidence_refs": []}
+
+    class _QuickBlue:
+        actor = "blue"
+
+        def next_action(self, turn, history):
+            return {"tool": "read_logs", "args": {"host": "web"},
+                    "reasoning": "inspect", "evidence_refs": []}
+
+    monkeypatch.setattr(orchestrator, "run_tool", fake_run_tool)
+    result = orchestrator.run_exercise(_QuickRed(), _QuickBlue(),
+                                       max_turns=10,
+                                       run_path=tmp_path / "quick.jsonl")
+    assert len(result["events"]) == 1
+    assert result["score"]["secret_exfiltrated"] is True
+    assert result["score"]["turns_used"] == 1
+
+
+def test_scripted_red_follows_longer_chain():
+    red = ScriptedRed()
+    actions = [red.next_action(turn, []) for turn in range(1, 9)]
+    assert [(action["tool"], action["args"].get("host")) for action in actions] == [
+        ("scan_host", "web"),
+        ("http_request", "web"),
+        ("try_credential", "app"),
+        ("read_file", "app"),
+        ("try_credential", "db"),
+        ("list_files", "db"),
+        ("read_file", "db"),
+        ("report_finding", None),
+    ]
+    assert actions[2]["args"]["user"] == "svc-report"
+    assert actions[3]["args"]["path"] == "/srv/app/config.ini"
+    assert actions[4]["args"]["user"] == "dbops"
+    assert actions[6]["args"]["path"] == "/secret/exercise_secret.txt"
+    assert red.next_action(9, []) is None
 
 
 def test_scripted_agents_make_zero_model_calls(monkeypatch):
@@ -204,7 +262,8 @@ def test_scripted_agents_make_zero_model_calls(monkeypatch):
 def test_start_raises_when_hosts_stay_down(monkeypatch):
     monkeypatch.setattr(sandbox, "_compose", lambda *a, **k: "")
     monkeypatch.setattr(sandbox, "status",
-                        lambda: {"web": True, "db": False, "workstation": False})
+                        lambda: {"web": True, "app": False, "db": False,
+                                 "workstation": False})
     with pytest.raises(sandbox.SandboxError) as excinfo:
         sandbox.start()
     assert "db" in str(excinfo.value)
@@ -214,8 +273,10 @@ def test_start_raises_when_hosts_stay_down(monkeypatch):
 def test_start_returns_state_when_all_up(monkeypatch):
     monkeypatch.setattr(sandbox, "_compose", lambda *a, **k: "")
     monkeypatch.setattr(sandbox, "status",
-                        lambda: {"web": True, "db": True, "workstation": True})
-    assert sandbox.start() == {"web": True, "db": True, "workstation": True}
+                        lambda: {"web": True, "app": True, "db": True,
+                                 "workstation": True})
+    assert sandbox.start() == {"web": True, "app": True, "db": True,
+                               "workstation": True}
 
 
 def _evt_host(actor, tool, host, ok=True, index=1, extra=None):
@@ -317,6 +378,34 @@ def test_score_accepts_weight_override():
 
 def test_business_weights_match_scenario():
     scenario = sandbox.load_scenario()
-    assert scenario["business_weights"] == {"web": 3, "db": 5, "workstation": 1}
-    assert orchestrator.DEFAULT_BUSINESS_WEIGHTS == {"web": 3, "db": 5, "workstation": 1}
+    assert scenario["business_weights"] == {"web": 3, "app": 3, "db": 5,
+                                            "workstation": 1}
+    assert orchestrator.DEFAULT_BUSINESS_WEIGHTS == {"web": 3, "app": 3, "db": 5,
+                                                     "workstation": 1}
     assert orchestrator.SECRET_PROTECTED_POINTS == 40
+
+
+def test_score_downtime_stops_at_secret_read():
+    history = [
+        _event("red", "scan_host", {"ok": True}, 1),
+        _evt_host("blue", "isolate_host", "web", True, 2),
+        _event("red", "read_file",
+               {"ok": True, "host": "db", "path": "/secret/exercise_secret.txt"}, 3),
+        _evt_host("blue", "isolate_host", "db", True, 4),
+        _event("red", "scan_host", {"ok": True}, 5),
+    ]
+    score = orchestrator.score_events(history)
+    assert score["secret_exfiltrated"] is True
+    assert score["downtime_cost"] == 6
+    assert score["blue_score"] == 0
+
+
+def test_score_downtime_counts_app_weight():
+    history = [
+        _event("red", "scan_host", {"ok": True}, 1),
+        _evt_host("blue", "isolate_host", "app", True, 2),
+        _event("red", "scan_host", {"ok": True}, 3),
+    ]
+    score = orchestrator.score_events(history)
+    assert score["downtime_cost"] == 6
+    assert score["blue_score"] == 34
