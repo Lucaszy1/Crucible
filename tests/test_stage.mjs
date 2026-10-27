@@ -4,7 +4,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  applyCamera, blueLine, dollyTarget, guardianPulse, intrusionLevel,
+  applyCamera, blueLine, dollyTarget, frameBudget, guardianPulse, intrusionLevel,
   laneFeed, redLine, stageLayout, stageWash, stepCamera,
 } from "../dashboard/js/stage.js";
 import { arenaGeometry, classicLayout, normalizeLayout } from "../dashboard/js/layout.js";
@@ -243,5 +243,41 @@ describe("entity levels", () => {
     assert.equal(stageWash([ADMIN, AUTH("app"), ev("x", "blue", "isolate_host", { host: "app" }, { ok: true })]), "calm");
     assert.equal(stageWash([ev("s", "red", "read_file", { host: "db" }, { ok: true, path: "/secret/x" })]), "alert");
     assert.equal(stageWash([ev("q", "red", "scan_host", { host: "web" }, { ok: true })]), "none");
+  });
+
+  it("stays full detail on fast frames", () => {
+    let avg = 16;
+    let low = false;
+    for (let i = 0; i < 60; i += 1) {
+      const next = frameBudget(avg, low, 12);
+      avg = next.avg;
+      low = next.low;
+    }
+    assert.equal(low, false);
+    assert.ok(avg < 17, String(avg));
+  });
+
+  it("drops to low detail on sustained slow frames", () => {
+    let avg = 16;
+    let low = false;
+    for (let i = 0; i < 120; i += 1) {
+      const next = frameBudget(avg, low, 50);
+      avg = next.avg;
+      low = next.low;
+    }
+    assert.equal(low, true);
+  });
+
+  it("recovers to full detail only when frames are fast again", () => {
+    const held = frameBudget(22, true, 20);
+    assert.equal(held.low, true);
+    let avg = 22;
+    let low = true;
+    for (let i = 0; i < 120; i += 1) {
+      const next = frameBudget(avg, low, 12);
+      avg = next.avg;
+      low = next.low;
+    }
+    assert.equal(low, false);
   });
 });

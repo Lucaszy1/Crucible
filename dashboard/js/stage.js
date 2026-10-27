@@ -407,6 +407,8 @@ export function initStage(canvas, opts) {
     hitstopUntil: 0,
     clock: 0,
     lastT: 0,
+    frameAvg: 16,
+    lowDetail: false,
     raf: 0,
     active: true,
     staticOnly: false,
@@ -758,6 +760,16 @@ export function setStageActive(refs, on) {
   if (refs.active && !refs.reduced) startStageLoop(refs);
 }
 
+// Rolling frame-time budget with hysteresis: slow machines drop to a
+// lower-detail pass (fewer particles, no grain) and recover cleanly.
+export function frameBudget(avg, low, dtMs) {
+  const dt = Math.min(100, Math.max(1, Number(dtMs) || 16));
+  const next = avg + (dt - avg) * 0.06;
+  if (!low && next > 26) return { avg: next, low: true };
+  if (low && next < 17) return { avg: next, low: false };
+  return { avg: next, low: Boolean(low) };
+}
+
 function startStageLoop(refs) {
   if (!refs || refs.raf || refs.reduced || !refs.active) return;
   const frames = typeof requestAnimationFrame === "function"
@@ -772,6 +784,9 @@ function startStageLoop(refs) {
     const t = typeof now === "number" ? now : refs.clock + 16;
     const dt = Math.max(1, Math.min(100, t - (refs.lastT || t - 16)));
     refs.lastT = t;
+    const budget = frameBudget(refs.frameAvg || 16, refs.lowDetail, dt);
+    refs.frameAvg = budget.avg;
+    refs.lowDetail = budget.low;
     if (t < refs.hitstopUntil) {
       drawStage(refs);
       return;
@@ -1411,9 +1426,11 @@ function paintLane(refs, ctx, side, lane) {
 
 function paintParticles(refs, ctx) {
   const t = refs.clock / 1000;
+  const step = refs.lowDetail ? 2 : 1;
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
-  for (const part of refs.particles) {
+  for (let i = 0; i < refs.particles.length; i += step) {
+    const part = refs.particles[i];
     const a = 0.25 + 0.35 * Math.abs(Math.sin(part.tw + t));
     ctx.strokeStyle = part.red ? `rgba(255,90,80,${a.toFixed(2)})` : `rgba(150,200,255,${a.toFixed(2)})`;
     ctx.lineWidth = part.r;
@@ -1467,7 +1484,7 @@ function paintOverlays(refs, ctx) {
   ctx.fillStyle = vig;
   ctx.fillRect(0, 0, cw, ch);
   const noise = refs.art && refs.art.noise;
-  if (noise && noise.width) {
+  if (noise && noise.width && !refs.lowDetail) {
     ctx.save();
     ctx.globalAlpha = 0.05;
     ctx.drawImage(noise, 0, 0, cw, ch);
