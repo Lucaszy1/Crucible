@@ -33,7 +33,7 @@ TEMPERATURE = 0.0
 MAX_RULES = 10
 RULE_LIMIT = 280
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 PLAYBOOK_JSON = ROOT / "playbooks" / "blue.json"
 PLAYBOOK_MD = ROOT / "playbooks" / "blue.md"
 

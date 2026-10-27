@@ -204,3 +204,9 @@ def test_save_and_load_roundtrip(tmp_path):
     assert "Restore after quiet. (from camp-2)" in text
     assert load_playbook(tmp_path / "missing.json") == empty_playbook()
     assert "No lessons yet." in render_markdown(empty_playbook())
+
+
+def test_playbook_paths_live_at_repo_root():
+    assert referee.PLAYBOOK_JSON == referee.ROOT / "playbooks" / "blue.json"
+    assert referee.PLAYBOOK_MD == referee.ROOT / "playbooks" / "blue.md"
+    assert (referee.ROOT / "crucible" / "agents").is_dir()
