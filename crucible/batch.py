@@ -26,6 +26,7 @@ CSV_FIELDS = (
     "detection_delay",
     "time_to_contain",
     "downtime_cost",
+    "downtime_pct",
     "blue_score",
     "red_attempts",
     "model_turns",
@@ -153,6 +154,7 @@ def main(argv=None) -> int:
                     "detection_delay": score.get("detection_delay"),
                     "time_to_contain": score.get("time_to_contain"),
                     "downtime_cost": score.get("downtime_cost", 0),
+                    "downtime_pct": score.get("downtime_pct", 0.0),
                     "blue_score": score.get("blue_score", 0),
                     "red_attempts": _red_attempts(result.get("events", [])),
                     "model_turns": model_turns,
@@ -164,6 +166,7 @@ def main(argv=None) -> int:
             print(
                 f"{exercise_id}: outcome={score.get('outcome', 'unknown')} "
                 f"delay={delay if delay is not None else 'no'} "
+                f"downtime={score.get('downtime_pct', 0.0)}% "
                 f"blue_score={score.get('blue_score', 0)} "
                 f"cost=${cost:.4f}"
             )
@@ -195,6 +198,7 @@ def main(argv=None) -> int:
         [row["detection_delay"] for row in rows if row["detection_delay"] is not None]
     )
     mean_blue = _mean([row["blue_score"] for row in rows])
+    mean_downtime = _mean([row["downtime_pct"] for row in rows])
     total_cost = sum(row["estimated_cost_usd"] for row in rows)
 
     print(f"Batch done: {len(rows)} exercises (prefix={args.prefix})")
@@ -203,6 +207,7 @@ def main(argv=None) -> int:
         print("Mean detection delay: no detections")
     else:
         print(f"Mean detection delay: {mean_delay:.2f} events")
+    print(f"Mean downtime: {mean_downtime:.2f}%" if mean_downtime is not None else "Mean downtime: no")
     print(f"Mean blue_score: {mean_blue:.2f}" if mean_blue is not None else "Mean blue_score: no")
     print(f"Total estimated cost: ${total_cost:.4f}")
     print(f"CSV: {path}")

@@ -62,13 +62,13 @@ def test_batch_rejects_zero_count(tmp_path, monkeypatch, capsys):
 def test_batch_writes_csv_and_summary(tmp_path, monkeypatch, capsys):
     seen = _stub_common(monkeypatch, tmp_path)
     plans = {
-        "demo-1": ("blue_held", 3, None, 9, 31, 0.02),
-        "demo-2": ("red_succeeded", 5, 8, 0, 0, 0.03),
-        "demo-3": ("stalemate", None, None, 0, 40, 0.00),
+        "demo-1": ("blue_held", 3, None, 9, 18.75, 81.25, 0.02),
+        "demo-2": ("red_succeeded", 5, 8, 0, 0.0, 0, 0.03),
+        "demo-3": ("stalemate", None, None, 0, 0.0, 100.0, 0.00),
     }
 
     def fake_exercise(red, blue, max_turns=30, run_path=None, exercise_id=None):
-        outcome, delay, contain, down, blue, cost = plans[exercise_id]
+        outcome, delay, contain, down, pct, blue, cost = plans[exercise_id]
         if cost:
             llm.record_spend(model="muse-spark-1.3", input_tokens=1000,
                              output_tokens=0, exercise_id=exercise_id)
@@ -91,7 +91,7 @@ def test_batch_writes_csv_and_summary(tmp_path, monkeypatch, capsys):
                       "hosts_compromised": 0, "compromised_hosts": [],
                       "secret_exfiltrated": outcome == "red_succeeded",
                       "outcome": outcome, "downtime_cost": down,
-                      "blue_score": blue},
+                      "downtime_pct": pct, "blue_score": blue},
             "run_path": str(tmp_path / f"{exercise_id}.jsonl"),
         }
 
@@ -109,7 +109,8 @@ def test_batch_writes_csv_and_summary(tmp_path, monkeypatch, capsys):
     assert rows[0]["outcome"] == "blue_held"
     assert rows[0]["detection_delay"] == "3"
     assert rows[0]["downtime_cost"] == "9"
-    assert rows[0]["blue_score"] == "31"
+    assert rows[0]["downtime_pct"] == "18.75"
+    assert rows[0]["blue_score"] == "81.25"
     assert rows[0]["model_turns"] == "4"
     assert rows[0]["fallback_turns"] == "1"
     assert rows[0]["red_attempts"] == "db=2, web=1"
@@ -119,12 +120,14 @@ def test_batch_writes_csv_and_summary(tmp_path, monkeypatch, capsys):
 
     out = capsys.readouterr().out
     assert "demo-1: outcome=blue_held" in out
+    assert "downtime=18.75%" in out
     assert "cost=$" in out
     assert "Red wins: 1" in out
     assert "blue holds: 1" in out.lower()
     assert "stalemates: 1" in out.lower()
     assert "Mean detection delay: 4.00" in out
-    assert "Mean blue_score: 23.67" in out
+    assert "Mean downtime: 6.25%" in out
+    assert "Mean blue_score: 60.42" in out
     assert "Total estimated cost: $0.0500" in out
     assert "CSV:" in out
 
@@ -147,7 +150,9 @@ def test_batch_model_flag_uses_cache_option(tmp_path, monkeypatch):
         return {"events": [], "score": {"outcome": "stalemate",
                                        "detection_delay": None,
                                        "time_to_contain": None,
-                                       "downtime_cost": 0, "blue_score": 40},
+                                       "downtime_cost": 0,
+                                       "downtime_pct": 0.0,
+                                       "blue_score": 100.0},
                 "run_path": str(tmp_path / "x.jsonl")}
 
     monkeypatch.setattr(batch, "ModelRed", _RecordingRed)
@@ -167,7 +172,7 @@ def test_batch_mean_handles_no_detections(tmp_path, monkeypatch, capsys):
         return {"events": [],
                 "score": {"outcome": "stalemate", "detection_delay": None,
                           "time_to_contain": None, "downtime_cost": 0,
-                          "blue_score": 40},
+                          "downtime_pct": 0.0, "blue_score": 100.0},
                 "run_path": str(tmp_path / "x.jsonl")}
 
     monkeypatch.setattr(orchestrator, "run_exercise", fake_exercise)
@@ -175,7 +180,8 @@ def test_batch_mean_handles_no_detections(tmp_path, monkeypatch, capsys):
     assert batch.main(["--count", "2", "--prefix", "quiet"]) == 0
     out = capsys.readouterr().out
     assert "Mean detection delay: no detections" in out
-    assert "Mean blue_score: 40.00" in out
+    assert "Mean downtime: 0.00%" in out
+    assert "Mean blue_score: 100.00" in out
 
 
 def _cap_event():
@@ -188,7 +194,8 @@ def _cap_event():
 
 def _cap_score():
     return {"outcome": "stalemate", "detection_delay": None,
-            "time_to_contain": None, "downtime_cost": 0, "blue_score": 40}
+            "time_to_contain": None, "downtime_cost": 0,
+            "downtime_pct": 0.0, "blue_score": 100.0}
 
 
 def test_batch_strict_flag_parses():

@@ -100,6 +100,10 @@ def _summary(score: dict) -> list:
     delay = score.get("detection_delay")
     contain = score.get("time_to_contain")
     hosts = ", ".join(score.get("compromised_hosts", [])) or "none"
+    try:
+        downtime_pct = f"{float(score.get('downtime_pct', 0.0)):.2f}%"
+    except (TypeError, ValueError):
+        downtime_pct = f"{score.get('downtime_pct', 0.0)}%"
     return [
         f"Turns used: {score.get('turns_used')} of {score.get('total_events')} events",
         f"Outcome: {score.get('outcome', 'unknown')}",
@@ -109,6 +113,7 @@ def _summary(score: dict) -> list:
         f"Hosts compromised: {score.get('hosts_compromised')} ({hosts})",
         f"Secret exfiltrated: {'yes' if score.get('secret_exfiltrated') else 'no'}",
         f"Downtime cost: {score.get('downtime_cost', 0)}",
+        f"Downtime: {downtime_pct}",
         f"Blue score: {score.get('blue_score', 0)}",
     ]
 
