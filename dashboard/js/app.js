@@ -329,7 +329,7 @@ function render(animate) {
     {
       weights: store.weights, finalScore: store.finalScore, label: store.label,
       display: display ? { label: display.label, line: outcomeLine(display.key) } : null,
-      layout,
+      layout, attackMap: store.attackMap,
     },
     !animate,
   );

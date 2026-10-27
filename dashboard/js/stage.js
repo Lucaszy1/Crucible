@@ -814,6 +814,7 @@ export function renderStageStatic(refs, events, cursor, opts, instant) {
     refs.events = list;
     refs.cursor = at;
     refs.states = states;
+    refs.attackMap = o.attackMap || null;
     refs.snap = {
       states, blocks, hostOrder: hosts, pressure,
       level: prog.level, notches: prog.notches, total: prog.total,
@@ -884,6 +885,7 @@ export function stageNotify(refs, ev, states, speed) {
   refs.tug = pressureValue(at, refs.layout && refs.layout.hosts ? refs.layout : null);
   if (ev.actor === "red") refs.surge.red = refs.clock + 900;
   if (ev.actor === "blue") refs.surge.blue = refs.clock + 900;
+  const prevRed = refs.lastRedHost;
   if (ev.actor === "red" && ev.tool === "try_credential" && (ev.result || {}).authenticated === true) {
     refs.lastRedHost = eventHost(ev);
   }
@@ -894,6 +896,13 @@ export function stageNotify(refs, ev, states, speed) {
         color: ev.actor === "red" ? "255,90,80" : "127,212,255", r0: 8, r1: 64 });
       spawnSparks(refs, orb.x, orb.y, ev.actor === "red" ? "red" : "blue", 10);
     }
+    for (const fx of fxForEvent(ev, { jewel: refs.jewel, lastRedHost: prevRed })) {
+      refs.fx.push({ ...fx, t0: refs.clock });
+    }
+  }
+  if (ev.actor === "red" && ev.tool === "read_file" && (ev.result || {}).ok === true &&
+      String((ev.result || {}).path || "").startsWith("/secret/")) {
+    refs.trauma = Math.min(1, refs.trauma + 0.8);
   }
   const host = eventHost(ev);
   if (host && refs.nodes[host]) {
@@ -1096,6 +1105,65 @@ function updateStageDebug(refs, force) {
   box.textContent = `stage ${refs.fps || 0}fps ${avg.toFixed(1)}ms p95 ${p95.toFixed(1)} ` +
     `${refs.lowDetail ? "LOW" : "FULL"} blanks ${refs.blankFrames || 0}` +
     (refs.lastError ? `\n! ${refs.lastError}` : "");
+}
+
+// Event-to-effects map, pure: each real event names the beams it
+// fires. ctx carries { jewel, lastRedHost }. Lateral moves draw a
+// tendril from the previous red foothold to the new host.
+export function fxForEvent(ev, ctx) {
+  if (!ev) return [];
+  const c = ctx || {};
+  const host = eventHost(ev);
+  const r = ev.result || {};
+  const failed = r.ok === false;
+  if (ev.actor === "red") {
+    if (failed && ev.tool !== "try_credential") return host ? [{ kind: "fizzle", host, dur: 700 }] : [];
+    switch (ev.tool) {
+      case "scan_host":
+        return host ? [{ kind: "fan", host, dur: 900 }] : [];
+      case "http_request":
+      case "list_files":
+        return host ? [{ kind: "needle", host, dur: 800 }] : [];
+      case "try_credential":
+        if (r.authenticated !== true) return host ? [{ kind: "keys", host, dur: 900 }] : [];
+        if (!host) return [];
+        const out = [{ kind: "pierce", host, dur: 1000 }];
+        if (c.lastRedHost && c.lastRedHost !== host) {
+          out.push({ kind: "tendril", from: c.lastRedHost, host, dur: 1200 });
+        }
+        return out;
+      case "read_file": {
+        if (!host) return [];
+        const path = String(r.path || (ev.args || {}).path || "");
+        if (r.ok === true && path.startsWith("/secret/")) return [{ kind: "grab", host, dur: 1400 }];
+        if (r.ok === true) return [{ kind: "siphon", host, dur: 1100 }];
+        return [{ kind: "fizzle", host, dur: 700 }];
+      }
+      default:
+        return [];
+    }
+  }
+  if (ev.actor === "blue") {
+    if (failed) return host ? [{ kind: "fizzle", host, dur: 700, color: "blue" }] : [];
+    switch (ev.tool) {
+      case "read_logs":
+        return host ? [{ kind: "scanring", host, dur: 900 }] : [];
+      case "report_finding":
+        return [{ kind: "flare", dur: 800 }];
+      case "isolate_host":
+        return host ? [
+          { kind: "slam", host, dur: 1000 },
+          { kind: "ring", host, t0: 0, dur: 800, color: "127,212,255", r0: 10, r1: 90 },
+        ] : [];
+      case "patch_service":
+        return host ? [{ kind: "sweep", host, dur: 900 }] : [];
+      case "restore_host":
+        return host ? [{ kind: "reconnect", host, dur: 1000 }] : [];
+      default:
+        return [];
+    }
+  }
+  return [];
 }
 
 // Clash orb position on the rail: red pressure pushes it toward the
@@ -1904,7 +1972,38 @@ function paintFx(refs, ctx) {
   for (const fx of refs.fx) {
     const age = refs.clock - fx.t0;
     if (age < 0 || age > fx.dur + 200) continue;
-    if (fx.kind === "ring") paintFxRing(ctx, fx, age);
+    const p = Math.max(0, Math.min(1, age / fx.dur));
+    switch (fx.kind) {
+      case "ring":
+        paintFxRing(ctx, fx, age, fxPoint(refs, fx));
+        break;
+      case "fan":
+        paintFxFan(refs, ctx, fx, p);
+        break;
+      case "needle":
+        paintFxNeedle(refs, ctx, fx, p);
+        break;
+      case "keys":
+        paintFxKeys(refs, ctx, fx, p);
+        break;
+      case "pierce":
+        paintFxPierce(refs, ctx, fx, p, false);
+        break;
+      case "grab":
+        paintFxPierce(refs, ctx, fx, p, true);
+        break;
+      case "tendril":
+        paintFxTendril(refs, ctx, fx, p);
+        break;
+      case "siphon":
+        paintFxSiphon(refs, ctx, fx, p);
+        break;
+      case "fizzle":
+        paintFxFizzle(refs, ctx, fx, p);
+        break;
+      default:
+        break;
+    }
   }
   if (refs.sparks.length > 0) {
     ctx.save();
@@ -1925,7 +2024,39 @@ function paintFx(refs, ctx) {
   }
 }
 
-function paintFxRing(ctx, fx, age) {
+function fxPoint(refs, fx) {
+  if (typeof fx.x === "number" && typeof fx.y === "number") return { x: fx.x, y: fx.y, r: 0 };
+  if (fx.host) {
+    const at = hostScreen(refs, fx.host);
+    if (at) return at;
+  }
+  return null;
+}
+
+function entityCore(refs, side) {
+  const slots = refs.stage.entities;
+  const slot = side === "blue" ? slots.guardian : slots.intrusion;
+  return { x: slot.x, y: slot.y, r: slot.r };
+}
+
+function beamStroke(ctx, x0, y0, x1, y1, color, width, alpha) {
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.lineCap = "round";
+  ctx.strokeStyle = `rgba(${color},${(alpha * 0.35).toFixed(2)})`;
+  ctx.lineWidth = width * 3;
+  ctx.beginPath();
+  ctx.moveTo(x0, y0);
+  ctx.lineTo(x1, y1);
+  ctx.stroke();
+  ctx.strokeStyle = `rgba(${color},${alpha.toFixed(2)})`;
+  ctx.lineWidth = width;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function paintFxRing(ctx, fx, age, pt) {
+  if (!pt) return;
   const p = Math.max(0, Math.min(1, age / fx.dur));
   const r = (fx.r0 || 8) + ((fx.r1 || 64) - (fx.r0 || 8)) * (1 - (1 - p) * (1 - p));
   ctx.save();
@@ -1933,8 +2064,211 @@ function paintFxRing(ctx, fx, age) {
   ctx.strokeStyle = `rgba(${fx.color || "255,255,255"},${(0.85 * (1 - p)).toFixed(2)})`;
   ctx.lineWidth = 3 * (1 - p) + 1;
   ctx.beginPath();
-  ctx.arc(fx.x, fx.y, r, 0, 6.283);
+  ctx.arc(pt.x, pt.y, r, 0, 6.283);
   ctx.stroke();
+  ctx.restore();
+}
+
+// Scan: a fan of rays sweeps from the Intrusion across the target.
+function paintFxFan(refs, ctx, fx, p) {
+  const at = fxPoint(refs, fx);
+  if (!at) return;
+  const from = entityCore(refs, "red");
+  const base = Math.atan2(at.y - from.y, at.x - from.x);
+  const dist = Math.hypot(at.x - from.x, at.y - from.y);
+  const sweep = Math.sin(p * Math.PI) * 0.5;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = -2; i <= 2; i += 1) {
+    const a = base + i * 0.12 + sweep * 0.4;
+    const len = dist * Math.min(1, p * 1.6);
+    ctx.strokeStyle = `rgba(255,90,80,${(0.5 * (1 - p) * (1 - Math.abs(i) / 3)).toFixed(2)})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(from.x + Math.cos(a) * len, from.y + Math.sin(a) * len);
+    ctx.stroke();
+  }
+  ctx.restore();
+  if (p > 0.65) {
+    paintFxRing(ctx, { ...fx, r0: at.r + 4, r1: at.r + 34, color: "255,90,80" },
+      (p - 0.65) * fx.dur, at);
+  }
+}
+
+// Probe: thin flickering needle beams.
+function paintFxNeedle(refs, ctx, fx, p) {
+  const at = fxPoint(refs, fx);
+  if (!at) return;
+  const from = entityCore(refs, "red");
+  const flick = 0.6 + 0.4 * Math.sin(p * 40);
+  for (const off of [-5, 0, 5]) {
+    const dx = at.x - from.x;
+    const dy = at.y - from.y;
+    const len = Math.hypot(dx, dy) || 1;
+    beamStroke(ctx, from.x - (dy / len) * off, from.y + (dx / len) * off,
+      from.x + dx * Math.min(1, p * 1.4) - (dy / len) * off,
+      from.y + dy * Math.min(1, p * 1.4) + (dx / len) * off,
+      "255,120,100", 1.5, flick * (1 - p * 0.5));
+  }
+  if (p > 0.5) {
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = `rgba(255,160,140,${((p - 0.5) * 1.6).toFixed(2)})`;
+    ctx.beginPath();
+    ctx.arc(at.x, at.y, 4 + (p - 0.5) * 10, 0, 6.283);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+// Credential guess: key shards fly out and bounce off.
+function paintFxKeys(refs, ctx, fx, p) {
+  const at = fxPoint(refs, fx);
+  if (!at) return;
+  const from = entityCore(refs, "red");
+  const leg = p < 0.5 ? p * 2 : (1 - p) * 2;
+  for (let i = 0; i < 3; i += 1) {
+    const lag = i * 0.12;
+    const q = Math.max(0, Math.min(1, leg - lag));
+    const x = from.x + (at.x - from.x) * q;
+    const y = from.y + (at.y - from.y) * q - Math.sin(q * Math.PI) * 26;
+    const s = 7;
+    const a = q * 9 + i;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(a);
+    ctx.fillStyle = `rgba(255,150,130,${(0.9 * (1 - p * 0.4)).toFixed(2)})`;
+    ctx.beginPath();
+    ctx.moveTo(0, -s);
+    ctx.lineTo(s * 0.7, s * 0.6);
+    ctx.lineTo(-s * 0.7, s * 0.6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  if (p > 0.35 && p < 0.8) {
+    ctx.save();
+    ctx.globalAlpha = (0.9 * (1 - (p - 0.35) / 0.45)).toFixed(2);
+    ctx.strokeStyle = "#ff5a4a";
+    ctx.lineWidth = 3;
+    const r = at.r * 0.4;
+    ctx.beginPath();
+    ctx.moveTo(at.x - r, at.y - r);
+    ctx.lineTo(at.x + r, at.y + r);
+    ctx.moveTo(at.x + r, at.y - r);
+    ctx.lineTo(at.x - r, at.y + r);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// Sign-in: pierce the host with a flare. Grab: the jewel snatch,
+// brighter and wider.
+function paintFxPierce(refs, ctx, fx, p, grab) {
+  const at = fxPoint(refs, fx);
+  if (!at) return;
+  const from = entityCore(refs, "red");
+  const grow = Math.min(1, p * 3);
+  beamStroke(ctx, from.x, from.y,
+    from.x + (at.x - from.x) * grow, from.y + (at.y - from.y) * grow,
+    grab ? "255,220,200" : "255,90,80", grab ? 7 : 4, 0.9 * (1 - p * 0.6));
+  if (p > 0.3) {
+    const q = (p - 0.3) / 0.7;
+    const sprites = refs.sprites || {};
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    drawGlow(ctx, grab ? sprites.white : sprites.red, at.x, at.y,
+      at.r * (grab ? 2.4 : 1.8) * (0.5 + q), grab ? 0.9 : 0.75 * (1 - q * 0.5));
+    ctx.restore();
+    paintFxRing(ctx, { ...fx, r0: at.r, r1: at.r + (grab ? 90 : 50), color: "255,110,100" },
+      q * fx.dur, at);
+  }
+}
+
+// Lateral move: a tendril crawls the link from the old foothold.
+function paintFxTendril(refs, ctx, fx, p) {
+  const a = hostScreen(refs, fx.from);
+  const b = hostScreen(refs, fx.host);
+  if (!a || !b) return;
+  const mx = (a.x + b.x) / 2;
+  const my = (a.y + b.y) / 2 - Math.abs(b.x - a.x) * 0.12;
+  const head = Math.min(1, p * 1.2);
+  const steps = 24;
+  const upto = Math.max(2, Math.floor(steps * head));
+  const quad = (t0) => ({
+    x: (1 - t0) * (1 - t0) * a.x + 2 * (1 - t0) * t0 * mx + t0 * t0 * b.x,
+    y: (1 - t0) * (1 - t0) * a.y + 2 * (1 - t0) * t0 * my + t0 * t0 * b.y,
+  });
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.lineCap = "round";
+  ctx.strokeStyle = `rgba(255,70,60,${(0.85 * (1 - p * 0.5)).toFixed(2)})`;
+  ctx.lineWidth = 3.5;
+  ctx.beginPath();
+  for (let i = 0; i <= upto; i += 1) {
+    const pt = quad(i / steps);
+    if (i === 0) ctx.moveTo(pt.x, pt.y);
+    else ctx.lineTo(pt.x, pt.y);
+  }
+  ctx.stroke();
+  const tip = quad(head);
+  ctx.fillStyle = "rgba(255,200,190,0.95)";
+  ctx.beginPath();
+  ctx.arc(tip.x, tip.y, 5, 0, 6.283);
+  ctx.fill();
+  ctx.restore();
+}
+
+// File read: a stream of data pulls back toward the Intrusion.
+function paintFxSiphon(refs, ctx, fx, p) {
+  const at = fxPoint(refs, fx);
+  if (!at) return;
+  const from = entityCore(refs, "red");
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = 0; i < 6; i += 1) {
+    const q = ((p * 1.4 - i / 6) % 1 + 1) % 1;
+    const x = at.x + (from.x - at.x) * q;
+    const y = at.y + (from.y - at.y) * q;
+    ctx.fillStyle = `rgba(255,150,130,${(0.85 * Math.sin(q * Math.PI)).toFixed(2)})`;
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, 6.283);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// Failed actions sputter and die short of the target.
+function paintFxFizzle(refs, ctx, fx, p) {
+  const at = fxPoint(refs, fx);
+  if (!at) return;
+  const red = fx.color !== "blue";
+  const from = entityCore(refs, red ? "red" : "blue");
+  const color = red ? "255,120,100" : "140,200,255";
+  const reach = 0.35 + 0.1 * Math.sin(p * 30);
+  const hx = from.x + (at.x - from.x) * reach;
+  const hy = from.y + (at.y - from.y) * reach;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.lineCap = "round";
+  for (let i = 0; i < 4; i += 1) {
+    const t0 = i / 4;
+    const t1 = t0 + 0.14;
+    if (Math.sin(p * 47 + i * 9) > -0.2) continue;
+    ctx.strokeStyle = `rgba(${color},${(0.7 * (1 - p)).toFixed(2)})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(from.x + (hx - from.x) * t0, from.y + (hy - from.y) * t0);
+    ctx.lineTo(from.x + (hx - from.x) * t1, from.y + (hy - from.y) * t1);
+    ctx.stroke();
+  }
+  ctx.fillStyle = `rgba(150,150,160,${(0.5 * p * (1 - p) * 4 * 0.5).toFixed(2)})`;
+  for (let i = 0; i < 3; i += 1) {
+    ctx.beginPath();
+    ctx.arc(hx + (i - 1) * 8, hy - p * 20, 4 + p * 8, 0, 6.283);
+    ctx.fill();
+  }
   ctx.restore();
 }
 

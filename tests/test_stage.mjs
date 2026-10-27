@@ -4,8 +4,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  applyCamera, blueLine, clashOrbX, dollyTarget, frameBudget, frameP95, guardianPulse, intrusionLevel,
-  laneFeed, paintGuardian, paintIntrusion, redLine, stageLayout, stageWash, stepCamera,
+  applyCamera, blueLine, clashOrbX, dollyTarget, frameBudget, frameP95, fxForEvent, guardianPulse,
+  intrusionLevel, laneFeed, paintGuardian, paintIntrusion, redLine, stageLayout, stageWash, stepCamera,
 } from "../dashboard/js/stage.js";
 import { arenaGeometry, classicLayout, normalizeLayout } from "../dashboard/js/layout.js";
 
@@ -321,6 +321,42 @@ describe("entity levels", () => {
     assert.doesNotThrow(() => paintGuardian(stub, {}, {}, 64, 64, 52, 0.15, 0));
     assert.ok(calls.includes("clip"), "texture path clips");
     assert.ok(calls.includes("fillText"), "glyphs paint");
+  });
+
+  it("maps red tools to beams", () => {
+    const kinds = (ev, ctx) => fxForEvent(ev, ctx).map((f) => f.kind);
+    assert.deepEqual(kinds(ev("a", "red", "scan_host", { host: "web" }, { ok: true })), ["fan"]);
+    assert.deepEqual(kinds(ev("b", "red", "http_request", { host: "web" }, { ok: true })), ["needle"]);
+    assert.deepEqual(kinds(ev("c", "red", "list_files", { host: "app" }, { ok: true })), ["needle"]);
+    assert.deepEqual(kinds(ev("d", "red", "try_credential", { host: "app" }, { ok: true })), ["keys"]);
+    assert.deepEqual(kinds(ev("e", "red", "try_credential", { host: "app" },
+      { ok: true, authenticated: true }), {}), ["pierce"]);
+    assert.deepEqual(kinds(ev("f", "red", "try_credential", { host: "db" },
+      { ok: true, authenticated: true }), { lastRedHost: "app" }), ["pierce", "tendril"]);
+    const tendril = fxForEvent(ev("f", "red", "try_credential", { host: "db" },
+      { ok: true, authenticated: true }), { lastRedHost: "app" })[1];
+    assert.equal(tendril.from, "app");
+    assert.deepEqual(kinds(ev("g", "red", "try_credential", { host: "app" },
+      { ok: true, authenticated: true }), { lastRedHost: "app" }), ["pierce"]);
+    assert.deepEqual(kinds(ev("h", "red", "read_file", { host: "db", path: "/etc/x" },
+      { ok: true })), ["siphon"]);
+    assert.deepEqual(kinds(ev("i", "red", "read_file", { host: "db" },
+      { ok: true, path: "/secret/crown" })), ["grab"]);
+    assert.deepEqual(kinds(ev("j", "red", "report_finding", {}, { ok: true })), []);
+    assert.deepEqual(kinds(ev("k", "red", "scan_host", { host: "web" }, { ok: false })), ["fizzle"]);
+    assert.deepEqual(kinds(ev("l", "red", "read_file", { host: "db" }, { ok: false })), ["fizzle"]);
+  });
+
+  it("maps blue tools to beams", () => {
+    const kinds = (ev, ctx) => fxForEvent(ev, ctx).map((f) => f.kind);
+    assert.deepEqual(kinds(ev("a", "blue", "read_logs", { host: "web" }, { ok: true })), ["scanring"]);
+    assert.deepEqual(kinds(ev("b", "blue", "report_finding", {}, { ok: true })), ["flare"]);
+    assert.deepEqual(kinds(ev("c", "blue", "isolate_host", { host: "app" }, { ok: true })), ["slam", "ring"]);
+    assert.deepEqual(kinds(ev("d", "blue", "patch_service", { host: "app" }, { ok: true })), ["sweep"]);
+    assert.deepEqual(kinds(ev("e", "blue", "restore_host", { host: "app" }, { ok: true })), ["reconnect"]);
+    assert.deepEqual(kinds(ev("f", "blue", "isolate_host", { host: "app" }, { ok: false })), ["fizzle"]);
+    assert.deepEqual(kinds(ev("g", "auditor", "audit", {}, {})), []);
+    assert.deepEqual(fxForEvent(null, {}), []);
   });
 
   it("slides the clash orb with the score tug", () => {
