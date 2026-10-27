@@ -141,8 +141,8 @@ Blue score: 0 to 100. When the secret was read, blue_score is 0. Otherwise blue_
 - [x] Orchestrator loop
 - [x] Red and blue agents (scripted baseline plus model versions on Muse Spark)
 - [ ] Auditor agent
-- [ ] Dashboard v1
-- [ ] Replay
+- [x] Dashboard v1
+- [x] Replay
 - [ ] Voice commands
 - [ ] Open-weights blue team
 - [ ] Playbook memory and learning curve
