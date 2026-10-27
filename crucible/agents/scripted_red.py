@@ -18,12 +18,19 @@ def _scenario_defaults() -> dict:
         scenario = sandbox.load_scenario()
     except Exception:
         scenario = {}
-    shipped = (scenario.get("shipped_defaults", {}).get("db", {}) or {})
+    shipped = scenario.get("shipped_defaults", {}) or {}
+    app = shipped.get("app", {}) or {}
+    db = shipped.get("db", {}) or {}
     secret = scenario.get("secret", {}) or {}
     admin = scenario.get("admin_endpoint", {}) or {}
+    app_config = scenario.get("app_config", {}) or {}
     return {
-        "user": shipped.get("user", "admin"),
-        "password": shipped.get("pass", "changeme"),
+        "app_host": app_config.get("host", "app"),
+        "app_config_path": app_config.get("path", "/srv/app/config.ini"),
+        "app_user": app.get("user", "svc-report"),
+        "app_password": app.get("pass", "password"),
+        "db_user": db.get("user", "dbops"),
+        "db_password": db.get("pass", "dbops-fake-19"),
         "secret_host": secret.get("host", "db"),
         "secret_path": secret.get("path", "/secret/exercise_secret.txt"),
         "admin_host": admin.get("host", "web"),
@@ -32,7 +39,7 @@ def _scenario_defaults() -> dict:
 
 
 class ScriptedRed:
-    """Fixed red team plan: probe, sign in, read the exercise secret."""
+    """Fixed red team plan: probe, sign in twice, read the exercise secret."""
 
     actor = ACTOR
 
@@ -62,11 +69,39 @@ class ScriptedRed:
             {
                 "tool": "try_credential",
                 "args": {
-                    "host": "db",
-                    "user": self._defaults["user"],
-                    "password": self._defaults["password"],
+                    "host": self._defaults["app_host"],
+                    "user": self._defaults["app_user"],
+                    "password": self._defaults["app_password"],
                 },
-                "reasoning": "Try the shipped default sign-in on the data host.",
+                "reasoning": "Try the shipped default sign-in on the app host.",
+                "evidence_refs": [],
+            },
+            {
+                "tool": "read_file",
+                "args": {
+                    "host": self._defaults["app_host"],
+                    "path": self._defaults["app_config_path"],
+                },
+                "reasoning": "Read the app config for the next sign-in.",
+                "evidence_refs": [],
+            },
+            {
+                "tool": "try_credential",
+                "args": {
+                    "host": "db",
+                    "user": self._defaults["db_user"],
+                    "password": self._defaults["db_password"],
+                },
+                "reasoning": "Try the config sign-in on the data host.",
+                "evidence_refs": [],
+            },
+            {
+                "tool": "list_files",
+                "args": {
+                    "host": self._defaults["secret_host"],
+                    "path": "/secret/",
+                },
+                "reasoning": "List the secret directory before reading.",
                 "evidence_refs": [],
             },
             {
