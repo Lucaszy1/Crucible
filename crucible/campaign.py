@@ -19,7 +19,9 @@ import argparse
 import csv
 import json
 import re
+import shutil
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from crucible import events, orchestrator, run_exercise, sandbox, tools
@@ -58,6 +60,8 @@ def parse_args(argv=None):
                         help="Skip the model response cache for this campaign")
     parser.add_argument("--resume", action="store_true",
                         help="Continue an existing campaign instead of starting over")
+    parser.add_argument("--force", action="store_true",
+                        help="Archive the existing campaign dir and start over")
     return parser.parse_args(argv)
 
 
@@ -112,6 +116,15 @@ def _load_state(path: Path) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def _archive_dir(campaign_dir: Path, name: str) -> Path:
+    """Move an existing campaign dir aside under runs/archive/."""
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    target = events.RUNS_DIR / "archive" / f"campaign-{name}-{stamp}"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(campaign_dir), str(target))
+    return target
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
     try:
@@ -148,6 +161,14 @@ def main(argv=None) -> int:
         print(f"Resuming campaign {args.name} at episode {len(rows) + 1} "
               f"of {total}...")
     else:
+        if campaign_dir.exists():
+            if not args.force:
+                print(f"campaign: {campaign_dir} already exists; pass "
+                      "--resume to continue it or --force to archive it "
+                      "and start over", file=sys.stderr)
+                return 1
+            archived = _archive_dir(campaign_dir, args.name)
+            print(f"Archived previous campaign to {archived}")
         referee.save_playbook(referee.empty_playbook())
         print(f"Starting campaign {args.name}: {total} episodes, "
               f"memory={args.memory}, agents={args.agents}...")

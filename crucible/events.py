@@ -105,12 +105,29 @@ def read_events(path: str | Path) -> list:
 
 
 class EventWriter:
-    """Sequential writer that numbers events as they land."""
+    """Sequential writer that numbers events as they land.
 
-    def __init__(self, path: str | Path | None = None):
+    Refuses an existing log file unless resume or overwrite is set,
+    so reusing an exercise id cannot silently append a second game.
+    Resume continues numbering after the stored events; overwrite
+    truncates the file first.
+    """
+
+    def __init__(self, path: str | Path | None = None, *,
+                 resume: bool = False, overwrite: bool = False):
         self.path = Path(path) if path else new_run_path()
-        self.count = 0
         self.events: list = []
+        if self.path.exists():
+            if resume:
+                self.events = read_events(self.path)
+            elif overwrite:
+                self.path.unlink()
+            else:
+                raise FileExistsError(
+                    f"log {self.path} already exists; pass resume=True to "
+                    "continue it or overwrite=True to replace it"
+                )
+        self.count = len(self.events)
 
     def log(
         self,
