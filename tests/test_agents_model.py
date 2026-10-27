@@ -471,22 +471,39 @@ def test_blue_prompt_contain_immediately_on_host_activity():
 
 
 def test_blue_prompt_check_data_host_early_and_restore_after():
-    assert "most likely heading toward" in BLUE_PROMPT
+    assert "connected hosts" in BLUE_PROMPT
+    assert "protected-data host" in BLUE_PROMPT
     assert "data host" in BLUE_PROMPT
-    assert "app and data hosts" in BLUE_PROMPT
     assert "worth doing early" in BLUE_PROMPT
     assert "consider restore_host" in BLUE_PROMPT
     assert "once red has stopped" in BLUE_PROMPT
 
 
-def test_blue_prompt_urges_narrow_contain_patch_and_restore():
+def test_blue_prompt_urges_connected_contain_patch_and_restore():
     assert "every turn" in BLUE_PROMPT
     assert "stays isolated or patched" in BLUE_PROMPT
-    assert "contain narrowly" in BLUE_PROMPT
-    assert "host red is actually using" in BLUE_PROMPT
+    assert "also contain any connected host" in BLUE_PROMPT
+    assert "higher business value" in BLUE_PROMPT
+    assert "holding the protected data" in BLUE_PROMPT
+    assert "weighing the extra downtime" in BLUE_PROMPT
     assert "prefer patch_service" in BLUE_PROMPT
     assert "close the hole" in BLUE_PROMPT
     assert "or the hole is closed" in BLUE_PROMPT
+
+
+def test_blue_prompt_guides_compromise_response_generically():
+    assert "confirmed successful sign-in" in BLUE_PROMPT
+    assert "act on it that same move" in BLUE_PROMPT
+    assert "do not wait when" in BLUE_PROMPT
+    assert "compromise is confirmed" in BLUE_PROMPT
+    assert "Do not isolate on failed guesses alone" in BLUE_PROMPT
+    assert "when alerts are quiet" in BLUE_PROMPT
+    assert "stop sweeping" in BLUE_PROMPT
+    assert "asset inventory" in BLUE_PROMPT
+    assert "alert-1" in BLUE_PROMPT
+    for forbidden in ("svc-report", "dbops", "config.ini",
+                      "exercise_secret.txt", "/srv/app", "/secret", "/admin"):
+        assert forbidden not in BLUE_PROMPT, forbidden
 
 
 def test_blue_prompt_gives_no_scoring_formula():
