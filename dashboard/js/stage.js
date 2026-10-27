@@ -17,9 +17,13 @@ import { applyRail } from "./rail.js";
 
 export const STAGE_WORLD = { w: 1600, h: 900 };
 // Hosts fit inside this share of their band, leaving slack on every
-// side for the camera to dolly without pushing hosts under lanes.
-const FIT_SHARE = 0.76;
-const DOLLY_ZOOM = 1.22;
+// side for the camera to dolly without pushing hosts under lanes or
+// entities. Share times zoom must stay under 1 or the dolly rests.
+const FIT_SHARE = 0.9;
+const DOLLY_ZOOM = 1.1;
+// Entity presence radius as a share of play height: each entity
+// spans roughly 30 to 35 percent of the stage height.
+const ENTITY_SHARE = 0.16;
 
 function worldBounds(nodes) {
   const pts = Object.values(nodes || {});
@@ -38,15 +42,15 @@ function worldBounds(nodes) {
   return { x0, y0, x1, y1 };
 }
 
+function laneStrip(rect) {
+  return {
+    ...rect,
+    feed: { x: rect.x + 6, y: rect.y + 6, w: rect.w - 12, h: rect.h - 12 },
+  };
+}
+
 function laneWithEntity(rect, orientation) {
-  if (orientation === "side") {
-    const zone = Math.round(Math.min(170, Math.max(96, rect.h * 0.3)));
-    return {
-      ...rect,
-      entity: { x: rect.x + rect.w / 2, y: rect.y + zone / 2, r: Math.min(64, zone / 2 - 8) },
-      feed: { x: rect.x + 8, y: rect.y + zone + 4, w: rect.w - 16, h: rect.h - zone - 12 },
-    };
-  }
+  if (orientation === "side") return laneStrip(rect);
   const zone = Math.min(64, Math.max(40, rect.h - 8));
   return {
     ...rect,
@@ -74,17 +78,30 @@ export function stageLayout(viewport, geo, chrome) {
   const mode = w >= 700 ? "side" : "stack";
   let lanes;
   let band;
+  let entities;
   let areaTop = top;
   let areaBottom = bottom;
   if (mode === "side") {
-    const laneW = Math.round(Math.min(250, Math.max(150, w * 0.17)));
+    // Slim strips at the edges, big entities inboard, the network
+    // between them: strip | Intrusion | hosts | Guardian | strip.
+    const laneW = Math.round(Math.min(150, Math.max(96, w * 0.085)));
+    const playH = Math.max(60, bottom - top);
+    const room = (w - 16 - laneW * 2 - gap * 4 - 200) / 4;
+    const entR = Math.min(Math.max(24, Math.min(150, playH * ENTITY_SHARE)), Math.max(24, room));
+    const cy = (top + bottom) / 2;
+    const intrusionCx = 8 + laneW + gap + entR + 6;
+    const guardianCx = w - 8 - laneW - gap - entR - 6;
     const blueTop = audBottom === null ? top : Math.max(top, Math.min(bottom - 40, audBottom + gap));
     lanes = {
-      red: laneWithEntity({ x: 8, y: top, w: laneW, h: Math.max(40, bottom - top) }, "side"),
-      blue: laneWithEntity(
-        { x: w - 8 - laneW, y: blueTop, w: laneW, h: Math.max(40, bottom - blueTop) }, "side"),
+      red: laneStrip({ x: 8, y: top, w: laneW, h: Math.max(40, bottom - top) }),
+      blue: laneStrip(
+        { x: w - 8 - laneW, y: blueTop, w: laneW, h: Math.max(40, bottom - blueTop) }),
     };
-    band = { x0: 8 + laneW + gap, x1: w - 8 - laneW - gap };
+    band = { x0: intrusionCx + entR + gap, x1: guardianCx - entR - gap };
+    entities = {
+      intrusion: { x: intrusionCx, y: cy, r: entR },
+      guardian: { x: guardianCx, y: cy, r: entR },
+    };
   } else {
     // One strip row, red left and blue right, so narrow stages keep
     // most of their height for the network.
@@ -99,6 +116,10 @@ export function stageLayout(viewport, geo, chrome) {
       blue: laneWithEntity(blue, "stack"),
     };
     band = { x0: 8, x1: w - 8 };
+    entities = {
+      intrusion: { ...lanes.red.entity },
+      guardian: { ...lanes.blue.entity },
+    };
   }
   const wb = worldBounds(nodes);
   const bandW = Math.max(80, band.x1 - band.x0);
@@ -119,7 +140,7 @@ export function stageLayout(viewport, geo, chrome) {
     };
   }
   return {
-    mode, w, h, gap, view, lanes, band,
+    mode, w, h, gap, view, lanes, band, entities,
     area: { top: areaTop, bottom: areaBottom },
     chrome: { hudBottom, capTop, audBottom },
     hosts, bounds: wb,
@@ -1489,13 +1510,14 @@ function paintHostLabel(refs, ctx, id, x, y, r, jewel) {
 }
 
 function paintEntities(refs, ctx) {
-  const lanes = refs.stage.lanes;
+  const slots = refs.stage.entities;
   const t = refs.clock / 1000;
   const sprites = refs.sprites || {};
-  paintIntrusion(ctx, sprites, lanes.red.entity.x, lanes.red.entity.y,
-    lanes.red.entity.r * (0.68 + 0.42 * refs.intrusion), refs.intrusion, t);
-  paintGuardian(ctx, sprites, lanes.blue.entity.x, lanes.blue.entity.y,
-    lanes.blue.entity.r, refs.guardian, t);
+  const red = slots.intrusion;
+  const blue = slots.guardian;
+  paintIntrusion(ctx, sprites, red.x, red.y,
+    red.r * (0.68 + 0.42 * refs.intrusion), refs.intrusion, t);
+  paintGuardian(ctx, sprites, blue.x, blue.y, blue.r, refs.guardian, t);
 }
 
 // The Intrusion: a hovering diamond of wireframe shards that grows
@@ -1634,8 +1656,9 @@ function paintLanes(refs, ctx) {
 
 function paintLane(refs, ctx, side, lane) {
   const accent = side === "red" ? RED : BLUE;
+  const slim = refs.stage.mode === "side";
   ctx.save();
-  ctx.fillStyle = "rgba(8,10,15,0.86)";
+  ctx.fillStyle = slim ? "rgba(8,10,15,0.62)" : "rgba(8,10,15,0.86)";
   roundRectPath(ctx, lane.x, lane.y, lane.w, lane.h, 8);
   ctx.fill();
   ctx.strokeStyle = "rgba(120,150,200,0.25)";
@@ -1646,17 +1669,17 @@ function paintLane(refs, ctx, side, lane) {
   ctx.globalAlpha = 0.85;
   ctx.fillRect(side === "red" ? lane.x : lane.x + lane.w - 3, lane.y + 8, 3, lane.h - 16);
   ctx.globalAlpha = 1;
-  ctx.font = `700 10px ${MONO}`;
+  ctx.font = `700 ${slim ? 9 : 10}px ${MONO}`;
   ctx.textAlign = "left";
   ctx.fillStyle = side === "red" ? "#c98a82" : "#7f9cc9";
   const feed = lane.feed;
-  ctx.fillText(side === "red" ? "INTRUSION FEED" : "OPERATIONS CONSOLE", feed.x, feed.y + 2);
+  ctx.fillText(side === "red" ? "INTRUSION" : "OPS CONSOLE", feed.x, feed.y + 2);
   const tones = LANE_TONES[side];
   const lines = refs.lanes[side] || [];
-  const lineH = 13;
+  const lineH = slim ? 12 : 13;
   const maxLines = Math.max(1, Math.floor((feed.h - 14) / lineH));
   const shown = lines.slice(-maxLines);
-  ctx.font = `400 11px ${MONO}`;
+  ctx.font = `400 ${slim ? 10 : 11}px ${MONO}`;
   const typed = refs.typed[side] || { chars: Infinity };
   shown.forEach((line, i) => {
     const y = feed.y + 14 + i * lineH;
@@ -1669,7 +1692,8 @@ function paintLane(refs, ctx, side, lane) {
       text = `${text.slice(0, -5)}…`;
     }
     ctx.fillStyle = tones[line.tone] || tones.cmd;
-    ctx.globalAlpha = 0.45 + 0.55 * ((i + 1) / shown.length);
+    const fresh = (i + 1) / shown.length;
+    ctx.globalAlpha = slim ? 0.2 + 0.8 * fresh * fresh : 0.45 + 0.55 * fresh;
     ctx.fillText(text, feed.x, y);
   });
   ctx.globalAlpha = 1;

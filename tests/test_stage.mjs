@@ -110,14 +110,36 @@ describe("stageLayout", () => {
               assert.ok(host.r >= 6, `${tag} ${id} stays readable`);
             }
           }
-          for (const side of ["red", "blue"]) {
-            const ent = stage.lanes[side].entity;
+          const ents = [stage.entities.intrusion, stage.entities.guardian];
+          for (const [name, ent] of [["intrusion", ents[0]], ["guardian", ents[1]]]) {
             const box = { x: ent.x - ent.r, y: ent.y - ent.r, w: ent.r * 2, h: ent.r * 2 };
-            assert.ok(inside(box, frame), `${tag} ${side} entity inside`);
+            assert.ok(inside(box, frame), `${tag} ${name} inside`);
+            assert.ok(!hits(box, hud), `${tag} ${name} clears HUD`);
+            assert.ok(!hits(box, cap), `${tag} ${name} clears caption`);
+            if (stage.mode === "side") {
+              assert.ok(!hits(box, stage.lanes.red), `${tag} ${name} clears red lane`);
+              assert.ok(!hits(box, stage.lanes.blue), `${tag} ${name} clears blue lane`);
+            } else {
+              // Narrow stages dock the glyphs inside their own strips.
+              const home = name === "intrusion" ? stage.lanes.red : stage.lanes.blue;
+              const away = name === "intrusion" ? stage.lanes.blue : stage.lanes.red;
+              assert.ok(inside(box, home), `${tag} ${name} docks in its strip`);
+              assert.ok(!hits(box, away), `${tag} ${name} clears the far strip`);
+            }
             for (const id of Object.keys(stage.hosts)) {
               const host = stage.hosts[id];
               const dist = Math.hypot(ent.x - host.x, ent.y - host.y);
-              assert.ok(dist >= ent.r + host.r, `${tag} ${side} entity clears ${id}`);
+              assert.ok(dist >= ent.r + host.r, `${tag} ${name} clears ${id}`);
+            }
+          }
+          const pair = Math.hypot(ents[0].x - ents[1].x, ents[0].y - ents[1].y);
+          assert.ok(pair >= ents[0].r + ents[1].r, `${tag} entities disjoint`);
+          if (stage.mode === "side") {
+            // Each entity spans roughly 30 to 35 percent of play height.
+            const playH = stage.area.bottom - stage.area.top;
+            for (const [name, ent] of [["intrusion", ents[0]], ["guardian", ents[1]]]) {
+              const share = (ent.r * 2) / playH;
+              assert.ok(share >= 0.28 && share <= 0.38, `${tag} ${name} share ${share}`);
             }
           }
         }
