@@ -34,6 +34,16 @@ CLASSIC_SEGMENTS = {
     "workstation": "internal",
 }
 
+# Classic service chain for the dashboard conduits. The inventory
+# mesh says every host reaches every other; the dashboard has always
+# drawn the service chain instead, so classic keeps emitting it.
+CLASSIC_LINKS = {
+    "web": ["app"],
+    "app": ["web", "db", "workstation"],
+    "db": ["app"],
+    "workstation": ["app"],
+}
+
 # Active generated spec, or None for the classic scenario. Set by the
 # CLIs around a scenario's episodes; everything below follows it.
 _ACTIVE_SPEC: dict | None = None
@@ -94,7 +104,7 @@ def scenario_layout() -> dict:
             "id": name,
             "role": (entry or {}).get("role", ""),
             "segment": CLASSIC_SEGMENTS.get(name, "internal"),
-            "links": list((entry or {}).get("connected_to", []) or []),
+            "links": list(CLASSIC_LINKS.get(name, []) or []),
             "weight": (entry or {}).get("weight", 1),
         })
     return {

@@ -638,6 +638,10 @@ def test_scenario_layout_classic_shape():
     assert by_id["web"]["segment"] == "dmz"
     assert by_id["db"]["segment"] == "data"
     assert by_id["db"]["weight"] == 5
+    assert by_id["web"]["links"] == ["app"]
+    assert by_id["app"]["links"] == ["web", "db", "workstation"]
+    assert by_id["db"]["links"] == ["app"]
+    assert by_id["workstation"]["links"] == ["app"]
     assert set(layout) == {"scenario_id", "hosts", "jewel_host"}
 
 
