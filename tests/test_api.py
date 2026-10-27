@@ -243,6 +243,19 @@ def test_model_start_warns_when_spend_cap_blocks(client, monkeypatch):
     assert _wait_idle(client)
 
 
+def test_failed_exercise_publishes_error(client, monkeypatch):
+    def failing(agents, exercise_id, run_path, publish):
+        raise RuntimeError("sandbox boot failed: demo outage")
+
+    monkeypatch.setattr(api, "_run_live_exercise", failing)
+    res = client.post("/api/exercise/start", json={"agents": "scripted"})
+    assert res.status_code == 202
+    assert _wait_idle(client)
+    messages = _sse_messages(client.get("/api/live").text)
+    assert messages[-1]["type"] == "error"
+    assert "demo outage" in messages[-1]["text"]
+
+
 def test_dashboard_index_served(client):
     res = client.get("/")
     assert res.status_code == 200
