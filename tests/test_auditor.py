@@ -639,7 +639,7 @@ def test_run_exercise_passes_audit_mode(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(run_exercise.tools, "reset_state", lambda: None)
 
     def fake_exercise(red, blue, max_turns=12, run_path=None,
-                      exercise_id=None, audit="off"):
+                      exercise_id=None, audit="off", sensors="on"):
         seen["audit"] = audit
         return {"events": [],
                 "score": {"turns_used": 0, "total_events": 0,
@@ -689,7 +689,7 @@ def test_batch_csv_carries_audit_metrics(tmp_path, monkeypatch):
     seen = {}
 
     def fake_exercise(red, blue, max_turns=30, run_path=None,
-                      exercise_id=None, audit="off"):
+                      exercise_id=None, audit="off", sensors="on"):
         seen[exercise_id] = audit
         return {"events": [],
                 "score": {"outcome": "blue_held", "detection_delay": 2,

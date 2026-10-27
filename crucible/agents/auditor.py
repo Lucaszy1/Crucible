@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import re
 
-from crucible import llm
+from crucible import llm, sensors
 
 ACTOR = "auditor"
 ROLE = "auditor"
@@ -213,12 +213,15 @@ def secret_observed_read(prior_events: list) -> bool:
 def check_evidence(blue_event: dict, prior_events: list) -> dict:
     """Layer 1: deterministic evidence checks with no model.
 
-    Every cited ref must exist in the logs blue had read, and each ref
-    must come from the host the action concerns or a host linked to the
-    claim. Also reports whether those visible logs held any suspicious
-    activity, judged from red's already-visible log output only, whether
-    this read repeats the last one with no new lines, and whether the
-    logs show the secret was already read (moot).
+    Every cited log ref must exist in the logs blue had read, and each
+    ref must come from the host the action concerns or a host linked to
+    the claim. Cited alert refs (alert-N) are accepted when that alert
+    was shown to blue on an earlier turn or the same turn, resolving to
+    the underlying log ids recorded under resolved_refs. Also reports
+    whether those visible logs held any suspicious activity, judged
+    from red's already-visible log output only, whether this read
+    repeats the last one with no new lines, and whether the logs show
+    the secret was already read (moot).
     """
     refs = list((blue_event or {}).get("evidence_refs", []) or [])
     visible = visible_logs(prior_events)
@@ -226,8 +229,24 @@ def check_evidence(blue_event: dict, prior_events: list) -> dict:
     host = action_host(blue_event)
     if host:
         linked.add(host)
+    shown = sensors.alert_map_from_events(
+        list(prior_events or []) + [blue_event or {}])
     invalid = []
+    resolved: list = []
     for ref in refs:
+        if sensors.is_alert_ref(ref):
+            entry = shown.get(ref)
+            if entry is None:
+                invalid.append(ref)
+                continue
+            under = [log_ref for log_ref in entry.get("refs", []) or []]
+            for log_ref in under:
+                if log_ref not in resolved:
+                    resolved.append(log_ref)
+            under_hosts = {str(log_ref).split(":", 1)[0] for log_ref in under}
+            if linked and under_hosts.isdisjoint(linked):
+                invalid.append(ref)
+            continue
         if ref not in visible:
             invalid.append(ref)
             continue
@@ -238,6 +257,7 @@ def check_evidence(blue_event: dict, prior_events: list) -> dict:
     repeat = redundant_read(blue_event, prior_events)
     return {
         "evidence_checked": refs,
+        "resolved_refs": resolved,
         "refs_valid": not invalid,
         "invalid_refs": invalid,
         "suspicious_visible": bool(suspicious),
@@ -365,11 +385,21 @@ def build_messages(blue_event: dict, prior_events: list,
     audit_check = check if check is not None else check_evidence(blue_event, prior_events)
     visible = visible_logs(prior_events)
     seen = ref_first_seen(prior_events)
+    shown = sensors.alert_map_from_events(
+        list(prior_events or []) + [blue_event or {}])
     refs = list((blue_event or {}).get("evidence_refs", []) or [])
     if refs:
         cited = []
         for ref in refs:
-            if ref in visible:
+            if sensors.is_alert_ref(ref):
+                entry = shown.get(ref)
+                if entry is None:
+                    cited.append(f"{ref}: NOT SHOWN to blue at that time")
+                else:
+                    under = ", ".join(entry.get("refs", []) or [])
+                    cited.append(f"{ref}: {entry.get('text', '').strip()} "
+                                 f"(log lines: {under})")
+            elif ref in visible:
                 first = seen.get(ref, "?")
                 cited.append(f"{ref} (first seen at {first}): {visible[ref]}")
             else:

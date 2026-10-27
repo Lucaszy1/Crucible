@@ -36,6 +36,7 @@ CSV_FIELDS = (
     "model_turns",
     "fallback_turns",
     "estimated_cost_usd",
+    "sensors",
 )
 
 
@@ -79,6 +80,13 @@ def parse_args(argv=None):
         choices=("off", "end"),
         default="off",
         help="off skips judging (saves cost), end audits after each exercise",
+    )
+    parser.add_argument(
+        "--sensors",
+        choices=("on", "off"),
+        default="on",
+        help="on shows blue new sensor alerts each turn, "
+        "off leaves blue on logs alone",
     )
     return parser.parse_args(argv)
 
@@ -142,6 +150,7 @@ def main(argv=None) -> int:
                 max_turns=args.max_turns,
                 exercise_id=exercise_id,
                 audit=args.audit,
+                sensors=args.sensors,
             )
             if run_exercise._spend_cap_hit(result.get("events", [])):
                 run_exercise._warn_spend_cap()
@@ -175,6 +184,7 @@ def main(argv=None) -> int:
                     "model_turns": model_turns,
                     "fallback_turns": fallback_turns,
                     "estimated_cost_usd": round(cost, 6),
+                    "sensors": score.get("sensors", args.sensors),
                 }
             )
             delay = score.get("detection_delay")
@@ -217,6 +227,7 @@ def main(argv=None) -> int:
     total_cost = sum(row["estimated_cost_usd"] for row in rows)
 
     print(f"Batch done: {len(rows)} exercises (prefix={args.prefix})")
+    print(f"Sensors: {args.sensors}")
     print(f"Red wins: {red_wins}, blue holds: {blue_holds}, stalemates: {stalemates}")
     if mean_delay is None:
         print("Mean detection delay: no detections")

@@ -37,6 +37,7 @@ CSV_FIELDS = (
     "time_to_contain",
     "cost",
     "playbook_rule_count",
+    "sensors",
 )
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -60,6 +61,9 @@ def parse_args(argv=None):
                         help="scripted is free, model uses Muse Spark")
     parser.add_argument("--audit", choices=("off", "end"), default="off",
                         help="off skips judging, end audits after each episode")
+    parser.add_argument("--sensors", choices=("on", "off"), default="on",
+                        help="on shows blue new sensor alerts each turn, "
+                        "off leaves blue on logs alone")
     parser.add_argument("--max-turns", type=int, default=40,
                         help="Turns per episode, capped at 40")
     parser.add_argument("--no-cache", action="store_true",
@@ -205,6 +209,11 @@ def _open_arm(name: str, memory: str, total: int, args) -> dict | None:
                   f"campaign {name!r} ({state.get('memory')}); aborting",
                   file=sys.stderr)
             return None
+        if state.get("sensors", args.sensors) != args.sensors:
+            print(f"campaign: resume sensors flag differs from the saved "
+                  f"campaign {name!r} ({state.get('sensors')}); aborting",
+                  file=sys.stderr)
+            return None
         rows = list(state.get("episodes", []) or [])
         if len(rows) >= total:
             print(f"campaign: {name} already has {len(rows)} episodes",
@@ -225,7 +234,8 @@ def _open_arm(name: str, memory: str, total: int, args) -> dict | None:
         print(f"Starting campaign {name}: {total} episodes, "
               f"memory={memory}, agents={args.agents}...")
     return {"name": name, "memory": memory, "dir": campaign_dir,
-            "summary_path": summary_path, "rows": rows, "playbook": playbook}
+            "summary_path": summary_path, "rows": rows, "playbook": playbook,
+            "sensors": args.sensors}
 
 
 def _run_episode(arm: dict, number: int, args, seed: str | None) -> None:
@@ -248,7 +258,8 @@ def _run_episode(arm: dict, number: int, args, seed: str | None) -> None:
     result = orchestrator.run_exercise(
         red, blue, max_turns=args.max_turns,
         run_path=arm["dir"] / f"{exercise_id}.jsonl",
-        exercise_id=exercise_id, audit=args.audit)
+        exercise_id=exercise_id, audit=args.audit,
+        sensors=args.sensors, seed=seed)
     score = result.get("score", {}) or {}
     referee_model = None
     if arm["memory"] == "on":
@@ -277,6 +288,7 @@ def _run_episode(arm: dict, number: int, args, seed: str | None) -> None:
         "time_to_contain": score.get("time_to_contain"),
         "cost": round(cost, 6),
         "playbook_rule_count": len(arm["playbook"].get("rules", []) or []),
+        "sensors": score.get("sensors", args.sensors),
         "referee_model": referee_model,
         "red_admin": admin,
         "red_in": got_in,
@@ -290,6 +302,7 @@ def _run_episode(arm: dict, number: int, args, seed: str | None) -> None:
     _write_json(arm["summary_path"], {"name": arm["name"],
                                      "memory": arm["memory"],
                                      "agents": args.agents,
+                                     "sensors": args.sensors,
                                      "episodes": arm["rows"]})
 
 
@@ -302,6 +315,7 @@ def _report_arm(arm: dict) -> float:
     stats = _arm_stats(rows)
     total_cost = sum(float(row.get("cost", 0.0) or 0.0) for row in rows)
     print(f"Campaign done: {len(rows)} episodes (name={arm['name']})")
+    print(f"Sensors: {arm.get('sensors', 'on')}")
     print("episode | outcome | blue_score | cost")
     for row in rows:
         print(f"{row['episode']} | {row['outcome']} | {row['blue_score']} "

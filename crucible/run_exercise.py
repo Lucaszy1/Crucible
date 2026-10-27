@@ -60,6 +60,13 @@ def parse_args(argv=None):
         help="off skips judging, end audits after the exercise, "
         "live audits each blue action as it happens",
     )
+    parser.add_argument(
+        "--sensors",
+        choices=("on", "off"),
+        default="on",
+        help="on shows blue new sensor alerts each turn, "
+        "off leaves blue on logs alone",
+    )
     return parser.parse_args(argv)
 
 
@@ -113,6 +120,7 @@ def _summary(score: dict) -> list:
         downtime_pct = f"{score.get('downtime_pct', 0.0)}%"
     lines = [
         f"Turns used: {score.get('turns_used')} of {score.get('total_events')} events",
+        f"Sensors: {score.get('sensors', 'off')}",
         f"Outcome: {score.get('outcome', 'unknown')}",
         f"Detected at event: {detect if detect is not None else 'no'}",
         f"Detection delay: {delay if delay is not None else 'no'} events",
@@ -212,6 +220,7 @@ def main(argv=None) -> int:
             run_path=args.out,
             exercise_id=args.exercise_id,
             audit=args.audit,
+            sensors=args.sensors,
         )
     finally:
         print("Stopping sandbox...")

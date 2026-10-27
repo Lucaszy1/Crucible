@@ -14,10 +14,11 @@ def _stubbed_run(monkeypatch, tmp_path):
                         lambda host: {"ok": True, "host": host})
     monkeypatch.setattr(run_exercise.tools, "reset_state", lambda: None)
 
-    def fake_exercise(red, blue, max_turns=12, run_path=None, exercise_id=None, audit="off"):
+    def fake_exercise(red, blue, max_turns=12, run_path=None, exercise_id=None, audit="off", sensors="on"):
         seen["red"] = type(red).__name__
         seen["blue"] = type(blue).__name__
         seen["max_turns"] = max_turns
+        seen["sensors"] = sensors
         path = str(tmp_path / "fake.jsonl")
         (tmp_path / "fake.jsonl").write_text("{}\n", encoding="utf-8")
         return {
@@ -65,7 +66,7 @@ def _evt(reasoning):
 def _stubbed_run_with_events(monkeypatch, tmp_path, events_list):
     seen = _stubbed_run(monkeypatch, tmp_path)
 
-    def fake_exercise(red, blue, max_turns=12, run_path=None, exercise_id=None, audit="off"):
+    def fake_exercise(red, blue, max_turns=12, run_path=None, exercise_id=None, audit="off", sensors="on"):
         path = str(tmp_path / "fake.jsonl")
         return {
             "events": events_list,
@@ -119,6 +120,14 @@ def test_no_cache_flag_parses():
     assert run_exercise.parse_args(["--agents", "model", "--no-cache"]).no_cache is True
 
 
+def test_sensors_flag_defaults_on_and_passes_through(tmp_path, monkeypatch, capsys):
+    assert run_exercise.parse_args(["--agents", "scripted"]).sensors == "on"
+    seen = _stubbed_run(monkeypatch, tmp_path)
+    assert run_exercise.main(["--agents", "scripted", "--sensors", "off"]) == 0
+    assert seen["sensors"] == "off"
+    assert "Sensors: off" in capsys.readouterr().out
+
+
 def test_runner_no_cache_disables_agent_cache(tmp_path, monkeypatch):
     seen = {}
     _stubbed_run(monkeypatch, tmp_path)
@@ -152,7 +161,7 @@ def test_runner_summary_prints_downtime_blue_and_cost(tmp_path, monkeypatch, cap
     seen = _stubbed_run(monkeypatch, tmp_path)
     monkeypatch.setattr(llm, "SPEND_FILE", tmp_path / "spend.jsonl")
 
-    def fake_exercise(red, blue, max_turns=12, run_path=None, exercise_id=None, audit="off"):
+    def fake_exercise(red, blue, max_turns=12, run_path=None, exercise_id=None, audit="off", sensors="on"):
         path = str(tmp_path / "fake.jsonl")
         return {
             "events": [],

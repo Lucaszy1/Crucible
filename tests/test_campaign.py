@@ -33,9 +33,10 @@ def _score(outcome="blue_held", blue=80.0, delay=2):
 
 def _stub_exercise(monkeypatch, seen, scores):
     def fake_exercise(red, blue, max_turns=40, run_path=None,
-                      exercise_id=None, audit="off"):
+                      exercise_id=None, audit="off", sensors="on", seed=None):
         seen.setdefault("ids", []).append(exercise_id)
         seen.setdefault("audits", []).append(audit)
+        seen.setdefault("sensors", []).append(sensors)
         seen["blue_playbook"] = getattr(blue, "_playbook", "scripted")
         score = scores[min(len(seen["ids"]) - 1, len(scores) - 1)]
         return {"events": [], "score": dict(score),
@@ -68,6 +69,7 @@ def test_campaign_runs_episodes_with_ids(tmp_path, monkeypatch, capsys):
     assert seen["reviews"] == ["mem1-1", "mem1-2", "mem1-3"]
     assert seen["stopped"] is True
     assert seen["audits"] == ["off", "off", "off"]
+    assert seen["sensors"] == ["on", "on", "on"]
     out = capsys.readouterr().out
     assert "mem1-1: outcome=blue_held" in out
     assert "Campaign done: 3 episodes" in out
@@ -153,10 +155,12 @@ def test_summary_csv_and_json(tmp_path, monkeypatch):
     assert rows[0]["playbook_rule_count"] == "1"
     assert rows[1]["detection_delay"] == ""
     assert rows[2]["playbook_rule_count"] == "3"
+    assert rows[0]["sensors"] == "on"
     state = json.loads((tmp_path / "runs" / "campaign-rep"
                         / "summary.json").read_text(encoding="utf-8"))
     assert state["name"] == "rep"
     assert state["memory"] == "on"
+    assert state["sensors"] == "on"
     assert len(state["episodes"]) == 3
     assert state["episodes"][0]["referee_model"] == "muse-wonder-1.0"
 
@@ -207,6 +211,9 @@ def test_resume_rejects_unknown_or_mismatch(tmp_path, monkeypatch, capsys):
     assert campaign.main(["--name", "real", "--episodes", "2", "--memory",
                           "off", "--resume"]) == 1
     assert "differs from the saved campaign" in capsys.readouterr().err
+    assert campaign.main(["--name", "real", "--episodes", "2", "--memory",
+                          "on", "--sensors", "off", "--resume"]) == 1
+    assert "differs from the saved campaign" in capsys.readouterr().err
 
 
 def test_bad_name_and_count_rejected(tmp_path, monkeypatch, capsys):
@@ -256,8 +263,9 @@ def test_force_archives_old_dir_and_starts_over(tmp_path, monkeypatch, capsys):
 
 def _stub_seeded_exercise(monkeypatch, seen, events_by_id=None):
     def fake_exercise(red, blue, max_turns=40, run_path=None,
-                      exercise_id=None, audit="off"):
+                      exercise_id=None, audit="off", sensors="on", seed=None):
         seen.setdefault("ids", []).append(exercise_id)
+        seen.setdefault("seeds_logged", []).append(seed)
         seen.setdefault("seeds", []).append((getattr(red, "_seed", None),
                                              getattr(blue, "_seed", None)))
         seen.setdefault("fed", []).append(list(
@@ -281,6 +289,7 @@ def test_arms_interleave_with_pair_seeds(tmp_path, monkeypatch):
                           "--agents", "model"]) == 0
     assert seen["ids"] == ["mem-1", "ctrl-1", "mem-2", "ctrl-2"]
     assert seen["seeds"] == [("pair-1", "pair-1")] * 2 + [("pair-2", "pair-2")] * 2
+    assert seen["seeds_logged"] == ["pair-1", "pair-1", "pair-2", "pair-2"]
     assert starts == [1]
     for arm in ("mem", "ctrl"):
         summary = tmp_path / "runs" / f"campaign-{arm}" / "summary.json"

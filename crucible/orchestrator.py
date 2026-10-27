@@ -11,6 +11,7 @@ from __future__ import annotations
 import inspect
 
 from crucible import events, tools
+from crucible import sensors as sensor_rules
 from crucible.agents.auditor import (
     AUDIT_MODES,
     SKIP_TOOLS as AUDIT_SKIP_TOOLS,
@@ -45,15 +46,77 @@ _DISPATCH = {
 }
 
 
-def _next_action(agent, turn: int, history: list, capped_turns: int):
-    """Ask one agent for its next move, sharing the turn cap it accepts."""
+def _next_action(agent, turn: int, history: list, capped_turns: int,
+                 alerts: list | None = None):
+    """Ask one agent for its next move, sharing what it accepts.
+
+    Passes the turn cap and the new sensor alerts only to agents whose
+    next_action declares them, so scripted baselines stay untouched.
+    """
     try:
         params = inspect.signature(agent.next_action).parameters
     except (TypeError, ValueError):
         return agent.next_action(turn, history)
+    kwargs: dict = {}
     if "max_turns" in params:
-        return agent.next_action(turn, history, capped_turns)
+        kwargs["max_turns"] = capped_turns
+    if "alerts" in params:
+        kwargs["alerts"] = alerts
+    if kwargs:
+        return agent.next_action(turn, history, **kwargs)
     return agent.next_action(turn, history)
+
+
+def _agent_accepts_alerts(agent) -> bool:
+    """Check whether an agent's next_action takes sensor alerts."""
+    try:
+        params = inspect.signature(agent.next_action).parameters
+    except (TypeError, ValueError):
+        return False
+    return "alerts" in params
+
+
+def _sensor_context() -> tuple:
+    """Load the inventory context the sensor rules need.
+
+    Returns (connections, crown_jewel_host) from the blue-visible
+    inventory, defaulting to empty links and no jewel on any load
+    trouble so exercises never hang on sensors.
+    """
+    try:
+        from crucible import sandbox
+
+        inventory = sandbox.blue_inventory()
+    except Exception:
+        return {}, None
+    links = {}
+    for host, entry in (inventory.get("hosts", {}) or {}).items():
+        links[host] = set((entry or {}).get("connected_to", []) or [])
+    return links, inventory.get("crown_jewel_host")
+
+
+def _new_sensor_alerts(shown_keys: set) -> list:
+    """Collect episode logs and return alerts not shown before.
+
+    Runs the deterministic rules over the same episode-scoped logs blue
+    could read, then filters to alerts whose key is new. Updates the
+    shown set. Never raises: unreadable logs mean no alerts.
+    """
+    try:
+        logs = sensor_rules.collect_episode_logs()
+    except Exception:
+        return []
+    try:
+        links, jewel = _sensor_context()
+        current = sensor_rules.build_alerts(logs, connections=links,
+                                            crown_jewel_host=jewel)
+    except Exception:
+        return []
+    fresh = [alert for alert in current
+             if sensor_rules.alert_key(alert) not in shown_keys]
+    for alert in fresh:
+        shown_keys.add(sensor_rules.alert_key(alert))
+    return fresh
 
 
 def run_tool(tool_name: str, args: dict) -> dict:
@@ -289,6 +352,7 @@ def score_events(event_list: list, business_weights: dict | None = None) -> dict
 
     audit = _audit_metrics(event_list)
     return {
+        "sensors": _sensors_mode(event_list),
         "time_to_detect": time_to_detect,
         "detection_delay": detection_delay,
         "time_to_contain": time_to_contain,
@@ -305,6 +369,20 @@ def score_events(event_list: list, business_weights: dict | None = None) -> dict
         "invalid_refs_count": audit["invalid_refs_count"],
         "mean_audit_score": audit["mean_audit_score"],
     }
+
+
+def _sensors_mode(event_list: list) -> str:
+    """Read the sensors flag from the episode's first event.
+
+    The clean-start check records on or off in its args. Logs written
+    before sensors existed carry no flag and read as off, since no
+    alerts were shown then.
+    """
+    for event in event_list or []:
+        if event.get("actor") == "system" and event.get("tool") == "clean_start_check":
+            mode = (event.get("args", {}) or {}).get("sensors", "off")
+            return mode if mode in ("on", "off") else "off"
+    return "off"
 
 
 def _audit_metrics(event_list: list) -> dict:
@@ -351,6 +429,8 @@ def run_exercise(
     audit: str = "off",
     auditor_client=None,
     auditor_use_cache: bool = True,
+    sensors: str = "on",
+    seed: str | None = None,
 ) -> dict:
     """Run one full exercise with alternating red and blue moves.
 
@@ -363,24 +443,36 @@ def run_exercise(
     turn. Before move 1 the range is restored, log scope starts, and a
     clean-start check is recorded as the first (system) event; agents
     never see system events and scoring skips them like auditor events.
+    That first event records the sensors mode (and seed when given) in
+    its args so ablations stay reproducible from the log.
 
     Audit modes: off skips judging, end audits every blue action after
     the loop, live audits each blue action right after it is logged.
     Agents never see auditor events; scoring ignores them for positions
     and downtime but summarizes them as audit metrics. The result adds
     an audit_summary with the mode, the metrics, and the audit cost.
+
+    Sensors mode on (the default) shows blue the new sensor alerts each
+    turn; off leaves blue on logs alone. Blue agents that accept alerts
+    get only the alerts fired since their last move, and the shown
+    alerts are attached to that turn's blue event for the audit trail.
     """
     if audit not in AUDIT_MODES:
         raise ValueError(f"audit must be one of {', '.join(AUDIT_MODES)}: {audit!r}")
+    if sensors not in ("on", "off"):
+        raise ValueError(f"sensors must be 'on' or 'off': {sensors!r}")
     red = red_agent if red_agent is not None else ScriptedRed()
     blue = blue_agent if blue_agent is not None else ScriptedBlue()
     tools.reset_state()
     check = tools.begin_episode()
     writer = events.EventWriter(run_path if run_path else events.new_run_path(exercise_id))
+    first_args: dict = {"sensors": sensors}
+    if seed is not None:
+        first_args["seed"] = str(seed)
     writer.log(
         actor="system",
         tool="clean_start_check",
-        args={},
+        args=first_args,
         result=check,
         reasoning_summary=(
             f"Clean-start check passed on attempt {check.get('attempts', 1)}; "
@@ -389,6 +481,8 @@ def run_exercise(
         evidence_refs=[],
     )
     audit_weights = _business_weights()
+    shown_alert_keys: set = set()
+    blue_takes_alerts = sensors == "on" and _agent_accepts_alerts(blue)
 
     turns_used = 0
     idle_rounds = 0
@@ -397,8 +491,12 @@ def run_exercise(
         agent = red if slot % 2 == 0 else blue
         visible = [event for event in writer.events
                    if event.get("actor") not in ("auditor", "system")]
+        fresh_alerts = None
+        if agent is blue and blue_takes_alerts:
+            fresh_alerts = _new_sensor_alerts(shown_alert_keys)
         try:
-            action = _next_action(agent, slot + 1, visible, capped_turns)
+            action = _next_action(agent, slot + 1, visible, capped_turns,
+                                  alerts=fresh_alerts)
         except Exception as exc:
             idle_rounds = 0
             turns_used += 1
@@ -426,6 +524,7 @@ def run_exercise(
             result=result,
             reasoning_summary=action.get("reasoning", ""),
             evidence_refs=action.get("evidence_refs", []),
+            sensor_alerts=fresh_alerts or None,
         )
         if (
             audit == "live"

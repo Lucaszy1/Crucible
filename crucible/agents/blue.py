@@ -227,15 +227,30 @@ def _lessons_text(playbook: list | None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _alerts_text(alerts: list | None) -> str:
+    """Render new sensor alerts, or nothing when sensors are off.
+
+    None means the exercise runs without sensors and the prompt keeps
+    its original shape. An empty list means sensors are on but quiet.
+    """
+    if alerts is None:
+        return ""
+    from crucible import sensors
+
+    return sensors.format_alerts_section(alerts)
+
+
 def _build_messages(turn: int, history: list,
                     max_turns: int = _common.DEFAULT_MAX_TURNS,
-                    playbook: list | None = None) -> list:
+                    playbook: list | None = None,
+                    alerts: list | None = None) -> list:
     recent = _common.summarize_own_recent(history, ACTOR)
     own = _common.summarize_own_history(history, ACTOR)
     last_result = _common.format_last_result(history, ACTOR)
     isolated = _isolated_hosts_line(history)
     lessons = _lessons_text(playbook)
     inventory = _inventory_text()
+    fresh = _alerts_text(alerts)
     remaining = max(0, int(max_turns) - int(turn) + 1)
     moves_so_far = max(0, int(turn) - 1)
     user_text = (
@@ -246,6 +261,7 @@ def _build_messages(turn: int, history: list,
         f"Moves so far this exercise: {moves_so_far}. "
         f"{inventory}"
         f"{lessons}"
+        f"{fresh}"
         f"Your most recent tool result:\n{last_result}\n"
         f"Your previous moves:\n{own}\n"
         f"Your recent moves:\n{recent}\n"
@@ -303,13 +319,14 @@ class ModelBlue:
         return action
 
     def next_action(self, turn: int, history: list,
-                    max_turns: int | None = None) -> dict | None:
+                    max_turns: int | None = None,
+                    alerts: list | None = None) -> dict | None:
         """Ask the model for one tool call, else use the baseline move."""
         total = max_turns if max_turns is not None else self._max_turns
         try:
             response = llm.chat(
                 ROLE,
-                _build_messages(turn, history, total, self._playbook),
+                _build_messages(turn, history, total, self._playbook, alerts),
                 tools=TOOL_SCHEMAS,
                 exercise_id=self._exercise_id,
                 client=self._client,
