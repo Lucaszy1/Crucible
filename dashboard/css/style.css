@@ -221,7 +221,7 @@ select {
 .position { font-size: 13px; color: var(--muted); white-space: nowrap; }
 
 /* Activity feed */
-.feed { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; padding-right: 2px; }
+.feed { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; padding-right: 2px; max-height: 620px; }
 .round-head {
   font-size: 12px; font-weight: 650; color: var(--muted);
   margin: 12px 0 4px; padding-top: 8px;
