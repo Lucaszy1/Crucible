@@ -58,6 +58,36 @@ def _scenario() -> dict:
     return sandbox.load_scenario()
 
 
+def _relay_host() -> str:
+    """Return the host whose container relays HTTP requests.
+
+    Classic ranges relay from workstation; generated ranges have no
+    workstation, so they relay from the spec's entry host (every
+    toyhost container ships python).
+    """
+    entry = _scenario().get("entry_host", "") or ""
+    if entry:
+        return entry
+    return "workstation"
+
+
+def _needs_session(host: str, clean: str) -> bool:
+    """Check whether a file path needs a prior sign-in on its host.
+
+    The /secret tree always gates, like the classic range. Under a
+    generated spec the planted files and their parent dirs gate too,
+    exactly the Stage 1 simulator's rule.
+    """
+    if clean.startswith("/secret/"):
+        return True
+    gated = (_scenario().get("gated_paths", {}) or {}).get(host, []) or []
+    return clean in gated
+
+
+def _session_error(host: str) -> dict:
+    return {"ok": False, "error": f"sign-in on {host!r} is required first"}
+
+
 def _valid_path(path: str) -> str:
     if not isinstance(path, str) or not path.startswith("/"):
         raise ValueError(f"path must be absolute: {path!r}")
@@ -192,8 +222,9 @@ def http_request(host: str, path: str, method: str = "GET", body: str | None = N
         return {"ok": False, "error": f"no http service declared on {host!r}"}
     if not sandbox.is_running(host):
         return {"ok": False, "error": f"host {host!r} is not up"}
-    if not sandbox.is_running("workstation"):
-        return {"ok": False, "error": "workstation relay is not up"}
+    relay = _relay_host()
+    if not sandbox.is_running(relay):
+        return {"ok": False, "error": f"{relay} relay is not up"}
     refused = _refuse_when_isolated(host, "http-request", f"path={_clean_token(path)}")
     if refused is not None:
         return refused
@@ -201,7 +232,7 @@ def http_request(host: str, path: str, method: str = "GET", body: str | None = N
     data_repr = repr(body.encode("utf-8")) if body is not None else "None"
     script = _relay_script(url, method, data_repr)
     try:
-        done = sandbox.exec("workstation", ["python", "-c", script])
+        done = sandbox.exec(relay, ["python", "-c", script])
     except SandboxError as exc:
         return {"ok": False, "error": str(exc)}
     stdout = done["output"]
@@ -267,8 +298,8 @@ def read_file(host: str, path: str) -> dict:
     refused = _refuse_when_isolated(host, "file-read", f"path={_clean_token(clean)}")
     if refused is not None:
         return refused
-    if clean.startswith("/secret/") and host not in _state["authed"]:
-        return {"ok": False, "error": f"sign-in on {host!r} is required first"}
+    if _needs_session(host, clean) and host not in _state["authed"]:
+        return _session_error(host)
     try:
         done = sandbox.exec(host, ["read-file", clean, LOG_SOURCE])
     except SandboxError as exc:
@@ -292,8 +323,9 @@ def list_files(host: str, path: str) -> dict:
     refused = _refuse_when_isolated(host, "dir-list", f"path={_clean_token(clean)}")
     if refused is not None:
         return refused
-    if (clean == "/secret" or clean.startswith("/secret/")) and host not in _state["authed"]:
-        return {"ok": False, "error": f"sign-in on {host!r} is required first"}
+    if (clean == "/secret" or _needs_session(host, clean)) \
+            and host not in _state["authed"]:
+        return _session_error(host)
     try:
         done = sandbox.exec(host, ["list-files", clean, LOG_SOURCE])
     except SandboxError as exc:
@@ -432,7 +464,42 @@ def _credential_account_names() -> set:
                 user = entry.get("user")
                 if isinstance(user, str) and user.strip():
                     names.add(user.strip())
+                for extra in entry.get("users", []) or []:
+                    if isinstance(extra, str) and extra.strip():
+                        names.add(extra.strip())
     return names
+
+
+def _gen_credential_failures(failures: dict) -> None:
+    """Check toyhost credential stores match their shipped copies.
+
+    Hosts with accounts must have identical live and shipped passwd
+    files (compared inside the container, so passwords never cross
+    the exec boundary); hosts without accounts must have no passwd
+    file at all.
+    """
+    shipped = (_scenario().get("shipped_defaults", {}) or {})
+    for host in sandbox.active_hosts():
+        if host in shipped:
+            try:
+                done = sandbox.exec(host, ["cmp", "-s",
+                                           "/run/toyhost/passwd",
+                                           "/run/toyhost/passwd.shipped"])
+            except SandboxError as exc:
+                failures[f"credentials:{host}"] = f"unreadable: {exc}"
+                continue
+            if done["exit_code"] != 0:
+                failures[f"credentials:{host}"] = \
+                    "credentials differ from shipped defaults"
+        else:
+            try:
+                probe = sandbox.exec(host, ["test", "!", "-e",
+                                            "/run/toyhost/passwd"])
+            except SandboxError as exc:
+                failures[f"credentials:{host}"] = f"unreadable: {exc}"
+                continue
+            if probe["exit_code"] != 0:
+                failures[f"credentials:{host}"] = "unexpected sign-in gate"
 
 
 def clean_start_check() -> dict:
@@ -444,7 +511,8 @@ def clean_start_check() -> dict:
     unreadable state fails the check instead.
     """
     failures = {}
-    for host in sandbox.ALLOWED_HOSTS:
+    hosts = list(sandbox.active_hosts())
+    for host in hosts:
         try:
             isolated = sandbox.is_isolated(host)
         except SandboxError as exc:
@@ -452,7 +520,7 @@ def clean_start_check() -> dict:
             continue
         if isolated:
             failures[f"isolated:{host}"] = "host detached from range network"
-    for host in sandbox.ALLOWED_HOSTS:
+    for host in hosts:
         try:
             done = sandbox.exec(host, ["test", "!", "-e", PATCH_FLAG])
         except SandboxError as exc:
@@ -460,32 +528,35 @@ def clean_start_check() -> dict:
             continue
         if done["exit_code"] != 0:
             failures[f"patch:{host}"] = "patch flag present"
-    shipped = (_scenario().get("shipped_defaults", {}) or {})
-    for host in ("app", "db"):
-        want = shipped.get(host, {}) or {}
-        try:
-            user = sandbox.exec(host, ["cat", "/secret/.toy_user"])
-            secret = sandbox.exec(host, ["cat", "/secret/.toy_pass"])
-        except SandboxError as exc:
-            failures[f"credentials:{host}"] = f"unreadable: {exc}"
-            continue
-        if user["exit_code"] != 0 or secret["exit_code"] != 0:
-            failures[f"credentials:{host}"] = "credential files missing"
-        elif user["output"] != want.get("user") or secret["output"] != want.get("pass"):
-            failures[f"credentials:{host}"] = "credentials differ from shipped defaults"
-    for host in ("web", "workstation"):
-        try:
-            probe = sandbox.exec(host, ["cat", "/secret/.toy_pass"])
-        except SandboxError as exc:
-            failures[f"credentials:{host}"] = f"unreadable: {exc}"
-            continue
-        if probe["exit_code"] == 0:
-            failures[f"credentials:{host}"] = "unexpected sign-in gate"
+    if sandbox.active_spec() is None:
+        shipped = (_scenario().get("shipped_defaults", {}) or {})
+        for host in ("app", "db"):
+            want = shipped.get(host, {}) or {}
+            try:
+                user = sandbox.exec(host, ["cat", "/secret/.toy_user"])
+                secret = sandbox.exec(host, ["cat", "/secret/.toy_pass"])
+            except SandboxError as exc:
+                failures[f"credentials:{host}"] = f"unreadable: {exc}"
+                continue
+            if user["exit_code"] != 0 or secret["exit_code"] != 0:
+                failures[f"credentials:{host}"] = "credential files missing"
+            elif user["output"] != want.get("user") or secret["output"] != want.get("pass"):
+                failures[f"credentials:{host}"] = "credentials differ from shipped defaults"
+        for host in ("web", "workstation"):
+            try:
+                probe = sandbox.exec(host, ["cat", "/secret/.toy_pass"])
+            except SandboxError as exc:
+                failures[f"credentials:{host}"] = f"unreadable: {exc}"
+                continue
+            if probe["exit_code"] == 0:
+                failures[f"credentials:{host}"] = "unexpected sign-in gate"
+    else:
+        _gen_credential_failures(failures)
     recorded = set(sandbox.log_offsets())
-    if recorded != set(sandbox.ALLOWED_HOSTS):
+    if recorded != set(hosts):
         failures["scope"] = "episode log scope not recorded"
     names = _credential_account_names()
-    for host in sandbox.ALLOWED_HOSTS:
+    for host in hosts:
         try:
             lines = sandbox.container_logs(host, tail=None)
         except SandboxError as exc:
@@ -498,8 +569,7 @@ def clean_start_check() -> dict:
             if "file read path=/secret/" in line:
                 failures[f"secret:{host}"] = "secret read in this-episode logs"
                 break
-    return {"ok": not failures, "failures": failures,
-            "hosts": list(sandbox.ALLOWED_HOSTS)}
+    return {"ok": not failures, "failures": failures, "hosts": hosts}
 
 
 def begin_episode() -> dict:
@@ -511,14 +581,14 @@ def begin_episode() -> dict:
     """
     last = {"ok": False, "failures": {"episode": "check never ran"}, "hosts": []}
     for attempt in (1, 2):
-        for host in sandbox.ALLOWED_HOSTS:
+        for host in sandbox.active_hosts():
             restore_host(host)
         try:
             sandbox.note_log_offsets()
             last = clean_start_check()
         except SandboxError as exc:
             last = {"ok": False, "failures": {"scope": str(exc)},
-                    "hosts": list(sandbox.ALLOWED_HOSTS)}
+                    "hosts": list(sandbox.active_hosts())}
         if last.get("ok"):
             return {"ok": True, "attempts": attempt, "checks": last}
     raise SandboxError(

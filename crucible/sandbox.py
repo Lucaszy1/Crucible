@@ -18,8 +18,41 @@ SANDBOX_DIR = ROOT / "sandbox"
 COMPOSE_FILE = SANDBOX_DIR / "docker-compose.yml"
 PROJECT = "crucible"
 
+# Rendered stack for one generated spec (see scenarios/render.py).
+GEN_COMPOSE_FILE = SANDBOX_DIR / "compose.gen.yml"
+GEN_SPEC_FILE = SANDBOX_DIR / "spec.gen.json"
+
 # The only hosts agents may touch. Enforced here in code.
 ALLOWED_HOSTS = ("web", "app", "db", "workstation")
+
+# Active generated spec, or None for the classic scenario. Set by the
+# CLIs around a scenario's episodes; everything below follows it.
+_ACTIVE_SPEC: dict | None = None
+
+
+def set_active_spec(spec: dict | None) -> None:
+    """Activate one generated spec, or None to return to classic."""
+    global _ACTIVE_SPEC
+    _ACTIVE_SPEC = dict(spec) if spec is not None else None
+
+
+def active_spec() -> dict | None:
+    """Return the active generated spec, or None for classic."""
+    return _ACTIVE_SPEC
+
+
+def active_hosts() -> tuple:
+    """Return the hosts agents may touch under the active scenario."""
+    if _ACTIVE_SPEC is None:
+        return ALLOWED_HOSTS
+    return tuple(host["name"] for host in _ACTIVE_SPEC.get("hosts", []))
+
+
+def active_compose_file() -> Path:
+    """Return the compose file for the active scenario."""
+    if _ACTIVE_SPEC is None:
+        return COMPOSE_FILE
+    return GEN_COMPOSE_FILE
 
 
 class AllowlistError(ValueError):
@@ -36,18 +69,32 @@ def check_host(host: str) -> str:
     Matching is strict on purpose: surrounding spaces, casing tricks, and
     dotted lookalikes all fail closed instead of resolving somewhere odd.
     """
-    if not isinstance(host, str) or host not in ALLOWED_HOSTS:
+    allowed = active_hosts()
+    if not isinstance(host, str) or host not in allowed:
         raise AllowlistError(
             f"host {host!r} is outside the sandbox; "
-            f"allowed hosts: {', '.join(ALLOWED_HOSTS)}"
+            f"allowed hosts: {', '.join(allowed)}"
         )
     return host
 
 
 @lru_cache(maxsize=1)
-def load_scenario() -> dict:
+def _load_classic_scenario() -> dict:
     """Load the scenario definition shipped with the sandbox."""
     return json.loads((SANDBOX_DIR / "scenario.json").read_text(encoding="utf-8"))
+
+
+def load_scenario() -> dict:
+    """Load the active scenario definition.
+
+    Classic by default; when a generated spec is active, returns its
+    classic-shaped adapter instead (see scenarios/compat.py).
+    """
+    if _ACTIVE_SPEC is not None:
+        from crucible.scenarios import compat
+
+        return compat.as_classic_dict(_ACTIVE_SPEC)
+    return _load_classic_scenario()
 
 
 def blue_inventory() -> dict:
@@ -64,7 +111,7 @@ def blue_inventory() -> dict:
         scenario = load_scenario()
     except Exception:
         scenario = {}
-    hosts = list(scenario.get("hosts", []) or list(ALLOWED_HOSTS))
+    hosts = list(scenario.get("hosts", []) or list(active_hosts()))
     weights = scenario.get("business_weights", {}) or {}
     section = scenario.get("blue_inventory", {}) or {}
     entries = section.get("hosts", {}) or {}
@@ -91,7 +138,8 @@ def blue_inventory() -> dict:
 
 
 def _compose(*args: str, timeout: int) -> str:
-    cmd = ["docker", "compose", "-f", str(COMPOSE_FILE), "-p", PROJECT, *args]
+    cmd = ["docker", "compose", "-f", str(active_compose_file()),
+           "-p", PROJECT, *args]
     try:
         done = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout, cwd=SANDBOX_DIR
@@ -106,15 +154,8 @@ def _compose(*args: str, timeout: int) -> str:
     return done.stdout
 
 
-def start() -> dict:
-    """Build the images and bring the four hosts up.
-
-    Raises SandboxError with the missing host names when any host is
-    still down after compose reports success, instead of handing back
-    a silent all-False map.
-    """
-    _compose("up", "-d", "--build", timeout=300)
-    state = status()
+def _check_started(state: dict) -> dict:
+    """Raise naming hosts still down after compose reports success."""
     missing = [host for host, up in state.items() if not up]
     if missing:
         raise SandboxError(
@@ -124,10 +165,32 @@ def start() -> dict:
     return state
 
 
+def start() -> dict:
+    """Build the images and bring the active scenario's hosts up.
+
+    Raises SandboxError with the missing host names when any host is
+    still down after compose reports success, instead of handing back
+    a silent all-False map.
+    """
+    _compose("up", "-d", "--build", timeout=300)
+    return _check_started(status())
+
+
+def start_warm() -> dict:
+    """Bring the active scenario's hosts up without rebuilding.
+
+    Used when switching between generated scenarios after the first
+    build, so warm switches stay fast. The toyhost image must already
+    exist from an earlier start().
+    """
+    _compose("up", "-d", timeout=300)
+    return _check_started(status())
+
+
 def stop() -> dict:
     """Stop the range and remove its containers."""
     _compose("down", timeout=120)
-    return {"web": False, "app": False, "db": False, "workstation": False}
+    return {host: False for host in active_hosts()}
 
 
 def reset() -> dict:
@@ -196,7 +259,7 @@ def is_running(host: str) -> bool:
 
 def status() -> dict:
     """Map each sandbox host to its running state."""
-    return {host: is_running(host) for host in ALLOWED_HOSTS}
+    return {host: is_running(host) for host in active_hosts()}
 
 
 def exec(host: str, cmd: list, timeout: int = 30) -> dict:
@@ -235,7 +298,7 @@ def note_log_offsets(hosts=None) -> dict:
     Later container_logs calls return only newer lines. Returns a copy
     of the recorded offsets.
     """
-    targets = list(hosts) if hosts else list(ALLOWED_HOSTS)
+    targets = list(hosts) if hosts else list(active_hosts())
     offsets = {}
     for host in targets:
         offsets[check_host(host)] = len(_raw_logs(host, tail=None))
