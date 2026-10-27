@@ -2001,6 +2001,21 @@ function paintFx(refs, ctx) {
       case "fizzle":
         paintFxFizzle(refs, ctx, fx, p);
         break;
+      case "scanring":
+        paintFxScanring(refs, ctx, fx, p);
+        break;
+      case "flare":
+        paintFxFlare(refs, ctx, fx, p);
+        break;
+      case "slam":
+        paintFxSlam(refs, ctx, fx, p);
+        break;
+      case "sweep":
+        paintFxSweep(refs, ctx, fx, p);
+        break;
+      case "reconnect":
+        paintFxReconnect(refs, ctx, fx, p);
+        break;
       default:
         break;
     }
@@ -2236,6 +2251,95 @@ function paintFxSiphon(refs, ctx, fx, p) {
     ctx.arc(x, y, 3, 0, 6.283);
     ctx.fill();
   }
+  ctx.restore();
+}
+
+// Log review: a scanning ring sweeps the host from the Guardian.
+function paintFxScanring(refs, ctx, fx, p) {
+  const at = fxPoint(refs, fx);
+  if (!at) return;
+  const from = entityCore(refs, "blue");
+  beamStroke(ctx, from.x, from.y, at.x, at.y, "120,190,255", 2, 0.35 * (1 - p));
+  paintFxRing(ctx, { ...fx, r0: at.r + 4, r1: at.r + 70, color: "127,212,255" }, p * fx.dur, at);
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.strokeStyle = `rgba(160,230,255,${(0.8 * (1 - p)).toFixed(2)})`;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(at.x, at.y, at.r + 16, p * 12, p * 12 + 1.8);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Report: the Guardian flares bright.
+function paintFxFlare(refs, ctx, fx, p) {
+  const at = entityCore(refs, "blue");
+  const sprites = refs.sprites || {};
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  drawGlow(ctx, sprites.cyan, at.x, at.y, at.r * 2.2 * (0.6 + p), 0.85 * (1 - p));
+  drawGlow(ctx, sprites.white, at.x, at.y, at.r * 0.9, 0.9 * (1 - p));
+  ctx.restore();
+}
+
+// Isolate: a barrier ring slams down onto the host.
+function paintFxSlam(refs, ctx, fx, p) {
+  const at = fxPoint(refs, fx);
+  if (!at) return;
+  const r = at.r + 8 + (1 - Math.min(1, p * 1.4)) * 70;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.strokeStyle = `rgba(120,190,255,${(0.9 * (1 - p * 0.4)).toFixed(2)})`;
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.arc(at.x, at.y, Math.max(4, r), 0, 6.283);
+  ctx.stroke();
+  if (p > 0.6) {
+    const q = (p - 0.6) / 0.4;
+    ctx.strokeStyle = `rgba(230,245,255,${(0.8 * (1 - q)).toFixed(2)})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(at.x, at.y, at.r + 8 + q * 30, 0, 6.283);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Patch: a green repair sweep crosses the host.
+function paintFxSweep(refs, ctx, fx, p) {
+  const at = fxPoint(refs, fx);
+  if (!at) return;
+  const x = at.x - at.r * 1.4 + p * at.r * 2.8;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const band = ctx.createLinearGradient(x - at.r * 0.5, 0, x + at.r * 0.5, 0);
+  band.addColorStop(0, "rgba(120,220,150,0)");
+  band.addColorStop(0.5, `rgba(140,235,170,${(0.55 * Math.sin(p * Math.PI)).toFixed(2)})`);
+  band.addColorStop(1, "rgba(120,220,150,0)");
+  ctx.fillStyle = band;
+  ctx.fillRect(x - at.r * 0.5, at.y - at.r * 1.4, at.r, at.r * 2.8);
+  ctx.strokeStyle = `rgba(150,240,180,${(0.7 * (1 - p)).toFixed(2)})`;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x, at.y - at.r * 1.3);
+  ctx.lineTo(x, at.y + at.r * 1.3);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Restore: reconnect pulses ripple out of the host.
+function paintFxReconnect(refs, ctx, fx, p) {
+  const at = fxPoint(refs, fx);
+  if (!at) return;
+  paintFxRing(ctx, { ...fx, r0: at.r, r1: at.r + 60, color: "127,212,255" }, p * fx.dur, at);
+  if (p > 0.35) {
+    paintFxRing(ctx, { ...fx, r0: at.r, r1: at.r + 44, color: "200,235,255" },
+      (p - 0.35) * fx.dur, at);
+  }
+  const sprites = refs.sprites || {};
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  drawGlow(ctx, sprites.cyan, at.x, at.y, at.r * 1.6, 0.5 * Math.sin(p * Math.PI));
   ctx.restore();
 }
 
