@@ -1,0 +1,20 @@
+{
+  "red": {
+    "scan_host": {"technique": "T1046", "name": "Network Service Discovery", "stage": "Recon"},
+    "http_request": {"technique": "T1190", "name": "Exploit Public-Facing Application", "stage": "Recon"},
+    "try_credential": {"technique": "T1110", "name": "Brute Force", "stage": "Access"},
+    "list_files": {"technique": "T1083", "name": "File and Directory Discovery", "stage": "Discovery"},
+    "read_file": {"technique": "T1005", "name": "Data from Local System", "stage": "Collection"}
+  },
+  "blue": {
+    "read_logs": {"label": "Detect"},
+    "list_processes": {"label": "Detect"},
+    "report_finding": {"label": "Detect"},
+    "wait": {"label": "Monitor"},
+    "block_ip": {"label": "Evict"},
+    "isolate_host": {"label": "Contain"},
+    "patch_service": {"label": "Contain"},
+    "restore_host": {"label": "Restore"}
+  },
+  "stages": ["Recon", "Access", "Discovery", "Collection", "Exfiltrated"]
+}

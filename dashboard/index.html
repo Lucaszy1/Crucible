@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crucible Operations Center</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-dot" aria-hidden="true"></span>
+    <div>
+      <h1>Crucible <span class="brand-ops">Operations Center</span></h1>
+      <p class="subtitle">Autonomous security validation range</p>
+    </div>
+  </div>
+  <div class="top-meta">
+    <span id="modeBadge" class="mode-badge" data-mode="idle">Idle</span>
+    <span id="exerciseTitle" class="exercise-title">No exercise loaded</span>
+    <span id="eventCount" class="event-count">0 events</span>
+  </div>
+</header>
+
+<section class="command" aria-label="Exercise controls and timeline">
+  <div class="control-bar">
+    <div class="control-group">
+      <label for="agentsSelect">Agents</label>
+      <select id="agentsSelect">
+        <option value="scripted" selected>Scripted (no cost)</option>
+        <option value="model">Model (metered)</option>
+      </select>
+      <button id="runBtn" class="btn primary">Run exercise</button>
+    </div>
+    <div class="control-group">
+      <label for="replaySelect">Replay</label>
+      <select id="replaySelect">
+        <option value="">Loading past runs…</option>
+      </select>
+      <button id="replayBtn" class="btn">Load</button>
+    </div>
+    <div class="control-group">
+      <span class="group-label" id="speedLabel">Speed</span>
+      <div class="seg" role="group" aria-labelledby="speedLabel" id="speedSeg">
+        <button data-speed="0.5" aria-pressed="false">0.5x</button>
+        <button data-speed="1" aria-pressed="true" class="active">1x</button>
+        <button data-speed="2" aria-pressed="false">2x</button>
+        <button data-speed="4" aria-pressed="false">4x</button>
+      </div>
+    </div>
+    <div class="control-group server">
+      <span id="serverLight" class="light" data-state="unknown" aria-hidden="true"></span>
+      <span id="serverLabel">Connecting…</span>
+    </div>
+  </div>
+
+  <div class="timeline-bar">
+    <div class="transport">
+      <button id="playBtn" class="btn small" disabled>Play</button>
+      <button id="pauseBtn" class="btn small" disabled>Pause</button>
+    </div>
+    <input id="scrubber" type="range" min="0" max="0" value="0" step="1" aria-label="Event scrubber" disabled>
+    <span id="positionLabel" class="position">0 / 0</span>
+  </div>
+  <div id="tickStrip" class="tick-strip" role="listbox" aria-label="Event timeline">
+    <span class="strip-hint">Timeline ticks appear here once an exercise loads.</span>
+  </div>
+</section>
+
+<div id="notice" class="notice" hidden></div>
+
+<main class="grid">
+  <div class="col col-left">
+    <section class="panel" aria-label="Network map">
+      <h2>Network map</h2>
+      <svg id="mapSvg" viewBox="0 0 360 300" role="img" aria-label="Range network state"></svg>
+      <div class="legend">
+        <span><i class="sw" data-state="clean"></i>Clean</span>
+        <span><i class="sw" data-state="probed"></i>Probed</span>
+        <span><i class="sw" data-state="signed-in"></i>Signed in</span>
+        <span><i class="sw" data-state="compromised"></i>Compromised</span>
+        <span><i class="sw" data-state="isolated"></i>Isolated</span>
+        <span><i class="sw" data-state="restored"></i>Restored</span>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="Technique coverage">
+      <h2>Technique coverage</h2>
+      <h3 class="mini-head">Kill chain</h3>
+      <ol id="stageStrip" class="stages"></ol>
+      <h3 class="mini-head">Red techniques</h3>
+      <ul id="redTechList" class="tech-list"><li class="empty">No red activity yet.</li></ul>
+      <h3 class="mini-head">Blue responses</h3>
+      <ul id="blueLabelList" class="tech-list"><li class="empty">No blue activity yet.</li></ul>
+    </section>
+  </div>
+
+  <div class="col col-center">
+    <section class="panel streams" aria-label="Reasoning streams">
+      <div class="stream-col red-col">
+        <h2>Red team <span id="redCount" class="count">0</span></h2>
+        <div id="redStream" class="stream">
+          <p class="empty">Red reasoning appears here during an exercise.</p>
+        </div>
+      </div>
+      <div class="stream-col blue-col">
+        <h2>Blue team <span id="blueCount" class="count">0</span></h2>
+        <div id="blueStream" class="stream">
+          <p class="empty">Blue reasoning appears here during an exercise.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="col col-right">
+    <section class="panel" aria-label="Scoreboard">
+      <h2>Scoreboard</h2>
+      <div id="finalBanner" class="banner" hidden></div>
+      <dl class="score-grid">
+        <div><dt>Outcome</dt><dd id="sbOutcome">—</dd></div>
+        <div><dt>Detection delay</dt><dd id="sbDetect">—</dd></div>
+        <div><dt>Containment</dt><dd id="sbContain">—</dd></div>
+        <div><dt>Downtime</dt><dd id="sbDowntime">—</dd></div>
+        <div><dt>Blue score</dt><dd id="sbBlue">—</dd></div>
+      </dl>
+      <div class="cost">
+        <div class="cost-head"><span>Cost today</span><span id="costLabel">$0.00</span></div>
+        <div class="meter"><div id="costBar" class="meter-fill" style="width:0%"></div></div>
+        <p id="exerciseCost" class="cost-sub">Exercise cost: —</p>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="Evidence">
+      <h2>Evidence</h2>
+      <div id="evidenceChips" class="chips"><span class="empty">Cited log lines appear here.</span></div>
+      <div id="logTabs" class="tabs" role="tablist"></div>
+      <div id="logViewer" class="logs" tabindex="0"><p class="empty">Host logs appear here.</p></div>
+    </section>
+  </div>
+</main>
+
+<div id="confirmOverlay" class="overlay" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <h2 id="confirmTitle">Run a model exercise?</h2>
+    <p>Model turns call the metered API. Scripted runs are free.</p>
+    <dl class="score-grid">
+      <div><dt>Estimated cost</dt><dd id="confirmCost">—</dd></div>
+      <div><dt>Spent today</dt><dd id="confirmSpent">—</dd></div>
+      <div><dt>Daily limit</dt><dd id="confirmLimit">—</dd></div>
+    </dl>
+    <p id="confirmWarn" class="warn" hidden></p>
+    <div class="dialog-actions">
+      <button id="confirmCancel" class="btn">Cancel</button>
+      <button id="confirmOk" class="btn primary">Start exercise</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>
