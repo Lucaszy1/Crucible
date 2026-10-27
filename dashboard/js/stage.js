@@ -338,6 +338,8 @@ export function stageWash(events) {
 // ---------- renderer ----------
 const ART_FILES = {
   backdrop: "backdrop-hall.webp",
+  intrusionTex: "intrusion-splash.webp",
+  guardianTex: "guardian-splash.webp",
   streak: "fx-streak.webp",
   ring: "fx-ring.webp",
   shard: "fx-shard.webp",
@@ -451,6 +453,7 @@ export function initStage(canvas, opts) {
     lanes: { red: [], blue: [] },
     intrusion: 0,
     guardian: 0.15,
+    surge: { red: 0, blue: 0 },
     wash: "none",
     flash: null,
     label: "",
@@ -829,6 +832,7 @@ export function renderStageStatic(refs, events, cursor, opts, instant) {
     for (const host of clean.hosts) refs.roles[host.id] = host.role;
     refs.jewel = clean.jewel_host;
     refs.flash = null;
+    refs.surge = { red: 0, blue: 0 };
     refs.cam = { dx: 0, dy: 0, z: 1 };
     refs.camTarget = { dx: 0, dy: 0, z: 1 };
     refs.trauma = 0;
@@ -857,6 +861,8 @@ export function stageNotify(refs, ev, states, speed) {
   refs.intrusion = intrusionLevel(refs.events, refs.events.slice(0, refs.cursor));
   refs.guardian = guardianPulse(refs.events.slice(0, refs.cursor));
   refs.wash = stageWash(refs.events.slice(0, refs.cursor));
+  if (ev.actor === "red") refs.surge.red = refs.clock + 900;
+  if (ev.actor === "blue") refs.surge.blue = refs.clock + 900;
   const host = eventHost(ev);
   if (host && refs.nodes[host]) {
     refs.camTarget = dollyTarget(refs.stage, refs.nodes, host);
@@ -1513,97 +1519,207 @@ function paintEntities(refs, ctx) {
   const slots = refs.stage.entities;
   const t = refs.clock / 1000;
   const sprites = refs.sprites || {};
+  const art = refs.art || {};
   const red = slots.intrusion;
   const blue = slots.guardian;
-  paintIntrusion(ctx, sprites, red.x, red.y,
-    red.r * (0.68 + 0.42 * refs.intrusion), refs.intrusion, t);
-  paintGuardian(ctx, sprites, blue.x, blue.y, blue.r, refs.guardian, t);
+  const redHot = refs.clock < refs.surge.red ? (refs.surge.red - refs.clock) / 900 : 0;
+  const blueHot = refs.clock < refs.surge.blue ? (refs.surge.blue - refs.clock) / 900 : 0;
+  const level = Math.min(1, refs.intrusion + redHot * 0.25);
+  const energy = Math.min(1.15, refs.guardian + blueHot * 0.35);
+  paintIntrusion(ctx, sprites, art, red.x, red.y,
+    red.r * (0.68 + 0.42 * refs.intrusion), level, t);
+  paintGuardian(ctx, sprites, art, blue.x, blue.y, blue.r, energy, t);
 }
 
-// The Intrusion: a hovering diamond of wireframe shards that grows
-// and sharpens as red progresses. Abstract light and code only.
-function paintIntrusion(ctx, sprites, x, y, r, level, t) {
+// The Intrusion: a hot white core wrapped in layered jagged crimson
+// shards turning at different speeds, glitch slices, and orbiting
+// code glyphs. Flicker turns violent as red progresses. Abstract
+// light and code only; the splash art lights the inside additively.
+export function paintIntrusion(ctx, sprites, art, x, y, r, level, t) {
   const rr = Math.max(8, r);
+  const lvl = Math.max(0, Math.min(1, level));
+  const violence = 0.25 + lvl * 1.6;
+  const step = Math.floor(t * 24);
+  const rnd = (n) => {
+    const s = Math.sin(step * 12.9898 + n * 78.233) * 43758.5453;
+    return s - Math.floor(s);
+  };
+  const jx = (rnd(1) - 0.5) * rr * 0.08 * violence;
+  const jy = (rnd(2) - 0.5) * rr * 0.08 * violence;
   ctx.save();
-  ctx.translate(x, y + Math.sin(t * 1.1) * rr * 0.05);
-  drawGlow(ctx, sprites.intrusion, 0, 0, rr * 2.2, 0.5 + level * 0.5);
-  const spin = t * (0.25 + level * 0.6);
-  ctx.rotate(Math.sin(spin * 0.4) * 0.12);
-  // Shard diamond core.
-  ctx.fillStyle = "rgba(52,12,12,0.95)";
-  ctx.beginPath();
-  ctx.moveTo(0, -rr);
-  ctx.lineTo(rr * 0.72, 0);
-  ctx.lineTo(0, rr);
-  ctx.lineTo(-rr * 0.72, 0);
-  ctx.closePath();
-  ctx.fill();
-  ctx.strokeStyle = level > 0.66 ? "#ff6a5e" : RED;
-  ctx.lineWidth = Math.max(1.5, rr * 0.05);
-  ctx.stroke();
-  ctx.strokeStyle = "rgba(255,110,100,0.5)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(0, -rr);
-  ctx.lineTo(0, rr);
-  ctx.moveTo(-rr * 0.72, 0);
-  ctx.lineTo(rr * 0.72, 0);
-  ctx.stroke();
-  // Orbiting shards multiply with progress.
-  const shards = 3 + Math.round(level * 4);
-  for (let i = 0; i < shards; i += 1) {
-    const a = spin * 1.7 + (i * 6.283) / shards;
-    const dist = rr * (1.25 + 0.18 * Math.sin(t * 2 + i));
-    const sx = Math.cos(a) * dist;
-    const sy = Math.sin(a) * dist * 0.8;
-    const s = rr * (0.1 + level * 0.1);
+  ctx.translate(x + jx, y + Math.sin(t * 1.1) * rr * 0.04 + jy);
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  drawGlow(ctx, (sprites || {}).intrusion, 0, 0, rr * 2.4, 0.45 + lvl * 0.55);
+  ctx.restore();
+  const tex = art && art.intrusionTex;
+  if (tex && tex.width) {
     ctx.save();
-    ctx.translate(sx, sy);
-    ctx.rotate(a + t);
-    ctx.fillStyle = "rgba(255,70,60,0.85)";
     ctx.beginPath();
-    ctx.moveTo(0, -s * 1.6);
-    ctx.lineTo(s, s);
-    ctx.lineTo(-s, s * 0.4);
-    ctx.closePath();
-    ctx.fill();
+    ctx.arc(0, 0, rr * 1.3, 0, 6.283);
+    ctx.clip();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = 0.4 + lvl * 0.3;
+    ctx.rotate(Math.sin(t * 0.18) * 0.2 + t * 0.03);
+    const ts = rr * 2.6;
+    ctx.drawImage(tex, -ts / 2, -ts / 2, ts, ts);
     ctx.restore();
   }
-  // Glitch slices sharpen with progress.
-  if (level > 0.15) {
-    const slices = 1 + Math.floor(level * 3);
-    ctx.fillStyle = "rgba(255,59,47,0.5)";
-    for (let i = 0; i < slices; i += 1) {
-      const gy = -rr + ((i * 2 + 1) / (slices * 2)) * rr * 2;
-      const gw = rr * (0.5 + 0.5 * Math.abs(Math.sin(t * 7 + i * 3)));
-      const off = Math.sin(t * 11 + i * 5) * rr * 0.12 * level;
-      ctx.fillRect(-gw + off, gy - 1, gw * 2, 2);
-    }
-  }
-  ctx.fillStyle = "#0a0505";
+  // Dark jagged body: the silhouette anchor under the shards.
+  ctx.save();
+  ctx.rotate(t * 0.12);
+  ctx.fillStyle = "rgba(24,6,7,0.95)";
+  ctx.strokeStyle = lvl > 0.66 ? "#ff7a5c" : "#e03228";
+  ctx.lineWidth = Math.max(1.5, rr * 0.035);
   ctx.beginPath();
-  ctx.arc(0, 0, rr * 0.2, 0, 6.283);
+  const teeth = 9;
+  for (let i = 0; i < teeth; i += 1) {
+    const a = (i * 6.283) / teeth;
+    const rad = rr * (i % 2 === 0 ? 0.98 : 0.72);
+    const px = Math.cos(a) * rad;
+    const py = Math.sin(a) * rad;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
   ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+  // Radiating spikes: thin teeth that sell the silhouette.
+  const spikes = 6 + Math.round(lvl * 3);
+  for (let i = 0; i < spikes; i += 1) {
+    const a = t * 0.35 + (i * 6.283) / spikes;
+    const len = rr * (0.35 + 0.3 * Math.abs(Math.sin(t * 3.1 + i * 2.4)) + lvl * 0.25);
+    const base = rr * 0.85;
+    const tip = base + len;
+    const wdt = rr * 0.07;
+    const dx = Math.cos(a);
+    const dy = Math.sin(a);
+    const nx = -dy;
+    const ny = dx;
+    ctx.fillStyle = "rgba(255,59,47,0.85)";
+    ctx.beginPath();
+    ctx.moveTo(dx * base + nx * wdt, dy * base + ny * wdt);
+    ctx.lineTo(dx * tip, dy * tip);
+    ctx.lineTo(dx * base - nx * wdt, dy * base - ny * wdt);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // Layered shard rings, each turning at its own speed.
+  const rings = [
+    { n: 8, rad: 1.12, size: 0.2, speed: 0.55, wob: 0.1 },
+    { n: 6, rad: 0.78, size: 0.18, speed: -0.38, wob: 0.14 },
+    { n: 5, rad: 0.5, size: 0.16, speed: 0.9, wob: 0.08 },
+  ];
+  const extra = Math.round(lvl * 3);
+  rings.forEach((ring, ri) => {
+    const n = ring.n + (ri === 0 ? extra : 0);
+    for (let i = 0; i < n; i += 1) {
+      const a = t * ring.speed + (i * 6.283) / n + ri * 1.3;
+      const dist = rr * ring.rad * (1 + Math.sin(t * 2.1 + i * 1.7 + ri) * ring.wob);
+      const s = rr * ring.size * (0.8 + lvl * 0.5) * (0.7 + 0.6 * Math.abs(Math.sin(i * 2.39 + ri * 1.1)));
+      ctx.save();
+      ctx.translate(Math.cos(a) * dist, Math.sin(a) * dist * 0.92);
+      ctx.rotate(a * 2 + i * 0.7 + t * (0.6 + ri * 0.3));
+      ctx.fillStyle = "rgba(46,10,10,0.92)";
+      ctx.strokeStyle = lvl > 0.66 ? "#ff7a5c" : "#ff3b2f";
+      ctx.lineWidth = Math.max(1, rr * 0.02);
+      ctx.beginPath();
+      ctx.moveTo(0, -s * 2.1);
+      ctx.lineTo(s * 0.5, s * 0.1);
+      ctx.lineTo(0, s * 0.9);
+      ctx.lineTo(-s * 0.5, s * 0.1);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+  });
+  // White-hot core with violent flicker.
+  const flick = 1 + (rnd(3) - 0.5) * 0.5 * violence + Math.sin(t * 47) * 0.06 * violence;
+  const coreR = Math.max(2, rr * 0.3 * flick);
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  drawGlow(ctx, (sprites || {}).white, 0, 0, coreR * 3.2, 0.5 + lvl * 0.4);
+  ctx.fillStyle = "#fff6f2";
+  ctx.beginPath();
+  ctx.arc(0, 0, coreR, 0, 6.283);
+  ctx.fill();
+  ctx.restore();
+  // Horizontal glitch-slice displacement across the body.
+  const slices = 2 + Math.round(lvl * 3);
+  for (let i = 0; i < slices; i += 1) {
+    const gy = -rr * 1.2 + ((i + rnd(10 + i) * 0.6) / slices) * rr * 2.4;
+    const gh = Math.max(1, rr * (0.02 + rnd(20 + i) * 0.03));
+    const off = (rnd(30 + i) - 0.5) * rr * 0.5 * (0.3 + lvl);
+    ctx.fillStyle = `rgba(255,70,60,${(0.25 + lvl * 0.4).toFixed(2)})`;
+    ctx.fillRect(-rr * 1.5 + off, gy, rr * 3, gh);
+    ctx.fillStyle = "rgba(127,212,255,0.18)";
+    ctx.fillRect(-rr * 1.5 + off * 0.5, gy + gh, rr * 3, 1);
+  }
+  // Orbiting code glyphs.
+  const glyphs = "01<>/\\{}=+*#$";
+  const count = 5 + Math.round(lvl * 4);
+  ctx.save();
+  ctx.font = `${Math.max(8, Math.round(rr * 0.2))}px ${MONO}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (let i = 0; i < count; i += 1) {
+    const a = t * (0.5 + lvl * 0.9) + (i * 6.283) / count;
+    const dist = rr * (1.35 + 0.25 * Math.sin(t * 1.3 + i * 2.2));
+    ctx.fillStyle = `rgba(255,110,100,${(0.35 + 0.45 * Math.abs(Math.sin(t * 3 + i))).toFixed(2)})`;
+    ctx.fillText(glyphs[(i * 3 + step) % glyphs.length], Math.cos(a) * dist, Math.sin(a) * dist);
+  }
+  ctx.restore();
   ctx.restore();
 }
 
-// The Guardian: calm concentric rings and shield plates that answer
-// blue containment with a bright pulse.
-function paintGuardian(ctx, sprites, x, y, r, energy, t) {
+// The Guardian: a bright cyan-white core inside segmented rings
+// turning in opposite directions, with orbiting shield plates and a
+// calm steady pulse that brightens on blue actions. Abstract light
+// and code only; the splash art lights the inside additively.
+export function paintGuardian(ctx, sprites, art, x, y, r, energy, t) {
   const rr = Math.max(8, r);
+  const e = Math.max(0.15, Math.min(1.2, energy));
   const breathe = 1 + Math.sin(t * 1.4) * 0.02;
+  const sp = sprites || {};
   ctx.save();
-  ctx.translate(x, y);
+  ctx.translate(x, y + Math.sin(t * 0.9) * rr * 0.03);
   ctx.scale(breathe, breathe);
-  drawGlow(ctx, sprites.guardian, 0, 0, rr * 2.2, 0.45 + energy * 0.55);
-  ctx.strokeStyle = `rgba(160,220,255,${0.5 + energy * 0.45})`;
-  for (let k = 0; k < 3; k += 1) {
-    ctx.lineWidth = k === 0 ? 3 : 1.5;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  drawGlow(ctx, sp.guardian, 0, 0, rr * 2.4, 0.4 + e * 0.55);
+  ctx.restore();
+  const tex = art && art.guardianTex;
+  if (tex && tex.width) {
     ctx.save();
-    ctx.rotate(t * (k % 2 === 0 ? 0.3 : -0.22) + k);
     ctx.beginPath();
-    ctx.arc(0, 0, rr * (1 - k * 0.22), 0, 6.283);
-    ctx.stroke();
+    ctx.arc(0, 0, rr * 1.3, 0, 6.283);
+    ctx.clip();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = 0.22 + e * 0.2;
+    ctx.rotate(t * 0.05);
+    const ts = rr * 2.4;
+    ctx.drawImage(tex, -ts / 2, -ts / 2, ts, ts);
+    ctx.restore();
+  }
+  // Segmented rings turning in opposite directions.
+  const rings = [
+    { rad: 1.0, segs: 4, gap: 0.32, speed: 0.3, w: 0.055, a: 0.75 },
+    { rad: 0.78, segs: 6, gap: 0.2, speed: -0.22, w: 0.04, a: 0.6 },
+    { rad: 0.56, segs: 3, gap: 0.5, speed: 0.16, w: 0.03, a: 0.5 },
+  ];
+  for (const ring of rings) {
+    ctx.save();
+    ctx.rotate(t * ring.speed);
+    ctx.strokeStyle = `rgba(160,220,255,${Math.min(1, ring.a + e * 0.3).toFixed(2)})`;
+    ctx.lineWidth = Math.max(1.5, rr * ring.w);
+    const full = 6.283 / ring.segs;
+    for (let s = 0; s < ring.segs; s += 1) {
+      ctx.beginPath();
+      ctx.arc(0, 0, rr * ring.rad, s * full + ring.gap / 2, (s + 1) * full - ring.gap / 2);
+      ctx.stroke();
+    }
     ctx.restore();
   }
   // Hex shield plates orbit the core.
@@ -1615,13 +1731,13 @@ function paintGuardian(ctx, sprites, x, y, r, energy, t) {
     ctx.translate(px, py);
     ctx.rotate(a);
     ctx.fillStyle = "rgba(30,60,110,0.9)";
-    ctx.strokeStyle = `rgba(160,220,255,${0.4 + energy * 0.5})`;
+    ctx.strokeStyle = `rgba(160,220,255,${(0.4 + e * 0.5).toFixed(2)})`;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     for (let k = 0; k < 6; k += 1) {
       const ha = (k * 6.283) / 6;
-      const hx = Math.cos(ha) * rr * 0.13;
-      const hy = Math.sin(ha) * rr * 0.13;
+      const hx = Math.cos(ha) * rr * 0.15;
+      const hy = Math.sin(ha) * rr * 0.15;
       if (k === 0) ctx.moveTo(hx, hy);
       else ctx.lineTo(hx, hy);
     }
@@ -1630,15 +1746,27 @@ function paintGuardian(ctx, sprites, x, y, r, energy, t) {
     ctx.stroke();
     ctx.restore();
   }
-  drawGlow(ctx, sprites.guardianCore, 0, 0, rr * 0.3, 0.55 + energy * 0.45);
-  if (energy > 0.5) {
+  // Bright core: calm steady pulse, brighter on blue energy.
+  const pulse = 0.5 + 0.5 * Math.sin(t * 1.4);
+  const coreR = Math.max(2, rr * (0.24 + e * 0.1 + pulse * 0.02));
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  drawGlow(ctx, sp.guardianCore, 0, 0, rr * 0.55, 0.5 + e * 0.5);
+  ctx.fillStyle = "#f2fbff";
+  ctx.beginPath();
+  ctx.arc(0, 0, coreR, 0, 6.283);
+  ctx.fill();
+  ctx.restore();
+  if (e > 0.4) {
     const phase = (t * 0.9) % 1;
+    ctx.save();
     ctx.strokeStyle = CYAN;
-    ctx.globalAlpha = (1 - phase) * energy;
+    ctx.globalAlpha = (1 - phase) * Math.min(1, e);
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(0, 0, rr * (0.4 + phase * 1.1), 0, 6.283);
     ctx.stroke();
+    ctx.restore();
   }
   ctx.restore();
 }

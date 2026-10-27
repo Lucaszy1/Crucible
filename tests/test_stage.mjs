@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   applyCamera, blueLine, dollyTarget, frameBudget, frameP95, guardianPulse, intrusionLevel,
-  laneFeed, redLine, stageLayout, stageWash, stepCamera,
+  laneFeed, paintGuardian, paintIntrusion, redLine, stageLayout, stageWash, stepCamera,
 } from "../dashboard/js/stage.js";
 import { arenaGeometry, classicLayout, normalizeLayout } from "../dashboard/js/layout.js";
 
@@ -298,6 +298,29 @@ describe("entity levels", () => {
     for (let i = 0; i < 5; i += 1) samples.push(50);
     assert.equal(frameP95(samples), 50);
     assert.equal(frameP95([16, null, 0, -3, "x"]), 16);
+  });
+
+  it("paints both entities on a stub context without throwing", () => {
+    const calls = [];
+    const stub = new Proxy({}, {
+      get(target, prop) {
+        if (prop === "measureText") return () => ({ width: 10 });
+        if (prop === "canvas") return { width: 128, height: 128 };
+        if (!(prop in target)) target[prop] = () => calls.push(prop);
+        return target[prop];
+      },
+      set(target, prop, value) {
+        target[prop] = value;
+        return true;
+      },
+    });
+    const tex = { width: 64, height: 64 };
+    assert.doesNotThrow(() => paintIntrusion(stub, {}, { intrusionTex: tex }, 64, 64, 52, 1, 1.7));
+    assert.doesNotThrow(() => paintGuardian(stub, {}, { guardianTex: tex }, 64, 64, 52, 1, 1.7));
+    assert.doesNotThrow(() => paintIntrusion(stub, {}, {}, 64, 64, 52, 0, 0));
+    assert.doesNotThrow(() => paintGuardian(stub, {}, {}, 64, 64, 52, 0.15, 0));
+    assert.ok(calls.includes("clip"), "texture path clips");
+    assert.ok(calls.includes("fillText"), "glyphs paint");
   });
 
   it("recovers to full detail only when frames are fast again", () => {
