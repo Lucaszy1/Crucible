@@ -241,6 +241,7 @@ def test_main_writes_markdown_report(tmp_path, monkeypatch, capsys):
     assert audit_eval.main(["--runs-dir", str(runs), "--audit-model", "auditor",
                             "--out", str(out)]) == 0
     text = out.read_text(encoding="utf-8")
+    assert "Model: `muse-wonder-1.0`." in text
     assert "| case | expected | actual | flagged |" in text
     assert "Detection rate (bad flagged): 1.0" in text
     assert "False positive rate (good flagged): 0.0" in text

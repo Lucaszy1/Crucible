@@ -24,6 +24,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from crucible import llm
 from crucible.agents import auditor
 from crucible.agents.auditor import (
     action_host,
@@ -466,10 +467,23 @@ def summarize(results: list) -> dict:
 def render_report(results: list, summary: dict, *, role: str) -> str:
     """Render the eval report as markdown."""
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    try:
+        resolved = llm.model_for(role)
+    except ValueError:
+        resolved = role
+    used = sorted({str(item["audit"].get("model_used", "")) for item in results
+                   if item["audit"].get("model_used")
+                   and item["audit"].get("model_used") != "none"})
+    if used:
+        model_line = ", ".join(f"`{name}`" for name in used)
+        if resolved not in used:
+            model_line += f" (requested `{role}`)"
+    else:
+        model_line = f"none, all deterministic (requested `{role}`)"
     lines = [
         "# Auditor eval",
         "",
-        f"Model: `{role}`. Run: {stamp}.",
+        f"Model: {model_line}. Run: {stamp}.",
         "",
         "Good cases are real well-supported blue actions from run logs. "
         "Bad cases are SYNTHETIC: mutated evidence or constructed actions "

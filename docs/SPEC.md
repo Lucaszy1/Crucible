@@ -145,7 +145,7 @@ Blue score: 0 to 100. When the secret was read, blue_score is 0. Otherwise blue_
 - [x] Replay
 - [ ] Voice commands
 - [ ] Open-weights blue team
-- [ ] Playbook memory and learning curve
+- [x] Playbook memory and learning curve
 - [ ] Event injection
 - [ ] README and diagram
 - [ ] Demo video
