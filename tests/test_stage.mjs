@@ -4,8 +4,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  applyCamera, blueLine, clashOrbX, dollyTarget, frameBudget, frameP95, fxForEvent, guardianPulse,
-  intrusionLevel, laneFeed, paintGuardian, paintIntrusion, redLine, stageLayout, stageWash, stepCamera,
+  applyCamera, blueLine, calloutForEvent, clashOrbX, dollyTarget, frameBudget, frameP95, fxForEvent,
+  guardianPulse, intrusionLevel, laneFeed, paintGuardian, paintIntrusion, redLine, stageLayout,
+  stageWash, stepCamera,
 } from "../dashboard/js/stage.js";
 import { arenaGeometry, classicLayout, normalizeLayout } from "../dashboard/js/layout.js";
 
@@ -357,6 +358,30 @@ describe("entity levels", () => {
     assert.deepEqual(kinds(ev("f", "blue", "isolate_host", { host: "app" }, { ok: false })), ["fizzle"]);
     assert.deepEqual(kinds(ev("g", "auditor", "audit", {}, {})), []);
     assert.deepEqual(fxForEvent(null, {}), []);
+  });
+
+  it("names callouts from the technique data", () => {
+    const map = {
+      red: { try_credential: { technique: "T1110", name: "Brute Force" } },
+      blue: { isolate_host: { label: "Contain" } },
+    };
+    const red = calloutForEvent(ev("a", "red", "try_credential", { host: "db" },
+      { ok: true, authenticated: true }), map);
+    assert.equal(red.tech, "T1110 · Brute Force");
+    assert.equal(red.side, "red");
+    assert.equal(red.failed, false);
+    assert.ok(red.line.length > 8, red.line);
+    const blue = calloutForEvent(ev("b", "blue", "isolate_host", { host: "db" }, { ok: true }), map);
+    assert.equal(blue.tech, "Contain");
+    assert.equal(blue.side, "blue");
+    const failed = calloutForEvent(ev("c", "blue", "isolate_host", { host: "db" }, { ok: false }), map);
+    assert.equal(failed.failed, true);
+    const missing = calloutForEvent(ev("d", "red", "scan_host", { host: "web" }, { ok: true }), map);
+    assert.equal(missing.tech, "scan_host");
+    const nomap = calloutForEvent(ev("e", "red", "scan_host", { host: "web" }, { ok: true }), null);
+    assert.equal(nomap.tech, "scan_host");
+    assert.equal(calloutForEvent(ev("f", "auditor", "audit", {}, {}), map), null);
+    assert.equal(calloutForEvent(null, map), null);
   });
 
   it("slides the clash orb with the score tug", () => {

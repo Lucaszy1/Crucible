@@ -899,6 +899,10 @@ export function stageNotify(refs, ev, states, speed) {
     for (const fx of fxForEvent(ev, { jewel: refs.jewel, lastRedHost: prevRed })) {
       refs.fx.push({ ...fx, t0: refs.clock });
     }
+    const callout = calloutForEvent(ev, refs.attackMap);
+    if (callout) {
+      refs.fx.push({ kind: "callout", ...callout, host: eventHost(ev), t0: refs.clock, dur: 1500 });
+    }
   }
   if (ev.actor === "red" && ev.tool === "read_file" && (ev.result || {}).ok === true &&
       String((ev.result || {}).path || "").startsWith("/secret/")) {
@@ -1164,6 +1168,22 @@ export function fxForEvent(ev, ctx) {
     }
   }
   return [];
+}
+
+// Kinetic callout content for one move: the technique name from the
+// data over the plain-English line. Null for non-move events.
+export function calloutForEvent(ev, attackMap) {
+  if (!ev || (ev.actor !== "red" && ev.actor !== "blue")) return null;
+  const map = attackMap || {};
+  let tech = ev.tool || "move";
+  if (ev.actor === "red") {
+    const entry = map.red && map.red[ev.tool];
+    if (entry && entry.technique) tech = `${entry.technique} · ${entry.name || ev.tool}`;
+  } else {
+    const entry = map.blue && map.blue[ev.tool];
+    if (entry && entry.label) tech = entry.label;
+  }
+  return { tech, line: describeEvent(ev), side: ev.actor, failed: (ev.result || {}).ok === false };
 }
 
 // Clash orb position on the rail: red pressure pushes it toward the
@@ -2016,6 +2036,9 @@ function paintFx(refs, ctx) {
       case "reconnect":
         paintFxReconnect(refs, ctx, fx, p);
         break;
+      case "callout":
+        paintFxCallout(refs, ctx, fx, p);
+        break;
       default:
         break;
     }
@@ -2340,6 +2363,44 @@ function paintFxReconnect(refs, ctx, fx, p) {
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
   drawGlow(ctx, sprites.cyan, at.x, at.y, at.r * 1.6, 0.5 * Math.sin(p * Math.PI));
+  ctx.restore();
+}
+
+// Kinetic callout: technique name over the plain-English line,
+// floating above the target with a fade in and out.
+function paintFxCallout(refs, ctx, fx, p) {
+  const stage = refs.stage;
+  const at = fx.host ? hostScreen(refs, fx.host) : null;
+  const anchor = at || entityCore(refs, fx.side === "blue" ? "blue" : "red");
+  const ar = at ? at.r : 40;
+  const x = Math.max(stage.band.x0 + 120, Math.min(stage.band.x1 - 120, anchor.x));
+  const y = Math.max(stage.area.top + 34, Math.min(stage.area.bottom - 76, anchor.y - ar - 60)) - p * 8;
+  const tech = String(fx.tech || "").toUpperCase();
+  let line = String(fx.line || "");
+  ctx.save();
+  ctx.font = `900 15px ${DISP}`;
+  const techW = ctx.measureText(tech).width;
+  ctx.font = `400 11px ${MONO}`;
+  while (line.length > 8 && ctx.measureText(line).width > 300) line = `${line.slice(0, -5)}…`;
+  const lineW = ctx.measureText(line).width;
+  const w = Math.min(stage.band.x1 - stage.band.x0 - 40, Math.max(techW, lineW) + 28);
+  const h = 46;
+  const fade = p < 0.15 ? p / 0.15 : p > 0.7 ? Math.max(0, 1 - (p - 0.7) / 0.3) : 1;
+  ctx.globalAlpha = fade;
+  ctx.fillStyle = "rgba(6,8,12,0.85)";
+  roundRectPath(ctx, x - w / 2, y - h / 2, w, h, 8);
+  ctx.fill();
+  const accent = fx.failed ? "#8a8f9a" : fx.side === "blue" ? "#8fb8ff" : "#ff7a5c";
+  ctx.fillStyle = accent;
+  ctx.fillRect(x - w / 2, y - h / 2 + 8, 3, h - 16);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `900 15px ${DISP}`;
+  ctx.fillStyle = accent;
+  ctx.fillText(tech, x + 4, y - 10, w - 20);
+  ctx.font = `400 11px ${MONO}`;
+  ctx.fillStyle = BONE;
+  ctx.fillText(line, x + 4, y + 11, w - 20);
   ctx.restore();
 }
 
