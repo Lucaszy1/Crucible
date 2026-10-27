@@ -16,6 +16,7 @@ runs/campaign-<name>/.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -54,8 +55,23 @@ SYSTEM_PROMPT = (
 )
 
 
+def _active_spec_dict() -> dict:
+    """Return the active generated spec, or {} on classic / failure."""
+    try:
+        from crucible import sandbox
+
+        return sandbox.active_spec() or {}
+    except Exception:
+        return {}
+
+
 def _scenario_secrets() -> set:
-    """Collect credential and file-name strings that rules must avoid."""
+    """Collect password and path strings that rules must avoid.
+
+    Substring tier: these never appear in legitimate tactic prose, so
+    any mention drops the rule. Covers the classic scenario and, when
+    a generated spec is active, every step, dead end, and decoy page.
+    """
     try:
         from crucible import sandbox
 
@@ -68,36 +84,126 @@ def _scenario_secrets() -> set:
         for entry in shipped.values():
             if not isinstance(entry, dict):
                 continue
-            for value in entry.values():
-                if isinstance(value, str) and value.strip():
-                    denied.add(value.strip())
+            password = entry.get("pass")
+            if isinstance(password, str) and password.strip():
+                denied.add(password.strip())
     for key in ("secret", "app_config"):
         block = scenario.get(key, {}) or {}
         path = block.get("path") if isinstance(block, dict) else None
         if isinstance(path, str) and path.strip():
             denied.add(path.strip())
             denied.add(path.strip().rsplit("/", 1)[-1])
+    admin = scenario.get("admin_endpoint", {}) or {}
+    admin_path = admin.get("path") if isinstance(admin, dict) else None
+    if isinstance(admin_path, str) and admin_path.strip():
+        denied.add(admin_path.strip())
+    spec = _active_spec_dict()
+    for group in ("path", "dead_ends"):
+        steps = spec.get(group, []) or []
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            for key in ("password", "reveals_password"):
+                value = step.get(key)
+                if isinstance(value, str) and value.strip():
+                    denied.add(value.strip())
+            for key in ("path", "page_path", "dir"):
+                value = step.get(key)
+                if isinstance(value, str) and value.strip():
+                    cleaned = value.strip()
+                    denied.add(cleaned)
+                    denied.add(cleaned.rsplit("/", 1)[-1])
+    jewel = spec.get("jewel", {}) or {}
+    jewel_path = jewel.get("path") if isinstance(jewel, dict) else None
+    if isinstance(jewel_path, str) and jewel_path.strip():
+        denied.add(jewel_path.strip())
+        denied.add(jewel_path.strip().rsplit("/", 1)[-1])
+    decoys = spec.get("decoys", {}) or {}
+    for group in ("admin_pages", "status_pages"):
+        for page in decoys.get(group, []) or []:
+            if not isinstance(page, dict):
+                continue
+            value = page.get("path")
+            if isinstance(value, str) and value.strip():
+                denied.add(value.strip())
     return {item for item in denied if item}
 
 
-def rule_is_clean(rule: str, denied: set | None = None) -> bool:
-    """Check that a rule carries no credential or exact file name."""
+def _scenario_names() -> set:
+    """Collect hostname and account strings that rules must avoid.
+
+    Whole-word tier: matched with word boundaries so generic tactic
+    words keep working ("monitoring" must survive an account named
+    "monitor"). Covers the classic scenario and the active spec.
+    """
+    try:
+        from crucible import sandbox
+
+        scenario = sandbox.load_scenario()
+    except Exception:
+        scenario = {}
+    names = set()
+    for host in scenario.get("hosts", []) or []:
+        if isinstance(host, str) and host.strip():
+            names.add(host.strip())
+    shipped = scenario.get("shipped_defaults", {}) or {}
+    if isinstance(shipped, dict):
+        for entry in shipped.values():
+            if not isinstance(entry, dict):
+                continue
+            user = entry.get("user")
+            if isinstance(user, str) and user.strip():
+                names.add(user.strip())
+            for extra in entry.get("users", []) or []:
+                if isinstance(extra, str) and extra.strip():
+                    names.add(extra.strip())
+    spec = _active_spec_dict()
+    for host in spec.get("hosts", []) or []:
+        if not isinstance(host, dict):
+            continue
+        name = host.get("name")
+        if isinstance(name, str) and name.strip():
+            names.add(name.strip())
+    for group in ("path", "dead_ends"):
+        steps = spec.get(group, []) or []
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            for key in ("host", "account", "leaks_host", "leaks_account",
+                        "reveals_host", "reveals_account", "terminal_host",
+                        "terminal_account"):
+                value = step.get(key)
+                if isinstance(value, str) and value.strip():
+                    names.add(value.strip())
+    return {item for item in names if item}
+
+
+def rule_is_clean(rule: str, denied: set | None = None,
+                  names: set | None = None) -> bool:
+    """Check that a rule carries no credential, path, or scenario name."""
     text = str(rule or "").lower()
     if not text.strip():
         return False
     banned = denied if denied is not None else _scenario_secrets()
-    return not any(secret.lower() in text for secret in banned if secret)
+    if any(secret.lower() in text for secret in banned if secret):
+        return False
+    words = names if names is not None else _scenario_names()
+    return not any(re.search(r"\b" + re.escape(name.lower()) + r"\b", text)
+                   for name in words if name)
 
 
 def scrub_rules(rules: list, episode: str,
-                denied: set | None = None) -> tuple:
+                denied: set | None = None,
+                names: set | None = None) -> tuple:
     """Clean model-proposed rules into playbook shape.
 
     Drops empty rules, rules over the length cap, and rules naming
-    credentials or exact files. Missing episode ids default to the
-    current episode. Returns (kept, dropped_count).
+    credentials, paths, or scenario hosts and accounts. Missing
+    episode ids default to the current episode. Returns
+    (kept, dropped_count).
     """
     banned = denied if denied is not None else _scenario_secrets()
+    words = names if names is not None else _scenario_names()
     kept = []
     dropped = 0
     for entry in rules or []:
@@ -108,7 +214,7 @@ def scrub_rules(rules: list, episode: str,
         if not text or len(text) > RULE_LIMIT:
             dropped += 1
             continue
-        if not rule_is_clean(text, banned):
+        if not rule_is_clean(text, banned, words):
             dropped += 1
             continue
         tag = str(entry.get("episode", "") or "").strip() or episode

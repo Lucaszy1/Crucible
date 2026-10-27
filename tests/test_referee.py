@@ -210,3 +210,46 @@ def test_playbook_paths_live_at_repo_root():
     assert referee.PLAYBOOK_JSON == referee.ROOT / "playbooks" / "blue.json"
     assert referee.PLAYBOOK_MD == referee.ROOT / "playbooks" / "blue.md"
     assert (referee.ROOT / "crucible" / "agents").is_dir()
+
+
+def test_whole_word_tier_spares_longer_words():
+    assert rule_is_clean("Maintain monitoring of every host.",
+                         denied=set(), names={"monitor"}) is True
+    assert rule_is_clean("Isolate the monitor host at once.",
+                         denied=set(), names={"monitor"}) is False
+    assert rule_is_clean("Rotate the password vault.",
+                         denied={"password"}, names=set()) is False
+
+
+def test_classic_hostnames_rejected_whole_word():
+    assert rule_is_clean("Isolate the app host at once.") is False
+    assert rule_is_clean("Approve the application quickly.") is True
+
+
+def test_gen_spec_secrets_and_names_rejected(monkeypatch):
+    from crucible import sandbox
+    from crucible.scenarios import generate
+
+    spec = generate.generate(11, "easy")
+    monkeypatch.setattr(sandbox, "_ACTIVE_SPEC", spec)
+    host = spec["hosts"][0]["name"]
+    assert rule_is_clean(f"Isolate {host} at once.") is False
+    assert rule_is_clean(f"Watch the {host}s for lateral moves.") is True
+    step = next(item for item in spec["path"]
+                if item.get("kind") == "weak_creds")
+    assert rule_is_clean(
+        f"Guess {step['account']} credentials early.") is False
+    assert rule_is_clean(
+        f"Try {step['password']} on the gate.") is False
+    jewel_base = spec["jewel"]["path"].rsplit("/", 1)[-1]
+    assert rule_is_clean(f"Read {jewel_base} to verify.") is False
+    assert rule_is_clean(
+        "Maintain monitoring without isolation.") is True
+    kept, dropped = scrub_rules(
+        [{"rule": f"Isolate {host} at once.", "episode": "t-1"},
+         {"rule": "Maintain monitoring without isolation.",
+          "episode": "t-1"}],
+        "t-1")
+    assert [entry["rule"] for entry in kept] == [
+        "Maintain monitoring without isolation."]
+    assert dropped == 1
