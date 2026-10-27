@@ -2409,7 +2409,10 @@ function paintFxFizzle(refs, ctx, fx, p) {
   const at = fxPoint(refs, fx);
   if (!at) return;
   const red = fx.color !== "blue";
-  const from = entityCore(refs, red ? "red" : "blue");
+  const core = entityCore(refs, red ? "red" : "blue");
+  const aim = Math.atan2(at.y - core.y, at.x - core.x);
+  // Start at the entity's edge so the sputter reads outside its glow.
+  const from = { x: core.x + Math.cos(aim) * core.r * 0.7, y: core.y + Math.sin(aim) * core.r * 0.7 };
   const color = red ? "255,120,100" : "140,200,255";
   const reach = 0.35 + 0.1 * Math.sin(p * 30);
   const hx = from.x + (at.x - from.x) * reach;
@@ -2419,16 +2422,16 @@ function paintFxFizzle(refs, ctx, fx, p) {
   ctx.lineCap = "round";
   for (let i = 0; i < 4; i += 1) {
     const t0 = i / 4;
-    const t1 = t0 + 0.14;
-    if (Math.sin(p * 47 + i * 9) > -0.2) continue;
-    ctx.strokeStyle = `rgba(${color},${(0.7 * (1 - p)).toFixed(2)})`;
-    ctx.lineWidth = 2;
+    const t1 = t0 + 0.2;
+    if (Math.sin(p * 47 + i * 9) > 0.35) continue;
+    ctx.strokeStyle = `rgba(${color},${(0.8 * (1 - p)).toFixed(2)})`;
+    ctx.lineWidth = 2.5;
     ctx.beginPath();
     ctx.moveTo(from.x + (hx - from.x) * t0, from.y + (hy - from.y) * t0);
     ctx.lineTo(from.x + (hx - from.x) * t1, from.y + (hy - from.y) * t1);
     ctx.stroke();
   }
-  ctx.fillStyle = `rgba(150,150,160,${(0.5 * p * (1 - p) * 4 * 0.5).toFixed(2)})`;
+  ctx.fillStyle = `rgba(150,150,160,${(p * (1 - p) * 4 * 0.45).toFixed(2)})`;
   for (let i = 0; i < 3; i += 1) {
     ctx.beginPath();
     ctx.arc(hx + (i - 1) * 8, hy - p * 20, 4 + p * 8, 0, 6.283);
