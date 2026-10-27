@@ -73,39 +73,46 @@
 <div id="arenaView">
 <main class="arena-wrap">
   <section class="arena-stage" id="arenaStage" aria-label="Exercise arena">
-    <div class="arena-pressure" aria-label="Contest pressure">
-      <span class="arena-pressure-label left">Red progress <b id="arenaRedPct">0%</b></span>
-      <div class="arena-pressure-track" aria-hidden="true">
-        <div id="arenaRedBar" class="arena-pressure-red" style="width:0%"></div>
-        <div id="arenaBlueBar" class="arena-pressure-blue" style="width:0%"></div>
-      </div>
-      <span class="arena-pressure-label right">Blue containment <b id="arenaBluePct">0%</b></span>
-    </div>
-    <div class="arena-mid">
-      <div class="arena-console red" aria-label="Attacker console">
-        <h3>Attacker</h3>
-        <p id="arenaRedLine" class="arena-line">Red is waiting.</p>
-      </div>
-      <div class="arena-center">
-        <svg id="arenaSvg" viewBox="0 0 640 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Range contest state"></svg>
-        <div id="arenaVignette" class="arena-vignette" hidden></div>
-        <div id="arenaBanner" class="arena-banner" hidden></div>
-      </div>
-      <div class="arena-console blue" aria-label="Defender console">
-        <h3>Defender</h3>
-        <p id="arenaBlueLine" class="arena-line">Blue is waiting.</p>
-        <div id="arenaVerdict" class="arena-verdict" hidden>
-          <span id="arenaVerdictIcon" aria-hidden="true"></span>
-          <span id="arenaVerdictWord"></span>
+    <div class="arena-canvas-wrap">
+      <canvas id="arenaCanvas" role="img" aria-label="Arena contest scene"></canvas>
+      <div id="arenaFrame" aria-hidden="true"></div>
+      <div id="arenaReadout" aria-hidden="true"></div>
+      <div id="arenaScan" aria-hidden="true"></div>
+      <div id="arenaHud">
+        <div class="arena-team red">
+          <h2>Red team</h2>
+          <small id="arenaRedLine">Red is waiting.</small>
+          <div class="arena-meter-l">Progress to the secret</div>
+          <div class="arena-meter" id="arenaRedMeter"><i></i><i></i><i></i><i></i></div>
+        </div>
+        <div class="arena-mid">
+          <div class="arena-row"><span id="arenaExercise">Exercise</span><span>Move <b id="arenaMove">00</b> / <b id="arenaTotal">0</b></span></div>
+          <div class="arena-tug" id="arenaTug" aria-hidden="true"><i class="r" id="arenaTugR"></i><i class="b"></i><em id="arenaTugM"></em></div>
+          <div class="arena-score"><span>Blue score</span><b id="arenaScore">100</b></div>
+        </div>
+        <div class="arena-team blue">
+          <h2>Blue team</h2>
+          <small id="arenaBlueLine">Blue is waiting.</small>
+          <div class="arena-meter-l">Network held</div>
+          <div class="arena-meter" id="arenaBlueMeter"><i></i><i></i><i></i><i></i></div>
         </div>
       </div>
+      <div id="arenaAud" role="status">
+        <div class="k"><span>Auditor</span><span>Verdict</span></div>
+        <div class="n"><span id="arenaAudNum">-/10</span><span class="w" id="arenaAudWord">--</span></div>
+        <div class="c" id="arenaAudCite"></div>
+        <div class="t" id="arenaAudNote"></div>
+      </div>
+      <div id="arenaCap" data-side="system">
+        <div id="arenaCapTag" class="system">EXERCISE</div>
+        <div id="arenaCapBody"><div id="arenaCapText">Four hosts. One secret.</div><div id="arenaCapSub"></div></div>
+      </div>
     </div>
-    <p id="arenaCaption" class="arena-caption">No exercise loaded.</p>
     <div class="arena-bottom">
       <div class="score-strip arena-scores" aria-label="Score summary">
-        <dl class="score-big"><dt>Outcome</dt><dd id="arenaOutcome">—</dd></dl>
-        <dl class="score-big"><dt>Blue score</dt><dd id="arenaBlue">—</dd></dl>
-        <dl class="score-big"><dt>Downtime</dt><dd id="arenaDowntime">—</dd></dl>
+        <dl class="score-big"><dt>Outcome</dt><dd id="arenaOutcome">--</dd></dl>
+        <dl class="score-big"><dt>Blue score</dt><dd id="arenaBlue">--</dd></dl>
+        <dl class="score-big"><dt>Downtime</dt><dd id="arenaDowntime">--</dd></dl>
       </div>
       <div class="arena-transport">
         <button id="arenaPlay" class="btn small" title="Play (Space)" disabled>Play</button>
@@ -150,9 +157,9 @@
 
   <div class="story-side">
     <div class="score-strip" aria-label="Score summary">
-      <dl class="score-big"><dt>Outcome</dt><dd id="sbOutcome">—</dd></dl>
-      <dl class="score-big"><dt>Blue score</dt><dd id="sbBlue">—</dd></dl>
-      <dl class="score-big"><dt>Downtime</dt><dd id="sbDowntime">—</dd></dl>
+      <dl class="score-big"><dt>Outcome</dt><dd id="sbOutcome">--</dd></dl>
+      <dl class="score-big"><dt>Blue score</dt><dd id="sbBlue">--</dd></dl>
+      <dl class="score-big"><dt>Downtime</dt><dd id="sbDowntime">--</dd></dl>
     </div>
     <section class="panel" aria-label="Activity">
       <h2>What happened</h2>
@@ -170,13 +177,13 @@
     <h2>Score</h2>
     <div id="finalBanner" class="banner" hidden></div>
     <dl class="score-list">
-      <div><dt>Detection delay</dt><dd id="sbDetect">—</dd></div>
-      <div><dt>Containment</dt><dd id="sbContain">—</dd></div>
+      <div><dt>Detection delay</dt><dd id="sbDetect">--</dd></div>
+      <div><dt>Containment</dt><dd id="sbContain">--</dd></div>
     </dl>
     <div class="cost">
       <div class="cost-head"><span>Cost today</span><span id="costLabel">$0.00</span></div>
       <div class="meter"><div id="costBar" class="meter-fill" style="width:0%"></div></div>
-      <p id="exerciseCost" class="cost-sub">Exercise cost: —</p>
+      <p id="exerciseCost" class="cost-sub">Exercise cost: --</p>
     </div>
   </section>
 
@@ -184,7 +191,7 @@
     <h2>Auditor</h2>
     <div id="auditChips" class="chips"><span class="empty">Verdict totals appear here.</span></div>
     <p id="auditSummary" class="cost-sub">No verdicts yet.</p>
-    <p id="auditCost" class="cost-sub">Audit cost: —</p>
+    <p id="auditCost" class="cost-sub">Audit cost: --</p>
     <div id="auditList" class="audit-list">
       <p class="empty">Verdicts appear here once blue acts.</p>
     </div>
@@ -244,9 +251,9 @@
     <h2 id="confirmTitle">Run a model exercise?</h2>
     <p>Model turns call the metered API. Scripted runs are free.</p>
     <dl class="score-grid">
-      <div><dt>Estimated cost</dt><dd id="confirmCost">—</dd></div>
-      <div><dt>Spent today</dt><dd id="confirmSpent">—</dd></div>
-      <div><dt>Daily limit</dt><dd id="confirmLimit">—</dd></div>
+      <div><dt>Estimated cost</dt><dd id="confirmCost">--</dd></div>
+      <div><dt>Spent today</dt><dd id="confirmSpent">--</dd></div>
+      <div><dt>Daily limit</dt><dd id="confirmLimit">--</dd></div>
     </dl>
     <p id="confirmWarn" class="warn" hidden></p>
     <div class="dialog-actions">

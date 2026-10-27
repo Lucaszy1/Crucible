@@ -3,8 +3,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  choreograph, effectHost, integrityFromEvents, isBlockedAttempt,
-  isSecretRead, latestByActor, pressureFromEvents, verdictWord,
+  choreograph, effectHost, httpLeakTokens, integrityFromEvents, isBlockedAttempt,
+  isSecretRead, latestByActor, logLineIds, pressureFromEvents, verdictCard, verdictWord,
 } from "../dashboard/js/choreography.js";
 
 function ev(actor, tool, args, result) {
@@ -229,5 +229,63 @@ describe("latestByActor", () => {
     assert.equal(latestByActor(list, "red").tool, "http_request");
     assert.equal(latestByActor(list, "blue").tool, "read_logs");
     assert.equal(latestByActor([], "red"), null);
+  });
+});
+
+describe("httpLeakTokens", () => {
+  it("pulls quoted hints from the admin page", () => {
+    const page = ev("red", "http_request", { host: "web", path: "/admin" },
+      { ok: true, body: "{\"hint\": \"the internal host 'app' runs reports as 'svc-report'\"}" });
+    assert.deepEqual(httpLeakTokens(page), ["app", "svc-report"]);
+  });
+
+  it("names a host only when a plain page mentions it", () => {
+    const plain = ev("red", "http_request", { host: "web", path: "/" },
+      { ok: true, body: "{\"service\": \"webapp\", \"state\": \"up\"}" });
+    assert.deepEqual(httpLeakTokens(plain), []);
+    const named = ev("red", "http_request", { host: "web", path: "/" },
+      { ok: true, body: "status page for the db replica" });
+    assert.deepEqual(httpLeakTokens(named), ["db"]);
+  });
+
+  it("stays empty on failures and other tools", () => {
+    const failed = ev("red", "http_request", { host: "web", path: "/admin" },
+      { ok: false, error: "unreachable" });
+    assert.deepEqual(httpLeakTokens(failed), []);
+    assert.deepEqual(httpLeakTokens(ev("red", "scan_host", {}, { ok: true })), []);
+  });
+});
+
+describe("logLineIds", () => {
+  it("returns the newest few ids in order", () => {
+    const read = ev("blue", "read_logs", { host: "db" },
+      { ok: true, lines: [{ id: "db:0" }, { id: "db:1" }, { id: "db:2" }, { id: "db:3" }, { id: "db:4" }] });
+    assert.deepEqual(logLineIds(read), ["db:1", "db:2", "db:3", "db:4"]);
+    assert.deepEqual(logLineIds(read, 2), ["db:3", "db:4"]);
+  });
+
+  it("stays empty on failures", () => {
+    assert.deepEqual(logLineIds(ev("blue", "read_logs", {}, { ok: false, error: "x" })), []);
+  });
+});
+
+describe("verdictCard", () => {
+  it("packs score, word, ids and rationale", () => {
+    const audit = {
+      id: "evt-0010", actor: "auditor", tool: "audit", args: {},
+      result: {
+        ok: true, verdict: "justified", score: 8, target_event_id: "evt-0004",
+        evidence_checked: ["db:1", "db:2"], rationale: "Blue read the right line.",
+      },
+    };
+    assert.deepEqual(verdictCard(audit), {
+      word: "justified", verdict: "justified", score: 8, target: "evt-0004",
+      ids: ["db:1", "db:2"], rationale: "Blue read the right line.",
+    });
+  });
+
+  it("returns null without a verdict", () => {
+    assert.equal(verdictCard(null), null);
+    assert.equal(verdictCard(ev("auditor", "audit", {}, { ok: true })), null);
   });
 });

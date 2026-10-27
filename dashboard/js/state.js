@@ -55,8 +55,9 @@ export function secretRead(eventList) {
 // Frontend mirror of orchestrator.score_events so the scoreboard can
 // update live. The server score at the end of a run is authoritative.
 export function scoreEvents(eventList, weights) {
-  // Auditor events never shift positions or downtime, mirroring the server.
-  const list = (eventList || []).filter((ev) => ev && ev.actor !== "auditor");
+  // Auditor and system events never shift positions or downtime,
+  // mirroring the server. The clean-start check is not a move.
+  const list = (eventList || []).filter((ev) => ev && ev.actor !== "auditor" && ev.actor !== "system");
   const w = { ...DEFAULT_WEIGHTS, ...(weights || {}) };
 
   const compromised = new Set();
@@ -198,4 +199,149 @@ export function formatArgs(args) {
   if ("password" in masked) masked.password = "...";
   if ("pass" in masked) masked.pass = "...";
   return JSON.stringify(masked);
+}
+
+// Error text that means an attempt never reached the host: the range
+// refused it. Mirrors the blocked-attempt check in choreography.js,
+// kept local so this module stays dependency-free.
+const BLOCKED_ERROR = /outside|allowlist|sandbox|blocked|off-range|off range|unreachable|cut off|detached|no route/i;
+
+function isBlockedResult(ev) {
+  const r = (ev && ev.result) || {};
+  if (r.ok !== false) return false;
+  const host = eventHost(ev);
+  if (host && !HOSTS.includes(host)) return true;
+  return BLOCKED_ERROR.test(String(r.error || ""));
+}
+
+function isAdminRead(ev) {
+  if (!ev || ev.actor !== "red" || ev.tool !== "http_request") return false;
+  if ((ev.result || {}).ok !== true) return false;
+  return String((ev.args || {}).path || "").startsWith("/admin");
+}
+
+function authHost(ev) {
+  if (!ev || ev.tool !== "try_credential") return null;
+  if ((ev.result || {}).authenticated !== true) return null;
+  return eventHost(ev);
+}
+
+function isConfigRead(ev) {
+  if (!ev || ev.actor !== "red" || ev.tool !== "read_file") return false;
+  if ((ev.result || {}).ok !== true) return false;
+  if (isSecretReadEvent(ev)) return false;
+  return String((ev.result || {}).path || (ev.args || {}).path || "").toLowerCase().includes("config");
+}
+
+function isSecretReadEvent(ev) {
+  return Boolean(
+    ev && ev.actor === "red" && ev.tool === "read_file" &&
+    (ev.result || {}).ok === true &&
+    String((ev.result || {}).path || "").startsWith("/secret/"),
+  );
+}
+
+// Contest pressure as a two-sided value in [-1, 1]: +1 means red
+// owns the exercise, -1 means blue holds it fully. Red milestones
+// push toward red weighted by progress; effective blue answers push
+// back; the value eases toward zero with every passing event.
+export function pressureValue(eventList) {
+  const DECAY = 0.97;
+  let value = 0;
+  const redTouched = new Set();
+  for (const ev of eventList || []) {
+    if (!ev) continue;
+    value *= DECAY;
+    const r = ev.result || {};
+    if (ev.actor === "red") {
+      const host = eventHost(ev);
+      if (host) redTouched.add(host);
+      if (isSecretReadEvent(ev)) {
+        value = 1;
+      } else if (ev.tool === "try_credential" && r.authenticated === true) {
+        value += eventHost(ev) === "db" ? 0.35 : 0.3;
+      } else if (isAdminRead(ev)) {
+        value += 0.3;
+      } else if (isConfigRead(ev)) {
+        value += 0.25;
+      } else if (isBlockedResult(ev)) {
+        value -= 0.1;
+      }
+    } else if (ev.actor === "blue" && r.ok === true) {
+      if (ev.tool === "report_finding" && (ev.evidence_refs || []).length > 0) {
+        value -= 0.15;
+      } else if (ev.tool === "isolate_host" || ev.tool === "patch_service") {
+        if (redTouched.has(eventHost(ev))) value -= 0.3;
+      }
+    }
+    if (value > 1) value = 1;
+    if (value < -1) value = -1;
+  }
+  return value;
+}
+
+// Red progress along the four-notch chain: admin page leak, app
+// sign-in, database sign-in, secret read. Each notch names the host
+// red relied on; a later blue isolate or patch on that host drops
+// the notch until red earns it again. Level is the longest held
+// prefix, so the bar only ever shows solid ground.
+export const RED_NOTCHES = [
+  { key: "admin", label: "Admin page leak", host: "web" },
+  { key: "app", label: "App sign-in", host: "app" },
+  { key: "db", label: "Database sign-in", host: "db" },
+  { key: "secret", label: "Secret read", host: "db" },
+];
+
+function notchAchieved(index, ev) {
+  if (index === 0) return isAdminRead(ev);
+  if (index === 1) return authHost(ev) === "app";
+  if (index === 2) return authHost(ev) === "db";
+  return isSecretReadEvent(ev);
+}
+
+export function redProgress(eventList) {
+  const achievedAt = [null, null, null, null];
+  const containedAt = { web: -1, app: -1, db: -1, workstation: -1 };
+  (eventList || []).forEach((ev, i) => {
+    if (!ev) return;
+    for (let n = 0; n < RED_NOTCHES.length; n += 1) {
+      if (notchAchieved(n, ev)) achievedAt[n] = i;
+    }
+    const r = ev.result || {};
+    if (ev.actor === "blue" && r.ok === true &&
+        (ev.tool === "isolate_host" || ev.tool === "patch_service")) {
+      const host = eventHost(ev);
+      if (host && host in containedAt) containedAt[host] = i;
+    }
+  });
+  const notches = RED_NOTCHES.map((notch, n) => {
+    if (achievedAt[n] === null) return false;
+    return containedAt[notch.host] < achievedAt[n];
+  });
+  let level = 0;
+  while (level < notches.length && notches[level]) level += 1;
+  return { level, notches };
+}
+
+// Blue network held blocks, one per host: clean (blue holds it),
+// breached (red is in), isolated (cut off, drawn striped), patched
+// (sign-in rotated, drawn solid). Probed or restored hosts count as
+// clean: blue still holds them.
+export function hostBlocks(eventList) {
+  const states = reduceHostStates(eventList);
+  const lastContain = {};
+  for (const ev of eventList || []) {
+    if (!ev || ev.actor !== "blue" || (ev.result || {}).ok !== true) continue;
+    if (ev.tool !== "isolate_host" && ev.tool !== "patch_service") continue;
+    const host = eventHost(ev);
+    if (host) lastContain[host] = ev.tool;
+  }
+  const blocks = {};
+  for (const host of HOSTS) {
+    const state = states[host];
+    if (state === "signed-in" || state === "compromised") blocks[host] = "breached";
+    else if (state === "isolated") blocks[host] = lastContain[host] === "patch_service" ? "patched" : "isolated";
+    else blocks[host] = "clean";
+  }
+  return blocks;
 }

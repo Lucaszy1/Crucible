@@ -233,3 +233,53 @@ export function latestByActor(eventList, actor) {
   }
   return null;
 }
+
+// Hostnames or account names a page leaked to red, for floating
+// text. The admin page names its quoted hints; any other page only
+// leaks a host it names as a whole word. Never passwords.
+export function httpLeakTokens(ev) {
+  if (!ev || ev.tool !== "http_request" || (ev.result || {}).ok !== true) return [];
+  const body = String((ev.result || {}).body || "");
+  if (!body) return [];
+  const path = String((ev.args || {}).path || "");
+  const tokens = [];
+  if (path.startsWith("/admin")) {
+    for (const match of body.matchAll(/'([^']{2,28})'/g)) {
+      const token = match[1].trim();
+      if (token && !tokens.includes(token)) tokens.push(token);
+      if (tokens.length >= 3) break;
+    }
+    return tokens;
+  }
+  for (const host of HOSTS) {
+    if (tokens.length >= 2) break;
+    if (new RegExp(`\\b${host}\\b`).test(body) && !tokens.includes(host)) tokens.push(host);
+  }
+  return tokens;
+}
+
+// Cited log line ids from a blue log read, newest few in order.
+export function logLineIds(ev, max) {
+  if (!ev || ev.tool !== "read_logs" || (ev.result || {}).ok !== true) return [];
+  const lines = (ev.result || {}).lines || [];
+  const count = Math.max(1, Math.min(6, Number(max) || 4));
+  return lines.slice(-count).map((line) => String((line && line.id) || "")).filter(Boolean);
+}
+
+// Auditor verdict as card data: score, plain word, cited ids,
+// rationale. Null when the event carries no verdict.
+export function verdictCard(ev) {
+  if (!ev) return null;
+  const result = ev.result || {};
+  const word = verdictWord(result.verdict);
+  if (!word) return null;
+  const ids = (result.evidence_checked || ev.evidence_refs || []).slice(0, 4).map(String);
+  return {
+    word,
+    verdict: result.verdict,
+    score: typeof result.score === "number" ? result.score : null,
+    target: result.target_event_id || (ev.args || {}).target_event_id || null,
+    ids,
+    rationale: String(result.rationale || ""),
+  };
+}

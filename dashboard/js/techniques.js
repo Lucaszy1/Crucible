@@ -1,11 +1,11 @@
-// Technique coverage: kill-chain strip plus red and blue tag lists.
+// Technique coverage: stage strip plus red and blue tag lists.
 import { secretRead } from "./state.js";
 
 function stageOf(map, tool) {
   return map.red?.[tool]?.stage || null;
 }
 
-export function renderAttack(els, attackMap, events, cursor) {
+export function renderTechniques(els, attackMap, events, cursor) {
   const slice = events.slice(0, cursor);
   const stages = attackMap?.stages || [];
   els.stages.innerHTML = "";

@@ -6,12 +6,12 @@ import { describeEvent, statusSentence } from "./story.js";
 import { initMap, updateMap } from "./network.js";
 import { renderFeed } from "./feed.js";
 import { renderTransport } from "./timeline.js";
-import { renderAttack } from "./attack.js";
+import { renderTechniques } from "./techniques.js";
 import { reduceAudits, renderAuditor } from "./audit.js";
 import { renderScoreboard, renderScoreDetails } from "./scoreboard.js";
 import { focusEvidenceRef, renderEvidence } from "./evidence.js";
 import { fillRuns, initControls, serverStatus, setServer, showConfirm } from "./controls.js";
-import { arenaNotify, cancelArena, initArena, renderArenaStatic, toggleArenaSound } from "./arena.js";
+import { arenaNotify, cancelArena, initArena, renderArenaStatic, setArenaActive, toggleArenaSound } from "./arena.js";
 
 const REPLAY_INTERVAL_MS = 1200;
 
@@ -52,19 +52,7 @@ const els = {
   tabDetails: document.getElementById("tabDetails"),
   tabLearn: document.getElementById("tabLearn"),
   arenaView: document.getElementById("arenaView"),
-  arenaSvg: document.getElementById("arenaSvg"),
-  arenaRedLine: document.getElementById("arenaRedLine"),
-  arenaBlueLine: document.getElementById("arenaBlueLine"),
-  arenaCaption: document.getElementById("arenaCaption"),
-  arenaRedBar: document.getElementById("arenaRedBar"),
-  arenaBlueBar: document.getElementById("arenaBlueBar"),
-  arenaRedPct: document.getElementById("arenaRedPct"),
-  arenaBluePct: document.getElementById("arenaBluePct"),
-  arenaVerdict: document.getElementById("arenaVerdict"),
-  arenaVerdictIcon: document.getElementById("arenaVerdictIcon"),
-  arenaVerdictWord: document.getElementById("arenaVerdictWord"),
-  arenaBanner: document.getElementById("arenaBanner"),
-  arenaVignette: document.getElementById("arenaVignette"),
+  arenaCanvas: document.getElementById("arenaCanvas"),
   arenaOutcome: document.getElementById("arenaOutcome"),
   arenaBlue: document.getElementById("arenaBlue"),
   arenaDowntime: document.getElementById("arenaDowntime"),
@@ -129,16 +117,6 @@ const store = {
 let mapRefs = null;
 let arenaRefs = null;
 
-function arenaUi() {
-  return {
-    redLine: els.arenaRedLine, blueLine: els.arenaBlueLine, caption: els.arenaCaption,
-    redBar: els.arenaRedBar, blueBar: els.arenaBlueBar,
-    redPct: els.arenaRedPct, bluePct: els.arenaBluePct,
-    verdict: els.arenaVerdict, verdictIcon: els.arenaVerdictIcon, verdictWord: els.arenaVerdictWord,
-    banner: els.arenaBanner, vignette: els.arenaVignette,
-  };
-}
-
 function arenaScoreEls() {
   return { outcome: els.arenaOutcome, blue: els.arenaBlue, downtime: els.arenaDowntime };
 }
@@ -201,12 +179,15 @@ function render(animate) {
   const slice = store.events.slice(0, store.cursor);
   const states = reduceHostStates(slice);
   updateMap(mapRefs, states, slice, animate);
-  const arenaStates = renderArenaStatic(arenaRefs, arenaUi(), store.events, store.cursor);
+  const arenaStates = renderArenaStatic(
+    arenaRefs, store.events, store.cursor,
+    { weights: store.weights, finalScore: store.finalScore, label: store.label }, !animate,
+  );
   if (animate && store.cursor > 0) {
     const ev = store.events[store.cursor - 1];
     if (ev && store.arenaCursor !== store.cursor) {
       store.arenaCursor = store.cursor;
-      arenaNotify(arenaRefs, arenaUi(), ev, arenaStates.states, store.speed);
+      arenaNotify(arenaRefs, ev, arenaStates.states, store.speed);
     }
   } else {
     store.arenaCursor = store.cursor;
@@ -232,7 +213,7 @@ function render(animate) {
     store.cursor, store.events.length, store.playing, canScrub,
   );
   renderTransport(arenaTransportEls(), store.cursor, store.events.length, store.playing, canScrub);
-  renderAttack(
+  renderTechniques(
     { stages: els.stages, redTech: els.redTech, blueTech: els.blueTech },
     store.attackMap, store.events, store.cursor,
   );
@@ -265,7 +246,7 @@ function playReplay() {
   if (store.mode !== "replay" || store.events.length === 0) return;
   if (store.cursor >= store.events.length) {
     store.cursor = 0;
-    cancelArena(arenaRefs, arenaUi());
+    cancelArena(arenaRefs);
   }
   stopTimer();
   store.playing = true;
@@ -280,7 +261,7 @@ function pauseReplay() {
 
 function jump(index) {
   if (store.mode !== "replay") return;
-  cancelArena(arenaRefs, arenaUi());
+  cancelArena(arenaRefs);
   store.cursor = Math.max(0, Math.min(store.events.length, index));
   store.finalScore = store.cursor >= store.events.length ? store.finalScore : null;
   if (store.replayScore && store.cursor >= store.events.length) store.finalScore = store.replayScore;
@@ -297,7 +278,7 @@ function closeLive() {
 async function loadReplay(runId, autoplay) {
   closeLive();
   stopTimer();
-  cancelArena(arenaRefs, arenaUi());
+  cancelArena(arenaRefs);
   notice("");
   setMode("replay", `Replaying ${runId}`);
   store.events = [];
@@ -307,7 +288,8 @@ async function loadReplay(runId, autoplay) {
   render(false);
   try {
     const data = await fetchRun(runId);
-    store.events = data.events || [];
+    // System events are harness notes, not moves: skip them everywhere.
+    store.events = (data.events || []).filter((ev) => ev && ev.actor !== "system");
     store.replayScore = data.score || null;
     store.cursor = 0;
     if (autoplay) {
@@ -326,7 +308,7 @@ async function loadReplay(runId, autoplay) {
 async function beginRun(agents) {
   closeLive();
   stopTimer();
-  cancelArena(arenaRefs, arenaUi());
+  cancelArena(arenaRefs);
   notice("");
   controls.run.disabled = true;
   try {
@@ -348,6 +330,7 @@ async function beginRun(agents) {
 
 function onLiveMessage(msg) {
   if (msg.type === "event" && msg.event) {
+    if (msg.event.actor === "system") return;
     if (store.mode === "booting") {
       const name = store.liveExerciseId ? `Live exercise ${store.liveExerciseId}` : "Live exercise";
       setMode("live", name);
@@ -455,6 +438,7 @@ function switchTab(name) {
     store.learnLoaded = true;
     loadLearning();
   }
+  setArenaActive(arenaRefs, active === "arena");
 }
 
 async function drawLearning() {
@@ -581,7 +565,7 @@ async function boot() {
     notice("Could not load range config, using default host weights.", false);
   }
   mapRefs = initMap(els.map, store.weights);
-  arenaRefs = initArena(els.arenaSvg);
+  arenaRefs = initArena(els.arenaCanvas);
   try {
     store.attackMap = await fetchAttackMap();
   } catch (err) {
