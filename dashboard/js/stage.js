@@ -536,9 +536,172 @@ export function setStageArt(refs, art) {
   drawStage(refs);
 }
 
-// Static layer cache lands here; until then every frame paints direct.
+// Cached static layers: the far backdrop, the floor grid, and the
+// vignette bake once per size (plus band for the grid) and blit per
+// frame with small parallax offsets. Keys rebuild them when the
+// layout, size, or art changes.
+const LAYER_M = 28;
+
 function buildStaticLayers(refs) {
-  void refs;
+  if (!refs || !refs.stage) return;
+  const { cw, ch, dpr } = refs.geom;
+  if (!cw || !ch) return;
+  const cache = refs.cache || (refs.cache = {});
+  const band = refs.stage.band;
+  const area = refs.stage.area;
+  const size = `${cw}x${ch}@${dpr}`;
+  const farKey = `far|${size}|${refs.art && refs.art.backdrop ? "art" : "flat"}`;
+  if (cache.farKey !== farKey || !cache.far) {
+    cache.far = bakeLayer(refs, LAYER_M, (g) => paintFarInto(refs, g, cw, ch));
+    cache.farKey = farKey;
+  }
+  const gridKey = `grid|${size}|${band.x0},${band.x1},${area.top},${area.bottom}`;
+  if (cache.gridKey !== gridKey || !cache.grid) {
+    cache.grid = bakeLayer(refs, LAYER_M, (g) => paintGridInto(refs, g, cw, ch));
+    cache.gridKey = gridKey;
+  }
+  const vigKey = `vig|${size}`;
+  if (cache.vigKey !== vigKey || !cache.vig) {
+    cache.vig = bakeLayer(refs, 0, (g) => paintVigInto(g, cw, ch));
+    cache.vigKey = vigKey;
+  }
+}
+
+function bakeLayer(refs, margin, paint) {
+  const { cw, ch, dpr } = refs.geom;
+  const layer = makeLayer((cw + margin * 2) * dpr, (ch + margin * 2) * dpr);
+  if (!layer) return null;
+  let g = null;
+  try {
+    g = layer.getContext("2d");
+  } catch {
+    return null;
+  }
+  if (!g) return null;
+  try {
+    g.setTransform(dpr, 0, 0, dpr, margin * dpr, margin * dpr);
+    paint(g);
+  } catch {
+    return null;
+  }
+  return layer;
+}
+
+function paintFarInto(refs, g, cw, ch) {
+  const M = LAYER_M;
+  const art = refs.art && refs.art.backdrop;
+  if (art && art.width) {
+    const scale = Math.max((cw + M * 2) / art.width, (ch + M * 2) / art.height) * 1.06;
+    const dw = art.width * scale;
+    const dh = art.height * scale;
+    g.save();
+    g.globalAlpha = 0.9;
+    g.drawImage(art, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
+    g.restore();
+  } else {
+    const sky = g.createLinearGradient(0, 0, 0, ch);
+    sky.addColorStop(0, "#05070c");
+    sky.addColorStop(0.6, "#0b1020");
+    sky.addColorStop(1, "#05070c");
+    g.fillStyle = sky;
+    g.fillRect(-M, -M, cw + M * 2, ch + M * 2);
+  }
+  const dim = g.createLinearGradient(0, 0, 0, ch);
+  dim.addColorStop(0, "rgba(5,7,12,0.55)");
+  dim.addColorStop(0.35, "rgba(5,7,12,0.25)");
+  dim.addColorStop(1, "rgba(5,7,12,0.72)");
+  g.fillStyle = dim;
+  g.fillRect(-M, -M, cw + M * 2, ch + M * 2);
+}
+
+function paintGridInto(refs, g, cw, ch) {
+  const M = LAYER_M;
+  const stage = refs.stage;
+  const horizon = stage.area.top + (stage.area.bottom - stage.area.top) * 0.3;
+  const vpx = (stage.band.x0 + stage.band.x1) / 2;
+  g.save();
+  g.globalCompositeOperation = "lighter";
+  g.strokeStyle = "rgba(127,212,255,0.22)";
+  g.lineWidth = 1;
+  g.beginPath();
+  for (let i = -12; i <= 12; i += 1) {
+    g.moveTo(vpx + i * 26, horizon);
+    g.lineTo(vpx + i * 150, ch + 40);
+  }
+  const rows = 9;
+  for (let i = 0; i < rows; i += 1) {
+    const f = i / (rows - 1);
+    const y = horizon + (ch + 40 - horizon) * f * f;
+    g.moveTo(-M, y);
+    g.lineTo(cw + M, y);
+  }
+  g.stroke();
+  const sheen = g.createLinearGradient(0, horizon, 0, ch);
+  sheen.addColorStop(0, "rgba(47,123,255,0.10)");
+  sheen.addColorStop(1, "rgba(47,123,255,0.015)");
+  g.fillStyle = sheen;
+  g.fillRect(-M, horizon, cw + M * 2, ch - horizon + M);
+  g.restore();
+}
+
+function paintVigInto(g, cw, ch) {
+  const vig = g.createRadialGradient(cw / 2, ch / 2, Math.min(cw, ch) * 0.36, cw / 2, ch / 2, Math.max(cw, ch) * 0.75);
+  vig.addColorStop(0, "rgba(0,0,0,0)");
+  vig.addColorStop(1, "rgba(0,0,0,0.5)");
+  g.fillStyle = vig;
+  g.fillRect(0, 0, cw, ch);
+}
+
+// Pre-rendered radial glow sprites: entities and halos blit these
+// instead of building gradients every frame. No shadowBlur and no
+// canvas filter anywhere in the per-frame path.
+function buildSprites(refs) {
+  if (refs.sprites) return refs.sprites;
+  const sprites = {
+    red: glowSprite([[0, "rgba(255,59,47,0.55)"], [0.5, "rgba(255,59,47,0.18)"], [1, "rgba(255,59,47,0)"]]),
+    blue: glowSprite([[0, "rgba(47,123,255,0.55)"], [0.5, "rgba(47,123,255,0.18)"], [1, "rgba(47,123,255,0)"]]),
+    cyan: glowSprite([[0, "rgba(127,212,255,0.5)"], [0.5, "rgba(127,212,255,0.16)"], [1, "rgba(127,212,255,0)"]]),
+    white: glowSprite([[0, "rgba(232,236,244,0.5)"], [0.5, "rgba(232,236,244,0.16)"], [1, "rgba(232,236,244,0)"]]),
+    gold: glowSprite([[0, "rgba(255,200,61,0.45)"], [0.5, "rgba(255,200,61,0.15)"], [1, "rgba(255,200,61,0)"]]),
+    intrusion: glowSprite([[0, "rgba(255,59,47,0.6)"], [0.55, "rgba(160,20,16,0.3)"], [1, "rgba(255,59,47,0)"]]),
+    guardian: glowSprite([[0, "rgba(127,212,255,0.56)"], [0.6, "rgba(47,123,255,0.28)"], [1, "rgba(127,212,255,0)"]]),
+    guardianCore: glowSprite([[0, "rgba(232,246,255,0.95)"], [0.4, "rgba(127,212,255,0.9)"], [1, "rgba(127,212,255,0)"]]),
+  };
+  refs.sprites = sprites;
+  return sprites;
+}
+
+function glowSprite(stops) {
+  const layer = makeLayer(128, 128);
+  if (!layer) return null;
+  let g = null;
+  try {
+    g = layer.getContext("2d");
+  } catch {
+    return null;
+  }
+  if (!g) return null;
+  try {
+    const grad = g.createRadialGradient(64, 64, 2, 64, 64, 64);
+    for (const [at, color] of stops) grad.addColorStop(at, color);
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 128, 128);
+  } catch {
+    return null;
+  }
+  return layer;
+}
+
+function drawGlow(ctx, sprite, x, y, r, alpha) {
+  if (!sprite || !(r > 0)) return;
+  if (alpha === undefined) {
+    ctx.drawImage(sprite, x - r, y - r, r * 2, r * 2);
+    return;
+  }
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+  ctx.drawImage(sprite, x - r, y - r, r * 2, r * 2);
+  ctx.restore();
 }
 
 function relayoutStage(refs) {
@@ -976,6 +1139,8 @@ function drawStage(refs) {
   const ctx = refs.ctx;
   if (!ctx || !refs.stage) return;
   ensureFrame(refs);
+  buildStaticLayers(refs);
+  buildSprites(refs);
   const target = refs.frameCtx || ctx;
   const direct = target === ctx;
   try {
@@ -1034,30 +1199,14 @@ function paintFrame(refs, ctx) {
 
 function paintBackdrop(refs, ctx) {
   const { cw, ch } = refs.geom;
-  const art = refs.art && refs.art.backdrop;
-  const drift = refs.cam.dx * 0.05 + Math.sin(refs.clock / 9000) * 6;
-  if (art && art.width) {
-    const scale = Math.max(cw / art.width, ch / art.height) * 1.06;
-    const dw = art.width * scale;
-    const dh = art.height * scale;
-    ctx.save();
-    ctx.globalAlpha = 0.9;
-    ctx.drawImage(art, (cw - dw) / 2 + drift, (ch - dh) / 2, dw, dh);
-    ctx.restore();
-  } else {
-    const sky = ctx.createLinearGradient(0, 0, 0, ch);
-    sky.addColorStop(0, "#05070c");
-    sky.addColorStop(0.6, "#0b1020");
-    sky.addColorStop(1, "#05070c");
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, cw, ch);
+  const far = refs.cache && refs.cache.far;
+  if (!far) {
+    paintFarInto(refs, ctx, cw, ch);
+    return;
   }
-  const dim = ctx.createLinearGradient(0, 0, 0, ch);
-  dim.addColorStop(0, "rgba(5,7,12,0.55)");
-  dim.addColorStop(0.35, "rgba(5,7,12,0.25)");
-  dim.addColorStop(1, "rgba(5,7,12,0.72)");
-  ctx.fillStyle = dim;
-  ctx.fillRect(0, 0, cw, ch);
+  const drift = refs.cam.dx * 0.05 + Math.sin(refs.clock / 9000) * 6;
+  const ox = Math.max(-LAYER_M, Math.min(LAYER_M, drift));
+  ctx.drawImage(far, -LAYER_M + ox, -LAYER_M, cw + LAYER_M * 2, ch + LAYER_M * 2);
 }
 
 function paintBeams(refs, ctx) {
@@ -1088,33 +1237,14 @@ function paintBeams(refs, ctx) {
 }
 
 function paintFloor(refs, ctx) {
-  const stage = refs.stage;
   const { cw, ch } = refs.geom;
-  const horizon = stage.area.top + (stage.area.bottom - stage.area.top) * 0.3;
-  const vpx = (stage.band.x0 + stage.band.x1) / 2 + refs.cam.dx * 0.3;
-  ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-  ctx.strokeStyle = "rgba(127,212,255,0.22)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  for (let i = -10; i <= 10; i += 1) {
-    ctx.moveTo(vpx + i * 26, horizon);
-    ctx.lineTo(vpx + i * 150, ch + 40);
+  const grid = refs.cache && refs.cache.grid;
+  if (!grid) {
+    paintGridInto(refs, ctx, cw, ch);
+    return;
   }
-  const rows = 9;
-  for (let i = 0; i < rows; i += 1) {
-    const f = i / (rows - 1);
-    const y = horizon + (ch + 40 - horizon) * f * f;
-    ctx.moveTo(0, y);
-    ctx.lineTo(cw, y);
-  }
-  ctx.stroke();
-  const sheen = ctx.createLinearGradient(0, horizon, 0, ch);
-  sheen.addColorStop(0, "rgba(47,123,255,0.10)");
-  sheen.addColorStop(1, "rgba(47,123,255,0.015)");
-  ctx.fillStyle = sheen;
-  ctx.fillRect(0, horizon, cw, ch - horizon);
-  ctx.restore();
+  const ox = Math.max(-LAYER_M, Math.min(LAYER_M, refs.cam.dx * 0.3));
+  ctx.drawImage(grid, -LAYER_M + ox, -LAYER_M, cw + LAYER_M * 2, ch + LAYER_M * 2);
 }
 
 function paintLinks(refs, ctx) {
@@ -1188,9 +1318,9 @@ function paintHosts(refs, ctx) {
     ctx.ellipse(at.x, at.y + r * 1.5, r * 1.6, r * 0.5, 0, 0, 6.283);
     ctx.fill();
     if (node.kind === "vault") {
-      paintVault(ctx, at.x, at.y, r, t, state, exposed);
+      paintVault(ctx, refs.sprites || {}, at.x, at.y, r, t, state, exposed);
     } else {
-      paintBlock(ctx, at.x, at.y, r, t, state, node.kind === "small");
+      paintBlock(ctx, refs.sprites || {}, at.x, at.y, r, t, state, node.kind === "small");
     }
     if (state === "isolated") {
       ctx.save();
@@ -1238,18 +1368,12 @@ function paintHosts(refs, ctx) {
   }
 }
 
-function paintBlock(ctx, x, y, r, t, state, small) {
+function paintBlock(ctx, sprites, x, y, r, t, state, small) {
   const s = r * 2;
   const breached = state === "compromised" || state === "signed-in";
   ctx.save();
   if (breached) {
-    const halo = ctx.createRadialGradient(x, y, r * 0.4, x, y, r * 2);
-    halo.addColorStop(0, "rgba(255,59,47,0.35)");
-    halo.addColorStop(1, "rgba(255,59,47,0)");
-    ctx.fillStyle = halo;
-    ctx.beginPath();
-    ctx.arc(x, y, r * 2, 0, 6.283);
-    ctx.fill();
+    drawGlow(ctx, sprites.red, x, y, r * 2, 0.65);
   }
   ctx.fillStyle = state === "compromised" ? "#2a0f0c" : state === "isolated" ? "#111722" : "#161c28";
   roundRectPath(ctx, x - r, y - r, s, s, small ? 5 : 9);
@@ -1295,16 +1419,14 @@ function paintBlock(ctx, x, y, r, t, state, small) {
   ctx.restore();
 }
 
-function paintVault(ctx, x, y, r, t, state, exposed) {
+function paintVault(ctx, sprites, x, y, r, t, state, exposed) {
   const breached = state === "compromised" || state === "signed-in" || exposed;
   ctx.save();
-  const halo = ctx.createRadialGradient(x, y, r * 0.3, x, y, r * 2.1);
-  halo.addColorStop(0, exposed || state === "compromised" ? "rgba(255,59,47,0.4)" : "rgba(255,200,61,0.28)");
-  halo.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = halo;
-  ctx.beginPath();
-  ctx.arc(x, y, r * 2.1, 0, 6.283);
-  ctx.fill();
+  if (exposed || state === "compromised") {
+    drawGlow(ctx, sprites.red, x, y, r * 2.1, 0.73);
+  } else {
+    drawGlow(ctx, sprites.gold, x, y, r * 2.1, 0.62);
+  }
   ctx.fillStyle = "#141824";
   ctx.beginPath();
   ctx.arc(x, y, r, 0, 6.283);
@@ -1369,26 +1491,20 @@ function paintHostLabel(refs, ctx, id, x, y, r, jewel) {
 function paintEntities(refs, ctx) {
   const lanes = refs.stage.lanes;
   const t = refs.clock / 1000;
-  paintIntrusion(ctx, lanes.red.entity.x, lanes.red.entity.y,
+  const sprites = refs.sprites || {};
+  paintIntrusion(ctx, sprites, lanes.red.entity.x, lanes.red.entity.y,
     lanes.red.entity.r * (0.68 + 0.42 * refs.intrusion), refs.intrusion, t);
-  paintGuardian(ctx, lanes.blue.entity.x, lanes.blue.entity.y,
+  paintGuardian(ctx, sprites, lanes.blue.entity.x, lanes.blue.entity.y,
     lanes.blue.entity.r, refs.guardian, t);
 }
 
 // The Intrusion: a hovering diamond of wireframe shards that grows
 // and sharpens as red progresses. Abstract light and code only.
-function paintIntrusion(ctx, x, y, r, level, t) {
+function paintIntrusion(ctx, sprites, x, y, r, level, t) {
   const rr = Math.max(8, r);
   ctx.save();
   ctx.translate(x, y + Math.sin(t * 1.1) * rr * 0.05);
-  const glow = ctx.createRadialGradient(0, 0, rr * 0.2, 0, 0, rr * 2.2);
-  glow.addColorStop(0, `rgba(255,59,47,${0.3 + level * 0.3})`);
-  glow.addColorStop(0.55, `rgba(160,20,16,${0.16 + level * 0.14})`);
-  glow.addColorStop(1, "rgba(255,59,47,0)");
-  ctx.fillStyle = glow;
-  ctx.beginPath();
-  ctx.arc(0, 0, rr * 2.2, 0, 6.283);
-  ctx.fill();
+  drawGlow(ctx, sprites.intrusion, 0, 0, rr * 2.2, 0.5 + level * 0.5);
   const spin = t * (0.25 + level * 0.6);
   ctx.rotate(Math.sin(spin * 0.4) * 0.12);
   // Shard diamond core.
@@ -1451,20 +1567,13 @@ function paintIntrusion(ctx, x, y, r, level, t) {
 
 // The Guardian: calm concentric rings and shield plates that answer
 // blue containment with a bright pulse.
-function paintGuardian(ctx, x, y, r, energy, t) {
+function paintGuardian(ctx, sprites, x, y, r, energy, t) {
   const rr = Math.max(8, r);
   const breathe = 1 + Math.sin(t * 1.4) * 0.02;
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(breathe, breathe);
-  const glow = ctx.createRadialGradient(0, 0, rr * 0.2, 0, 0, rr * 2.2);
-  glow.addColorStop(0, `rgba(127,212,255,${0.24 + energy * 0.32})`);
-  glow.addColorStop(0.6, `rgba(47,123,255,${0.12 + energy * 0.16})`);
-  glow.addColorStop(1, "rgba(127,212,255,0)");
-  ctx.fillStyle = glow;
-  ctx.beginPath();
-  ctx.arc(0, 0, rr * 2.2, 0, 6.283);
-  ctx.fill();
+  drawGlow(ctx, sprites.guardian, 0, 0, rr * 2.2, 0.45 + energy * 0.55);
   ctx.strokeStyle = `rgba(160,220,255,${0.5 + energy * 0.45})`;
   for (let k = 0; k < 3; k += 1) {
     ctx.lineWidth = k === 0 ? 3 : 1.5;
@@ -1499,14 +1608,7 @@ function paintGuardian(ctx, x, y, r, energy, t) {
     ctx.stroke();
     ctx.restore();
   }
-  const core = ctx.createRadialGradient(0, 0, 1, 0, 0, rr * 0.3);
-  core.addColorStop(0, "#e8f6ff");
-  core.addColorStop(0.4, `rgba(127,212,255,${0.5 + energy * 0.4})`);
-  core.addColorStop(1, "rgba(127,212,255,0)");
-  ctx.fillStyle = core;
-  ctx.beginPath();
-  ctx.arc(0, 0, rr * 0.3, 0, 6.283);
-  ctx.fill();
+  drawGlow(ctx, sprites.guardianCore, 0, 0, rr * 0.3, 0.55 + energy * 0.45);
   if (energy > 0.5) {
     const phase = (t * 0.9) % 1;
     ctx.strokeStyle = CYAN;
@@ -1637,11 +1739,12 @@ function paintOverlays(refs, ctx) {
     }
     ctx.restore();
   }
-  const vig = ctx.createRadialGradient(cw / 2, ch / 2, Math.min(cw, ch) * 0.36, cw / 2, ch / 2, Math.max(cw, ch) * 0.75);
-  vig.addColorStop(0, "rgba(0,0,0,0)");
-  vig.addColorStop(1, "rgba(0,0,0,0.5)");
-  ctx.fillStyle = vig;
-  ctx.fillRect(0, 0, cw, ch);
+  const cached = refs.cache && refs.cache.vig;
+  if (cached) {
+    ctx.drawImage(cached, 0, 0, cw, ch);
+  } else {
+    paintVigInto(ctx, cw, ch);
+  }
   const noise = refs.art && refs.art.noise;
   if (noise && noise.width && !refs.lowDetail) {
     ctx.save();
