@@ -400,14 +400,22 @@ body.present #detailsView,
 body.present #learnView,
 body.present #notice,
 body.present .mode-word,
-body.present .event-count {
+body.present .event-count,
+body.present .map-panel h2,
+body.present .map-panel .legend {
   display: none;
 }
-body.present .story-grid { grid-template-columns: minmax(0, 1fr); max-width: 1100px; }
+body.present .story-grid {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 1400px;
+  min-height: calc(100vh - 120px);
+}
+body.present .story-main { justify-content: center; }
 body.present .status-line { font-size: 26px; font-weight: 600; white-space: normal; }
+body.present #mapSvg { max-height: calc(100vh - 340px); min-height: 0; }
 body.present #presentLatest {
   display: flex; flex-direction: column; gap: 10px;
-  list-style: none; margin: 0; padding: 0;
+  list-style: none; margin: 16px 0 0; padding: 0;
 }
 body.present #presentLatest li { font-size: 22px; }
 body.present #presentLatest li:first-child { color: var(--muted); font-size: 19px; }
