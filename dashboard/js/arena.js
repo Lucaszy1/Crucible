@@ -9,6 +9,7 @@ import {
   redNotches, reduceHostStates, scoreEvents, secretRead, shortResult,
 } from "./state.js";
 import { describeEvent } from "./story.js";
+import { applyRail } from "./rail.js";
 import { pathBetween } from "./network.js";
 import {
   choreograph, effectHost, httpLeakTokens,
@@ -182,6 +183,10 @@ export function initArena(canvas) {
     canvas, ctx: canvas.getContext("2d"),
     hud: {
       hudEl: el("arenaHud"),
+      wrapEl: el("arenaWrap"),
+      midEl: el("arenaMid"),
+      thoughtRed: el("thoughtRed"),
+      thoughtBlue: el("thoughtBlue"),
       redLine: el("arenaRedLine"), blueLine: el("arenaBlueLine"),
       redMeter: el("arenaRedMeter"), blueMeter: el("arenaBlueMeter"),
       exercise: el("arenaExercise"), move: el("arenaMove"), total: el("arenaTotal"),
@@ -279,6 +284,7 @@ function fitCanvas(refs) {
   canvas.width = Math.round(cw * dpr);
   canvas.height = Math.round(ch * dpr);
   buildDots(refs);
+  layOutRail(refs);
 }
 
 function blankSnapshot(refs) {
@@ -1958,6 +1964,7 @@ function showAuditor(refs, ev) {
   if (hud.audCite) hud.audCite.textContent = card.ids.length > 0 ? `cites ${card.ids.join(", ")}` : "no cited lines";
   if (hud.audNote) hud.audNote.textContent = String(card.rationale || "").slice(0, 140);
   hud.aud.className = card.word === "justified" ? "show" : "show bad";
+  layOutRail(refs);
   if (refs.audTimer) clearTimeout(refs.audTimer);
   refs.audTimer = setTimeout(() => hideAuditor(refs), 4200);
 }
@@ -1969,6 +1976,23 @@ function hideAuditor(refs) {
     refs.audTimer = 0;
   }
   if (refs.hud.aud) refs.hud.aud.className = "";
+  layOutRail(refs);
+}
+
+// Keep the thought panels clear of the score block, the auditor
+// card, and the caption from measured boxes. Runs on auditor
+// show and hide and on every canvas refit (resize, tab switch).
+export function layOutRail(refs) {
+  if (!refs || !refs.hud) return null;
+  const hud = refs.hud;
+  return applyRail({
+    wrap: hud.wrapEl,
+    mid: hud.midEl,
+    aud: hud.aud,
+    cap: hud.cap,
+    red: hud.thoughtRed,
+    blue: hud.thoughtBlue,
+  });
 }
 
 // ---------- static snapshot ----------

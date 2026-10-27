@@ -83,7 +83,7 @@
 <div id="arenaView" hidden>
 <main class="arena-wrap">
   <section class="arena-stage" id="arenaStage" aria-label="Exercise arena">
-    <div class="arena-canvas-wrap">
+    <div class="arena-canvas-wrap" id="arenaWrap">
       <canvas id="arenaCanvas" role="img" aria-label="Arena contest scene"></canvas>
       <div id="arenaFrame" aria-hidden="true"></div>
       <div id="arenaReadout" aria-hidden="true"></div>
@@ -95,7 +95,7 @@
           <div class="arena-meter-l">Progress to the secret</div>
           <div class="arena-meter" id="arenaRedMeter"><i></i><i></i><i></i><i></i></div>
         </div>
-        <div class="arena-mid">
+        <div class="arena-mid" id="arenaMid">
           <div class="arena-row"><span id="arenaExercise">Exercise</span><span>Move <b id="arenaMove">00</b> / <b id="arenaTotal">0</b></span></div>
           <div class="arena-tug" id="arenaTug" aria-hidden="true"><i class="r" id="arenaTugR"></i><i class="b"></i><em id="arenaTugM"></em></div>
           <div class="arena-score"><span>Blue score</span><b id="arenaScore">100</b></div>

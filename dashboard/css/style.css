@@ -725,12 +725,17 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
 .strip-pip:disabled { cursor: default; }
 .strip-verdict { display: none; }
 
-/* Thought streams: typed reasoning beside each banner. */
+/* Thought streams: typed reasoning beside each banner. JavaScript
+   sets top and max-height from measured boxes (see rail.js) so the
+   panels never cover the score block, the auditor card, or the
+   caption; these defaults hold before the first measurement. */
 .thought {
   position: absolute; top: 14%; width: min(300px, 30%);
+  max-height: 62cqh; overflow-y: auto;
   background: rgba(9, 11, 16, 0.88); border: 1px solid #2a3140;
   border-radius: 8px; padding: 8px 10px; z-index: 4;
   font-size: 12px; line-height: 1.45;
+  transition: top 0.3s ease;
 }
 .thought.red { left: 12px; border-top: 3px solid #ff3b2f; }
 .thought.blue { right: 12px; border-top: 3px solid #2f7bff; text-align: right; }
@@ -835,6 +840,10 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
 @container (max-width: 640px) {
   .thought { width: 44%; font-size: 11px; top: 16%; }
   .thought-text { min-height: 0; }
+  #arenaAud { width: min(300px, calc(100% - 24px)); padding: 10px 12px 12px; }
+  #arenaAud .n { font-size: 44px; }
+  #arenaAud .w { font-size: 18px; }
+  #arenaAud .c, #arenaAud .t { font-size: 11px; }
 }
 
 @media (max-width: 1050px) {
