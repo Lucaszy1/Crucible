@@ -270,6 +270,8 @@ select {
 .verdict[data-tone="amber"] { color: #241a06; background: var(--amber); border-color: var(--amber); }
 .verdict[data-tone="red"] { color: #2a1113; background: var(--red); border-color: var(--red); }
 .verdict[data-tone="grey"] { color: var(--text); background: #2a3546; border-color: #3b4a61; }
+.verdict[data-tone="cyan"] { color: #062a36; background: var(--cyan); border-color: var(--cyan); }
+.verdict[data-tone="muted"] { color: var(--muted); background: transparent; border-color: var(--muted); }
 .verdict-flag {
   font-size: 10px; font-weight: 700; color: var(--amber);
   border: 1px solid var(--amber); border-radius: 10px; padding: 1px 8px;

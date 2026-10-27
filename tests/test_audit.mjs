@@ -35,6 +35,8 @@ describe("verdictTone", () => {
     assert.equal(verdictTone("disproportionate"), "amber");
     assert.equal(verdictTone("unsupported"), "red");
     assert.equal(verdictTone("late"), "grey");
+    assert.equal(verdictTone("redundant"), "cyan");
+    assert.equal(verdictTone("moot"), "muted");
   });
 });
 
@@ -60,6 +62,7 @@ describe("reduceAudits", () => {
     assert.equal(summary.unsupportedCount, 1);
     assert.equal(summary.invalidRefsCount, 1);
     assert.equal(summary.meanScore, 5);
+    assert.deepEqual(summary.verdictCounts, { justified: 1, unsupported: 1 });
     assert.equal(summary.cost, 0.03);
   });
 

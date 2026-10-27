@@ -46,6 +46,7 @@ const els = {
   auditChips: document.getElementById("auditChips"),
   auditCost: document.getElementById("auditCost"),
   auditCount: document.getElementById("auditCount"),
+  auditSummary: document.getElementById("auditSummary"),
 };
 
 const controls = {
@@ -120,7 +121,7 @@ function render(animate) {
     store.events, store.cursor, store.attackMap, onEvidenceRef, audits.byTarget,
   );
   renderAuditor(
-    { list: els.auditList, chips: els.auditChips, cost: els.auditCost, count: els.auditCount },
+    { list: els.auditList, chips: els.auditChips, cost: els.auditCost, count: els.auditCount, summary: els.auditSummary },
     store.events, store.cursor, audits, onEvidenceRef,
   );
   const canScrub = store.mode === "replay";

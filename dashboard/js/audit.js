@@ -8,6 +8,8 @@ export const VERDICT_TONES = {
   disproportionate: "amber",
   unsupported: "red",
   late: "grey",
+  redundant: "cyan",
+  moot: "muted",
 };
 
 export function verdictTone(verdict) {
@@ -30,10 +32,12 @@ export function reduceAudits(eventList, cursor) {
   let scoreSum = 0;
   let scoreCount = 0;
   let cost = 0;
+  const verdictCounts = {};
   for (const ev of audits) {
     const r = ev.result || {};
     if (r.verdict === "justified") justified += 1;
     if (r.verdict === "unsupported") unsupported += 1;
+    if (r.verdict) verdictCounts[r.verdict] = (verdictCounts[r.verdict] || 0) + 1;
     if (r.refs_valid === false) invalidRefs += 1;
     if (typeof r.score === "number") {
       scoreSum += r.score;
@@ -50,6 +54,7 @@ export function reduceAudits(eventList, cursor) {
       unsupportedCount: unsupported,
       invalidRefsCount: invalidRefs,
       meanScore: scoreCount > 0 ? Math.round((scoreSum / scoreCount) * 100) / 100 : null,
+      verdictCounts,
       cost: Math.round(cost * 1000000) / 1000000,
     },
   };
@@ -128,6 +133,18 @@ export function renderAuditor(els, eventList, cursor, reduced, onRef) {
   invalid.dataset.tone = summary.invalidRefsCount > 0 ? "red" : "green";
   invalid.textContent = `Invalid refs ${summary.invalidRefsCount}`;
   els.chips.append(justified, invalid);
+  if (summary.count > 0) {
+    const parts = [`${summary.count} verdict${summary.count === 1 ? "" : "s"}`];
+    if (summary.meanScore !== null) parts.push(`mean ${summary.meanScore}/10`);
+    const counts = Object.entries(summary.verdictCounts)
+      .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(b[0]))
+      .map(([verdict, n]) => `${verdict} ${n}`)
+      .join(", ");
+    if (counts) parts.push(counts);
+    els.summary.textContent = parts.join(" · ");
+  } else {
+    els.summary.textContent = "No verdicts yet.";
+  }
   els.cost.textContent = summary.count > 0 ? `Audit cost: $${summary.cost.toFixed(4)}` : "Audit cost: --";
 
   els.list.innerHTML = "";
