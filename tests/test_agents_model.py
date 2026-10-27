@@ -737,3 +737,39 @@ def test_blue_agent_sends_playbook_to_model(tmp_path, monkeypatch):
     sent = json.dumps(client.calls[0]["messages"])
     assert "Lessons from earlier exercises:" in sent
     assert "Contain quickly." in sent
+
+
+def test_agents_send_role_temperature_by_default(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    monkeypatch.delenv("LLM_TEMPERATURE", raising=False)
+    red_client = _FakeClient(_response("Scanning.", [("scan_host", {"host": "web"})]))
+    ModelRed(client=red_client).next_action(1, [])
+    assert red_client.calls[0]["temperature"] == 0.8
+    blue_client = _FakeClient(_response("Reading.", [("read_logs", {"host": "web"})]))
+    ModelBlue(client=blue_client).next_action(2, [])
+    assert blue_client.calls[0]["temperature"] == 0.5
+
+
+def test_agents_honor_temperature_override(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    monkeypatch.setenv("LLM_TEMPERATURE", "0.1")
+    client = _FakeClient(_response("Scanning.", [("scan_host", {"host": "web"})]))
+    ModelRed(client=client).next_action(1, [])
+    assert client.calls[0]["temperature"] == 0.1
+
+
+def test_agents_explicit_temperature_wins(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    client = _FakeClient(_response("Reading.", [("read_logs", {"host": "web"})]))
+    ModelBlue(client=client, temperature=0.0).next_action(2, [])
+    assert client.calls[0]["temperature"] == 0.0
+
+
+def test_agent_seed_splits_cache(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    resp = _response("Scanning.", [("scan_host", {"host": "web"})])
+    client = _FakeClient(resp)
+    ModelRed(client=client, exercise_id="ex-seed", seed="pair-1").next_action(1, [])
+    ModelRed(client=client, exercise_id="ex-seed", seed="pair-2").next_action(1, [])
+    ModelRed(client=client, exercise_id="ex-seed", seed="pair-2").next_action(1, [])
+    assert len(client.calls) == 2

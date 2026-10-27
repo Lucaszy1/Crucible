@@ -311,3 +311,15 @@ def test_campaign_detail_rejects_unknown(client, tmp_runs):
     _campaign_fixture(tmp_runs)
     assert client.get("/api/campaigns/nope").status_code == 404
     assert client.get("/api/campaigns/..%2F..%2Fnope").status_code == 404
+
+
+def test_campaigns_list_shows_both_arms(client, tmp_runs):
+    _campaign_fixture(tmp_runs)
+    directory = tmp_runs / "campaign-ctrl1"
+    directory.mkdir()
+    (directory / "summary.json").write_text(json.dumps({
+        "name": "ctrl1", "memory": "off", "agents": "model", "episodes": [],
+    }), encoding="utf-8")
+    body = client.get("/api/campaigns").json()
+    assert [item["name"] for item in body["campaigns"]] == ["ctrl1", "mem1"]
+    assert body["campaigns"][0]["memory"] == "off"

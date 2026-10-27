@@ -223,3 +223,59 @@ def test_load_env_file_does_not_override(tmp_path, monkeypatch):
     llm._load_env_file(env_path)
     assert os.environ.get("LLM_DAILY_LIMIT_USD") == "7"
     assert llm.daily_limit_usd() == pytest.approx(7.0)
+
+
+def test_temperature_defaults_per_role(monkeypatch):
+    monkeypatch.delenv("LLM_TEMPERATURE", raising=False)
+    assert llm.temperature_for("red") == 0.8
+    assert llm.temperature_for("blue") == 0.5
+    assert llm.temperature_for("auditor") == 0.7
+
+
+def test_temperature_env_override_wins(monkeypatch):
+    monkeypatch.setenv("LLM_TEMPERATURE", "0.25")
+    assert llm.temperature_for("red") == 0.25
+    assert llm.temperature_for("blue") == 0.25
+
+
+def test_temperature_bad_env_falls_back(monkeypatch):
+    monkeypatch.setenv("LLM_TEMPERATURE", "hot")
+    assert llm.temperature_for("red") == 0.8
+
+
+def test_chat_resolves_temperature_per_role(isolated_storage, monkeypatch):
+    monkeypatch.delenv("LLM_TEMPERATURE", raising=False)
+    client = _FakeClient()
+    messages = [{"role": "user", "content": "hi"}]
+    llm.chat("red", messages, client=client, exercise_id="ex-t")
+    llm.chat("blue", messages, client=client, exercise_id="ex-t")
+    assert client.calls[0]["temperature"] == 0.8
+    assert client.calls[1]["temperature"] == 0.5
+
+
+def test_chat_explicit_temperature_wins(isolated_storage):
+    client = _FakeClient()
+    messages = [{"role": "user", "content": "hi"}]
+    llm.chat("red", messages, client=client, exercise_id="ex-t",
+             temperature=0.0)
+    assert client.calls[0]["temperature"] == 0.0
+
+
+def test_chat_cache_splits_on_seed(isolated_storage):
+    client = _FakeClient()
+    messages = [{"role": "user", "content": "hi"}]
+    llm.chat("red", messages, client=client, exercise_id="ex-s",
+             seed="pair-1")
+    llm.chat("red", messages, client=client, exercise_id="ex-s",
+             seed="pair-2")
+    llm.chat("red", messages, client=client, exercise_id="ex-s",
+             seed="pair-2")
+    assert len(client.calls) == 2
+
+
+def test_chat_cache_unchanged_without_seed(isolated_storage):
+    client = _FakeClient()
+    messages = [{"role": "user", "content": "hi"}]
+    llm.chat("red", messages, client=client, exercise_id="ex-s")
+    llm.chat("red", messages, client=client, exercise_id="ex-s")
+    assert len(client.calls) == 1

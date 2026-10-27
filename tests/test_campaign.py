@@ -240,3 +240,108 @@ def test_force_archives_old_dir_and_starts_over(tmp_path, monkeypatch, capsys):
     assert seen["ids"] == ["redo-1", "redo-1"]
     with (tmp_path / "runs" / "campaign-redo" / "summary.csv").open() as handle:
         assert len(list(csv.DictReader(handle))) == 1
+
+
+def _stub_seeded_exercise(monkeypatch, seen, events_by_id=None):
+    def fake_exercise(red, blue, max_turns=40, run_path=None,
+                      exercise_id=None, audit="off"):
+        seen.setdefault("ids", []).append(exercise_id)
+        seen.setdefault("seeds", []).append((getattr(red, "_seed", None),
+                                             getattr(blue, "_seed", None)))
+        seen.setdefault("fed", []).append(list(
+            getattr(blue, "_playbook", None) or []))
+        events = (events_by_id or {}).get(exercise_id, [])
+        return {"events": events, "score": _score(),
+                "run_path": str(run_path),
+                "audit_summary": {"mode": audit}}
+    monkeypatch.setattr(orchestrator, "run_exercise", fake_exercise)
+    monkeypatch.setattr(campaign.orchestrator, "run_exercise", fake_exercise)
+
+
+def test_arms_interleave_with_matched_seeds(tmp_path, monkeypatch):
+    seen = _stub_common(monkeypatch, tmp_path)
+    starts = []
+    monkeypatch.setattr(sandbox, "start",
+                        lambda: starts.append(1) or {"web": True})
+    _stub_seeded_exercise(monkeypatch, seen)
+    _stub_referee(monkeypatch, seen)
+    assert campaign.main(["--arms", "mem,ctrl", "--episodes", "2",
+                          "--agents", "model"]) == 0
+    assert seen["ids"] == ["mem-1", "ctrl-1", "mem-2", "ctrl-2"]
+    assert seen["seeds"] == [("pair-1", "pair-1")] * 2 + [("pair-2", "pair-2")] * 2
+    assert starts == [1]
+    for arm in ("mem", "ctrl"):
+        summary = tmp_path / "runs" / f"campaign-{arm}" / "summary.json"
+        state = json.loads(summary.read_text(encoding="utf-8"))
+        assert [row["episode"] for row in state["episodes"]] == [f"{arm}-1",
+                                                                 f"{arm}-2"]
+    assert [rule["episode"] for rule in seen["fed"][2]] == ["mem-1"]
+    assert seen["fed"][3] == []
+
+
+def test_arms_positional_memory_and_suffix_override(tmp_path, monkeypatch):
+    seen = _stub_common(monkeypatch, tmp_path)
+    _stub_seeded_exercise(monkeypatch, seen)
+    _stub_referee(monkeypatch, seen)
+    assert campaign.main(["--arms", "mem,ctrl", "--episodes", "1",
+                          "--agents", "model"]) == 0
+    assert seen.get("reviews") == ["mem-1"]
+    mem_state = json.loads((tmp_path / "runs" / "campaign-mem"
+                            / "summary.json").read_text(encoding="utf-8"))
+    ctrl_state = json.loads((tmp_path / "runs" / "campaign-ctrl"
+                             / "summary.json").read_text(encoding="utf-8"))
+    assert mem_state["memory"] == "on"
+    assert ctrl_state["memory"] == "off"
+
+    seen2 = _stub_common(monkeypatch, tmp_path)
+    _stub_seeded_exercise(monkeypatch, seen2)
+    _stub_referee(monkeypatch, seen2)
+    assert campaign.main(["--arms", "a:off,b:on", "--episodes", "1",
+                          "--agents", "model"]) == 0
+    assert seen2.get("reviews") == ["b-1"]
+
+
+def _red_event(tool, args, result, index):
+    return {"id": f"evt-{index:04d}", "timestamp": "2026-01-01T00:00:00+00:00",
+            "actor": "red", "tool": tool, "args": args, "result": result,
+            "reasoning_summary": "r", "evidence_refs": []}
+
+
+def test_arms_report_admin_in_and_wins(tmp_path, monkeypatch, capsys):
+    seen = _stub_common(monkeypatch, tmp_path)
+    admin = _red_event("http_request", {"host": "web", "path": "/admin"},
+                       {"ok": True, "status": 200}, 1)
+    breach = _red_event("try_credential", {"host": "db"},
+                        {"ok": True, "authenticated": True}, 2)
+    _stub_seeded_exercise(monkeypatch, seen, {
+        "mem-1": [admin], "mem-2": [admin, breach], "ctrl-1": [breach],
+        "ctrl-2": []})
+    _stub_referee(monkeypatch, seen)
+    assert campaign.main(["--arms", "mem,ctrl", "--episodes", "2"]) == 0
+    out = capsys.readouterr().out
+    assert "mem: red /admin 2/2 (1.0) | red in 1/2 (0.5) | wins 2" in out
+    assert "ctrl: red /admin 0/2 (0.0) | red in 1/2 (0.5) | wins 2" in out
+
+
+def test_arms_rejects_bad_specs(tmp_path, monkeypatch, capsys):
+    _stub_common(monkeypatch, tmp_path)
+    for spec in ("solo", "a,b,c", "same,same", "a:maybe,b:on"):
+        assert campaign.main(["--arms", spec, "--episodes", "1"]) == 1
+        assert "campaign:" in capsys.readouterr().err
+    assert campaign.main(["--arms", "mem,ctrl", "--episodes", "1",
+                          "--memory", "on"]) == 1
+    assert "conflicts with --arms" in capsys.readouterr().err
+    assert campaign.main(["--episodes", "1", "--memory", "on"]) == 1
+    assert "--name is required" in capsys.readouterr().err
+
+
+def test_single_arm_reports_stats_line(tmp_path, monkeypatch, capsys):
+    seen = _stub_common(monkeypatch, tmp_path)
+    admin = _red_event("http_request", {"host": "web", "path": "/admin"},
+                       {"ok": True, "status": 200}, 1)
+    _stub_seeded_exercise(monkeypatch, seen, {"solo-1": [admin]})
+    _stub_referee(monkeypatch, seen)
+    assert campaign.main(["--name", "solo", "--episodes", "1", "--memory",
+                          "off"]) == 0
+    out = capsys.readouterr().out
+    assert "solo: red /admin 1/1 (1.0) | red in 0/1 (0.0) | wins 1" in out
