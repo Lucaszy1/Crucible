@@ -5,8 +5,8 @@
 // Transient effects spawn only while stepping forward in real time;
 // scrubbing rebuilds the static snapshot with no leftovers.
 import {
-  DEFAULT_WEIGHTS, HOSTS, hostBlocks, motionReduced, pressureValue,
-  redProgress, reduceHostStates, scoreEvents, secretRead, shortResult,
+  DEFAULT_WEIGHTS, hostBlocks, motionReduced, pressureValue,
+  redNotches, reduceHostStates, scoreEvents, secretRead, shortResult,
 } from "./state.js";
 import { describeEvent } from "./story.js";
 import { pathBetween } from "./network.js";
@@ -14,6 +14,9 @@ import {
   choreograph, effectHost, httpLeakTokens,
   latestByActor, logLineIds, verdictCard,
 } from "./choreography.js";
+import {
+  arenaGeometry, classicLayout, layoutHosts, nodeLabel, roleSub,
+} from "./layout.js";
 
 const RED = "#ff3b2f";
 const RED_DEEP = "#7d1913";
@@ -48,15 +51,9 @@ const BASE_MS = {
 };
 
 // World stage in fixed coordinates; the canvas scales to fit.
+// Host geometry lives on refs (see setArenaLayout): segment columns
+// from the exercise layout, or the classic four when unknown.
 const WORLD = { w: 1600, h: 900 };
-const NODES = {
-  web: { x: 330, y: 450, r: 88 },
-  app: { x: 790, y: 450, r: 88 },
-  db: { x: 1250, y: 285, r: 100 },
-  workstation: { x: 1250, y: 625, r: 72 },
-};
-const SRC = { red: { x: 90, y: 450 }, blue: { x: 1490, y: 790 } };
-const EDGES = [["web", "app"], ["app", "db"], ["app", "workstation"], ["red", "web"]];
 const CAM_HOME = { x: 800, y: 450, z: 1 };
 
 // Single motion switch shared with the app shell, so ?motion=full
@@ -76,19 +73,22 @@ function now() {
 }
 
 function nodePos(refs, key) {
-  if (key === "red") return SRC.red;
-  if (key === "blue") return SRC.blue;
+  if (key === "red") return refs.src.red;
+  if (key === "blue") return refs.src.blue;
   const n = refs.nodes[key];
   return n ? { x: n.x, y: n.y } : { x: WORLD.w / 2, y: WORLD.h / 2 };
 }
 
-// Red travels in through web, then along the real links.
-function redPathTo(target) {
-  if (!target || !NODES[target]) return [{ ...SRC.red }, { x: SRC.red.x + 220, y: SRC.red.y }];
-  const pts = [{ ...SRC.red }];
-  const leg = target === "web" ? ["web"] : pathBetween("web", target) || [target];
+// Red travels in through the entry host, then along the real links.
+function redPathTo(refs, target) {
+  const src = refs.src.red;
+  const nodes = refs.nodes;
+  if (!target || !nodes[target]) return [{ ...src }, { x: src.x + 220, y: src.y }];
+  const pts = [{ ...src }];
+  const entry = refs.entry;
+  const leg = target === entry ? [entry] : pathBetween(entry, target, refs.paths) || [target];
   for (const hop of leg) {
-    if (NODES[hop]) pts.push({ x: NODES[hop].x, y: NODES[hop].y });
+    if (nodes[hop]) pts.push({ x: nodes[hop].x, y: nodes[hop].y });
   }
   return pts;
 }
@@ -121,16 +121,55 @@ function pointAlong(pts, t) {
   return { ...last, ang: Math.atan2(last.y - prev.y, last.x - prev.x) };
 }
 
-function makeNode(key) {
-  const base = NODES[key];
+function makeNode(key, base) {
   return {
     key, x: base.x, y: base.y, r: base.r,
+    kind: base.kind || "standard", label: base.label || key.toUpperCase(), sub: base.sub || "",
     tint: "ok", tag: "CLEAN", flood: 0, floodTarget: 0,
     open: 0, openTarget: 0, gold: 0, goldTarget: 0,
     wheel: Math.random() * 6,
     scanT: 0, scanMax: 1, flicker: 0, pop: 0,
     sh: 0, shTarget: 0, shScale: 2.4, flag: false,
   };
+}
+
+// Rebuild host nodes, conduits, and team positions for one exercise
+// layout. Called when an exercise opens and whenever the layout
+// changes; scrubbing within one exercise never rebuilds.
+export function setArenaLayout(refs, layout) {
+  if (!refs) return;
+  const clean = layout && layout.hosts ? layout : classicLayout();
+  const geo = arenaGeometry(clean);
+  const roles = {};
+  for (const host of clean.hosts) roles[host.id] = host.role;
+  refs.layout = clean;
+  refs.hosts = layoutHosts(clean);
+  refs.edges = geo.edges;
+  refs.src = { red: geo.red, blue: geo.blue };
+  refs.entry = geo.entry;
+  refs.jewel = geo.jewel;
+  refs.paths = {
+    positions: Object.fromEntries(
+      Object.entries(geo.nodes).map(([id, node]) => [id, { x: node.x, y: node.y }])),
+    edges: geo.edges.filter(([a]) => a !== "red" && a !== "blue"),
+  };
+  refs.nodes = {};
+  for (const [id, node] of Object.entries(geo.nodes)) {
+    const role = roles[id] || "";
+    const jewel = id === clean.jewel_host;
+    refs.nodes[id] = makeNode(id, {
+      x: node.x, y: node.y, r: node.r, kind: node.kind,
+      label: nodeLabel(id, role), sub: roleSub(role, jewel),
+    });
+  }
+}
+
+function ensureLayout(refs, layout) {
+  const clean = layout && layout.hosts ? layout : classicLayout();
+  const key = `${clean.scenario_id}|${layoutHosts(clean).join(",")}`;
+  if (!refs || refs.layoutKey === key) return;
+  refs.layoutKey = key;
+  setArenaLayout(refs, clean);
 }
 
 function el(id) {
@@ -154,7 +193,8 @@ export function initArena(canvas) {
     },
     geom: { cw: 0, ch: 0, dpr: 1, sc: 1, cx: 0, cy: 0 },
     dots: null,
-    nodes: { web: makeNode("web"), app: makeNode("app"), db: makeNode("db"), workstation: makeNode("workstation") },
+    nodes: {}, hosts: [], edges: [], src: { red: { x: 90, y: 450 }, blue: { x: 1490, y: 790 } },
+    entry: "", jewel: "", paths: { positions: {}, edges: [] }, layout: null, layoutKey: "",
     snap: null, shown: null,
     particles: [], texts: [], transients: [], bursts: [], speedLines: [],
     pending: [], queue: [], playing: false, runId: 0,
@@ -174,6 +214,7 @@ export function initArena(canvas) {
   }
   refs.ro = ro;
   fitCanvas(refs);
+  setArenaLayout(refs, classicLayout());
   blankSnapshot(refs);
   refs.lastT = now();
   const loop = () => {
@@ -241,15 +282,14 @@ function fitCanvas(refs) {
 
 function blankSnapshot(refs) {
   refs.snap = {
-    states: { web: "clean", app: "clean", db: "clean", workstation: "clean" },
-    blocks: { web: "clean", app: "clean", db: "clean", workstation: "clean" },
-    pressure: 0, level: 0, notches: [false, false, false, false],
+    states: {}, blocks: {}, hostOrder: [...refs.hosts],
+    pressure: 0, level: 0, notches: [false, false, false],
     score: 100, outcome: null, moves: 0, total: 0, label: "Exercise",
     weights: { ...DEFAULT_WEIGHTS }, secret: false,
-    caption: "Four hosts. One secret.", sub: "", tag: "EXERCISE", tagTone: "system",
+    caption: "Hosts guard one secret.", sub: "", tag: "EXERCISE", tagTone: "system",
     redLine: "Red is waiting.", blueLine: "Blue is waiting.",
   };
-  refs.shown = { pressure: 0, level: 0, score: 100 };
+  refs.shown = { pressure: 0, score: 100 };
 }
 
 // Prerendered halftone squares plus giant side words. The red/blue
@@ -333,8 +373,9 @@ function update(refs, dt) {
   refs.cam.y += (refs.camTarget.y - refs.cam.y) * k;
   refs.cam.z += (refs.camTarget.z - refs.cam.z) * k;
 
-  for (const key of HOSTS) {
+  for (const key of refs.hosts) {
     const n = refs.nodes[key];
+    if (!n) continue;
     n.wheel += dt * (n.open > 0 && n.open < 1 ? 9 : 0.35);
     if (n.scanT > 0) n.scanT -= dt;
     if (n.flicker > 0) n.flicker -= dt;
@@ -399,7 +440,6 @@ function update(refs, dt) {
   const shown = refs.shown;
   const snap = refs.snap;
   shown.pressure += (snap.pressure - shown.pressure) * (1 - Math.exp(-dt * 3));
-  shown.level += (snap.level - shown.level) * (1 - Math.exp(-dt * 5));
   shown.score += (snap.score - shown.score) * (1 - Math.exp(-dt * 4));
   if (Math.abs(snap.score - shown.score) < 0.4) shown.score = snap.score;
   updateHud(refs);
@@ -427,7 +467,7 @@ function stepAmbient(refs, dt, idle) {
   amb.next -= dt;
   if (amb.next > 0 || amb.dots.length >= AMBIENT_MAX) return;
   amb.next = 1.1 + Math.random() * 1.2;
-  const open = EDGES.filter(([a, b]) => !conduitCut(refs, a, b));
+  const open = refs.edges.filter(([a, b]) => !conduitCut(refs, a, b));
   if (open.length === 0) return;
   const [a, b] = open[Math.floor(Math.random() * open.length)];
   const A = nodePos(refs, a);
@@ -525,8 +565,18 @@ function draw(refs) {
   drawConduits(refs);
   drawAmbient(refs);
   drawEmblems(refs);
-  for (const key of ["web", "app", "workstation", "db"]) drawNode(refs, refs.nodes[key]);
-  for (const key of HOSTS) drawShield(refs, refs.nodes[key]);
+  // Vaults draw last so the crown jewel sits on top.
+  const ordered = [...refs.hosts].sort((a, b) => {
+    const ka = refs.nodes[a] && refs.nodes[a].kind === "vault" ? 1 : 0;
+    const kb = refs.nodes[b] && refs.nodes[b].kind === "vault" ? 1 : 0;
+    return ka - kb;
+  });
+  for (const key of ordered) {
+    if (refs.nodes[key]) drawNode(refs, refs.nodes[key]);
+  }
+  for (const key of refs.hosts) {
+    if (refs.nodes[key]) drawShield(refs, refs.nodes[key]);
+  }
   drawBeams(refs);
   drawScans(refs);
   drawPackets(refs);
@@ -559,7 +609,7 @@ function conduitCut(refs, a, b) {
 
 function drawConduits(refs) {
   const { ctx } = refs;
-  for (const [a, b] of EDGES) {
+  for (const [a, b] of refs.edges) {
     const A = nodePos(refs, a);
     const B = nodePos(refs, b);
     const cut = conduitCut(refs, a, b);
@@ -617,8 +667,8 @@ function textOut(ctx, s, x, y, font, size, fill, weight, align, stroke) {
 
 function drawEmblems(refs) {
   const { ctx } = refs;
-  const r = SRC.red;
-  const b = SRC.blue;
+  const r = refs.src.red;
+  const b = refs.src.blue;
   ctx.fillStyle = RED;
   ctx.beginPath();
   ctx.moveTo(r.x - 46, r.y - 58);
@@ -713,8 +763,8 @@ function drawNode(refs, n) {
   ctx.stroke();
   ctx.restore();
 
-  const isDb = n.key === "db";
-  if (isDb) {
+  const isVault = n.kind === "vault";
+  if (isVault) {
     for (let i = 26; i > 0; i -= 2) {
       const c = 10 + (26 - i);
       ctx.fillStyle = `rgb(${c},${c + 3},${c + 10})`;
@@ -782,7 +832,8 @@ function drawNode(refs, n) {
         ctx.fillText("SECRET", 0, -r * 0.2 - h / 2);
       }
     }
-    textOut(ctx, "DB", 0, r * 1.12 + 34, DISP, 54, BONE, 900, "center");
+    const tagFs = n.label.length <= 3 ? 54 : Math.max(28, Math.round((54 * 3.2) / n.label.length));
+    textOut(ctx, n.label, 0, r * 1.12 + 34, DISP, tagFs, BONE, 900, "center");
   } else {
     const s = r * 2;
     const x0 = -r;
@@ -807,13 +858,15 @@ function drawNode(refs, n) {
     ctx.strokeStyle = col;
     roundRectPath(ctx, x0, y0, s, s, 18);
     ctx.stroke();
-    const label = n.key === "workstation" ? "WS" : n.key.toUpperCase();
-    textOut(ctx, label, 0, -4, DISP, n.key === "workstation" ? 62 : 78, n.flood > 0.5 ? INK : BONE, 900, "center", false);
-    const subs = { web: "public site", app: "reports server", workstation: "staff desktop" };
+    // Label and caption come from the layout (role-based); long names
+    // shrink to fit the block. Small blocks keep the compact size.
+    const fs = n.kind === "small" ? 62
+      : n.label.length <= 3 ? 78 : Math.max(34, Math.round((78 * 3.4) / n.label.length));
+    textOut(ctx, n.label, 0, -4, DISP, fs, n.flood > 0.5 ? INK : BONE, 900, "center", false);
     ctx.font = `700 14px ${MONO}`;
     ctx.fillStyle = n.flood > 0.5 ? INK : "#5b6678";
     ctx.textAlign = "center";
-    ctx.fillText(String(subs[n.key] || "").toUpperCase(), 0, r * 0.58);
+    ctx.fillText(String(n.sub || "").toUpperCase(), 0, r * 0.58);
   }
   // Business-weight badge, from the server config when loaded.
   const weights = refs.snap.weights || DEFAULT_WEIGHTS;
@@ -828,7 +881,7 @@ function drawNode(refs, n) {
     ctx.fillText(`×${w}`, -r + 26, -r - 14);
   }
   // Status tag plate.
-  const ty = (isDb ? r * 1.12 + 78 : r + 34);
+  const ty = (isVault ? r * 1.12 + 78 : r + 34);
   ctx.font = `900 24px ${DISP}`;
   const tw = ctx.measureText(n.tag).width + 28;
   ctx.fillStyle = col;
@@ -912,7 +965,7 @@ function drawBeams(refs) {
     } else if (t.kind === "beam") {
       const p = progressOf(t);
       const n = refs.nodes[t.host] || nodePos(refs, t.host);
-      const s = SRC.blue;
+      const s = refs.src.blue;
       const a = Math.min(1, p * 6) * Math.min(1, (1 - p) * 5);
       const dx = n.x - s.x;
       const dy = n.y - s.y;
@@ -1012,9 +1065,9 @@ function drawBeams(refs) {
 
 function drawScans(refs) {
   const { ctx } = refs;
-  for (const key of HOSTS) {
+  for (const key of refs.hosts) {
     const n = refs.nodes[key];
-    if (n.scanT <= 0) continue;
+    if (!n || n.scanT <= 0) continue;
     const p = 1 - n.scanT / (n.scanMax || 1);
     const a = Math.sin(Math.min(1, Math.max(0, p)) * Math.PI);
     ctx.save();
@@ -1284,16 +1337,18 @@ function updateHud(refs) {
   if (hud.tugR) hud.tugR.style.width = pc;
   if (hud.tugM) hud.tugM.style.left = pc;
   // Meters: red progress notches, blue held blocks per host.
+  // Meters rebuild their segments when the count changes: red shows
+  // one segment per episode notch, blue one block per host.
   if (hud.redMeter) {
-    const segs = hud.redMeter.children;
-    for (let i = 0; i < 4 && i < segs.length; i += 1) {
-      segs[i].className = shown.level > i + 0.35 ? "on" : "";
+    const segs = ensureSegs(hud.redMeter, snap.notches.length);
+    for (let i = 0; i < segs.length; i += 1) {
+      segs[i].className = snap.notches[i] ? "on" : "";
     }
   }
   if (hud.blueMeter) {
-    const segs = hud.blueMeter.children;
-    const order = ["web", "app", "db", "workstation"];
-    for (let i = 0; i < 4 && i < segs.length; i += 1) {
+    const order = snap.hostOrder && snap.hostOrder.length > 0 ? snap.hostOrder : refs.hosts;
+    const segs = ensureSegs(hud.blueMeter, order.length);
+    for (let i = 0; i < segs.length; i += 1) {
       const block = snap.blocks[order[i]];
       segs[i].className = block === "breached" ? "bad" : block === "isolated" ? "iso" : block === "patched" ? "fixed" : "on";
     }
@@ -1514,23 +1569,31 @@ function stopShort(from, to, gap) {
   return { x: to.x - (dx / l) * gap, y: to.y - (dy / l) * gap };
 }
 
-function bluePathTo(target) {
-  if (!target || !NODES[target]) return [{ ...SRC.blue }, { x: SRC.blue.x - 220, y: SRC.blue.y }];
-  return [{ ...SRC.blue }, { x: NODES[target].x, y: NODES[target].y }];
+function ensureSegs(meter, count) {
+  while (meter.children.length < count) meter.append(document.createElement("i"));
+  while (meter.children.length > count) meter.lastChild.remove();
+  return meter.children;
+}
+
+function bluePathTo(refs, target) {
+  const src = refs.src.blue;
+  const node = target && refs.nodes[target];
+  if (!node) return [{ ...src }, { x: src.x - 220, y: src.y }];
+  return [{ ...src }, { x: node.x, y: node.y }];
 }
 
 // ---------- step player ----------
 // Each choreograph() step becomes canvas transients plus an optional
 // DOM beat (auditor card). Returns the step's pacing duration in ms.
 
-function stepHost(step) {
-  return step.target && NODES[step.target] ? step.target : null;
+function stepHost(refs, step) {
+  return step.target && refs.nodes[step.target] ? step.target : null;
 }
 
 function runStep(refs, step, ev, speed) {
   const S = (ms) => Math.max(1, Math.round((ms || 0) / (speed || 1)));
   playSound(step.effect);
-  const host = stepHost(step);
+  const host = stepHost(refs, step);
   const n = host ? refs.nodes[host] : null;
   const p = n ? { x: n.x, y: n.y } : { x: 800, y: 450 };
   const r = n ? n.r : 88;
@@ -1554,7 +1617,7 @@ function runStep(refs, step, ev, speed) {
       ringAt(refs, p.x, p.y, col, 220, S(700), 7, 0);
       break;
     case "packet": {
-      const pts = redSide ? redPathTo(host) : bluePathTo(host);
+      const pts = redSide ? redPathTo(refs, host) : bluePathTo(refs, host);
       if (host) focusHost(refs, host, 1.4);
       packetAlong(refs, pts, {
         kind: "packet", col, ms: S(900),
@@ -1564,7 +1627,7 @@ function runStep(refs, step, ev, speed) {
           ringAt(refs, p.x, p.y, GOLD, 260, S(700), 7, 0);
           shake(refs, 6);
           if (ev.tool === "http_request") {
-            const tokens = httpLeakTokens(ev);
+            const tokens = httpLeakTokens(ev, refs.hosts);
             textAt(refs, String((ev.args || {}).path || "page"), p.x, p.y - r - 58,
               { c: GOLD, kind: "info", ttl: S(2000) });
             tokens.slice(0, 3).forEach((token, i) => {
@@ -1577,7 +1640,7 @@ function runStep(refs, step, ev, speed) {
       break;
     }
     case "packet-fail": {
-      const pts = redSide ? redPathTo(host) : bluePathTo(host);
+      const pts = redSide ? redPathTo(refs, host) : bluePathTo(refs, host);
       if (host) {
         const tip = stopShort(pts[pts.length - 2] || pts[0], pts[pts.length - 1], r * 1.2);
         pts[pts.length - 1] = tip;
@@ -1589,7 +1652,7 @@ function runStep(refs, step, ev, speed) {
       break;
     }
     case "key-try": {
-      const pts = redPathTo(host);
+      const pts = redPathTo(refs, host);
       const tip = host ? stopShort(pts[pts.length - 2] || pts[0], pts[pts.length - 1], r * 1.55) : pts[pts.length - 1];
       pts[pts.length - 1] = tip;
       packetAlong(refs, pts, {
@@ -1599,9 +1662,9 @@ function runStep(refs, step, ev, speed) {
       break;
     }
     case "key-bounce": {
-      const pts = redPathTo(host);
+      const pts = redPathTo(refs, host);
       const tip = host ? stopShort(pts[pts.length - 2] || pts[0], pts[pts.length - 1], r * 1.55) : pts[pts.length - 1];
-      const back = pts.length > 2 ? pts[pts.length - 2] : SRC.red;
+      const back = pts.length > 2 ? pts[pts.length - 2] : refs.src.red;
       packetAlong(refs, [tip, back], { kind: "key", col: "#5b6678", fade: true, ms: S(500) });
       burstAt(refs, tip.x, tip.y, BLUE_LIGHT, 34, 700, 0);
       ringAt(refs, tip.x, tip.y, BLUE, 200, S(500), 8, 0);
@@ -1615,7 +1678,7 @@ function runStep(refs, step, ev, speed) {
       if (host) focusHost(refs, host, 1.4);
       break;
     case "key-through": {
-      packetAlong(refs, redPathTo(host), {
+      packetAlong(refs, redPathTo(refs, host), {
         kind: "key", col: RED, ms: S(800),
         onArrive: () => {
           burstAt(refs, p.x, p.y, RED, 60, 820, 0);
@@ -1639,13 +1702,13 @@ function runStep(refs, step, ev, speed) {
       if (n) n.pop = 1;
       break;
     case "file-stream": {
-      const pts = redPathTo(host).reverse();
+      const pts = redPathTo(refs, host).reverse();
       if (host) focusHost(refs, host, 1.45);
       packetAlong(refs, pts, {
         kind: "icon", col: RED, fill: GOLD, ms: S(900),
         onArrive: () => {
-          ringAt(refs, SRC.red.x, SRC.red.y, GOLD, 260, S(700), 7, 0);
-          burstAt(refs, SRC.red.x, SRC.red.y, GOLD, 18, 420, 0);
+          ringAt(refs, refs.src.red.x, refs.src.red.y, GOLD, 260, S(700), 7, 0);
+          burstAt(refs, refs.src.red.x, refs.src.red.y, GOLD, 18, 420, 0);
         },
       });
       break;
@@ -1768,7 +1831,7 @@ function runStep(refs, step, ev, speed) {
       if (host) focusHost(refs, host, 1.4);
       break;
     case "idle-tick": {
-      const side = ev.actor === "blue" ? SRC.blue : SRC.red;
+      const side = ev.actor === "blue" ? refs.src.blue : refs.src.red;
       pushCapped(refs.transients, MAX_TRANSIENTS,
         { kind: "idle", x: side.x, y: side.y, col: ev.actor === "blue" ? BLUE : RED, t: 0, ttl: S(350), delay: 0 });
       break;
@@ -1789,7 +1852,7 @@ export function arenaNotify(refs, ev, states, speed) {
   if (!ev || !refs) return;
   const spd = Number(speed) || 1;
   refs.speed = spd;
-  let steps = choreograph(ev, { states });
+  let steps = choreograph(ev, { states, hosts: refs.hosts });
   if (spd >= 4) steps = steps.filter((step) => !step.secondary);
   if (steps.length === 0) return;
   refs.queue.push({ ev, steps, speed: spd });
@@ -1914,12 +1977,13 @@ function applyStatic(refs, states, blocks, slice, instant) {
   const flagged = {};
   for (const ev of slice) {
     if (ev && ev.actor === "blue" && ev.tool === "report_finding" && (ev.result || {}).ok === true) {
-      const h = effectHost(ev);
+      const h = effectHost(ev, refs.hosts);
       if (h) flagged[h] = true;
     }
   }
-  for (const key of HOSTS) {
+  for (const key of refs.hosts) {
     const n = refs.nodes[key];
+    if (!n) continue;
     const st = states[key];
     const block = blocks[key];
     n.flag = Boolean(flagged[key]);
@@ -1954,7 +2018,7 @@ function applyStatic(refs, states, blocks, slice, instant) {
       n.floodTarget = 0;
       n.shTarget = 0;
     }
-    if (secret && key === "db") {
+    if (secret && key === refs.jewel) {
       n.openTarget = 1;
       n.goldTarget = 1;
     } else {
@@ -1982,11 +2046,16 @@ export function renderArenaStatic(refs, events, cursor, opts, instant) {
   const at = Math.max(0, Math.min(list.length, cursor || 0));
   const slice = list.slice(0, at);
   const o = opts || {};
+  // Rebuild geometry only when the exercise layout changed; scrubbing
+  // within one exercise keeps the same nodes.
+  if (refs) ensureLayout(refs, o.layout || null);
+  const layout = (refs && refs.layout) || o.layout || classicLayout();
+  const hosts = layoutHosts(layout);
   const weights = { ...DEFAULT_WEIGHTS, ...(o.weights || {}) };
-  const states = reduceHostStates(slice);
-  const blocks = hostBlocks(slice);
-  const prog = redProgress(slice);
-  const pressure = pressureValue(slice);
+  const states = reduceHostStates(slice, hosts);
+  const blocks = hostBlocks(slice, hosts);
+  const prog = redNotches(list, slice);
+  const pressure = pressureValue(slice, layout);
   const scoreInfo = scoreEvents(slice, weights);
   const ended = Boolean(o.finalScore) && at >= list.length && list.length > 0;
   const score = ended && typeof o.finalScore.blue_score === "number"
@@ -1998,7 +2067,8 @@ export function renderArenaStatic(refs, events, cursor, opts, instant) {
 
   let tag = "EXERCISE";
   let tone = "system";
-  let caption = "Four hosts. One secret.";
+  const hostWord = hosts.length === 1 ? "host" : "hosts";
+  let caption = `${hosts.length} ${hostWord}. One secret.`;
   let sub = list.length === 0 ? "No exercise loaded." : "Waiting for the first move.";
   if (ended) {
     // Honest end line: the display outcome plus its plain sentence.
@@ -2021,7 +2091,7 @@ export function renderArenaStatic(refs, events, cursor, opts, instant) {
       refs.hud.tug.classList.add("hit");
     }
     refs.snap = {
-      states, blocks, pressure,
+      states, blocks, hostOrder: hosts, pressure,
       level: prog.level, notches: prog.notches,
       score, outcome: ended ? o.finalScore.outcome : null,
       moves: at, total: list.length, label: o.label || "Exercise",

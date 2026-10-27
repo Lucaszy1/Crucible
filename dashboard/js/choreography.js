@@ -10,11 +10,13 @@ const BLOCKED_ERROR = /outside|allowlist|sandbox|blocked|off-range|off range|unr
 
 // A failed attempt that never reached the host: off-range host or a
 // network-level refusal. Sign-in refusals and missing files are not
-// blocked; they get their own Denied or fail beat.
-export function isBlockedAttempt(ev, states) {
+// blocked; they get their own Denied or fail beat. Hosts default to
+// the classic four; generated exercises pass their own.
+export function isBlockedAttempt(ev, states, hosts) {
   if (!ev || (ev.result || {}).ok !== false) return false;
+  const names = Array.isArray(hosts) && hosts.length > 0 ? hosts : HOSTS;
   const host = eventHost(ev);
-  if (host && !HOSTS.includes(host)) return true;
+  if (host && !names.includes(host)) return true;
   const err = String((ev.result || {}).error || "");
   if (BLOCKED_ERROR.test(err)) return true;
   if (host && states && states[host] === "isolated" && ev.actor === "red") return true;
@@ -29,11 +31,12 @@ export function isSecretRead(ev) {
   );
 }
 
-function evidenceHost(ev) {
+function evidenceHost(ev, hosts) {
+  const names = Array.isArray(hosts) && hosts.length > 0 ? hosts : HOSTS;
   const refs = ev.evidence_refs || [];
   for (const ref of refs) {
     const host = String(ref).split(":")[0];
-    if (HOSTS.includes(host)) return host;
+    if (names.includes(host)) return host;
   }
   return null;
 }
@@ -41,28 +44,31 @@ function evidenceHost(ev) {
 // Target host for effects that need one. report_finding carries no
 // host arg, so fall back to its first cited host. Off-range hosts
 // are not valid targets and resolve to null.
-export function effectHost(ev) {
+export function effectHost(ev, hosts) {
+  const names = Array.isArray(hosts) && hosts.length > 0 ? hosts : HOSTS;
   const direct = eventHost(ev);
-  if (direct && HOSTS.includes(direct)) return direct;
-  return evidenceHost(ev) || null;
+  if (direct && names.includes(direct)) return direct;
+  return evidenceHost(ev, names) || null;
 }
 
-function blockedSteps(ev) {
-  return [{ effect: "bounce-blocked", target: effectHost(ev) || "stage", mark: "Blocked" }];
+function blockedSteps(ev, hosts) {
+  return [{ effect: "bounce-blocked", target: effectHost(ev, hosts) || "stage", mark: "Blocked" }];
 }
 
 // One event plus current host states to an ordered step list. Each
 // step is { effect, target?, secondary? } plus effect-specific fields.
 // secondary steps are decorative and skipped at 4x playback.
+// ctx.hosts names the range hosts; without it the classic four apply.
 export function choreograph(ev, ctx) {
   const states = (ctx && ctx.states) || null;
+  const hosts = (ctx && ctx.hosts) || null;
   if (!ev || typeof ev !== "object") return [{ effect: "idle-tick", secondary: true }];
-  if (isBlockedAttempt(ev, states)) return blockedSteps(ev);
+  if (isBlockedAttempt(ev, states, hosts)) return blockedSteps(ev, hosts);
 
   const tool = ev.tool || "";
   const result = ev.result || {};
   const ok = result.ok === true;
-  const target = effectHost(ev);
+  const target = effectHost(ev, hosts);
 
   switch (tool) {
     case "scan_host":
@@ -202,9 +208,12 @@ export function pressureFromEvents(eventList) {
 }
 
 // Per-host integrity, purely from events: red ground drops it,
-// restore_host refills it. 0-100 per host.
-export function integrityFromEvents(eventList) {
-  const integrity = { web: 100, app: 100, db: 100, workstation: 100 };
+// restore_host refills it. 0-100 per host. Hosts default to the
+// classic four; generated exercises pass their own.
+export function integrityFromEvents(eventList, hosts) {
+  const names = Array.isArray(hosts) && hosts.length > 0 ? hosts : HOSTS;
+  const integrity = {};
+  for (const host of names) integrity[host] = 100;
   for (const ev of eventList || []) {
     if (!ev) continue;
     const host = eventHost(ev);
@@ -236,11 +245,13 @@ export function latestByActor(eventList, actor) {
 
 // Hostnames or account names a page leaked to red, for floating
 // text. The admin page names its quoted hints; any other page only
-// leaks a host it names as a whole word. Never passwords.
-export function httpLeakTokens(ev) {
+// leaks a host it names as a whole word. Never passwords. Hosts
+// default to the classic four; generated exercises pass their own.
+export function httpLeakTokens(ev, hosts) {
   if (!ev || ev.tool !== "http_request" || (ev.result || {}).ok !== true) return [];
   const body = String((ev.result || {}).body || "");
   if (!body) return [];
+  const names = Array.isArray(hosts) && hosts.length > 0 ? hosts : HOSTS;
   const path = String((ev.args || {}).path || "");
   const tokens = [];
   if (path.startsWith("/admin")) {
@@ -251,9 +262,10 @@ export function httpLeakTokens(ev) {
     }
     return tokens;
   }
-  for (const host of HOSTS) {
+  for (const host of names) {
     if (tokens.length >= 2) break;
-    if (new RegExp(`\\b${host}\\b`).test(body) && !tokens.includes(host)) tokens.push(host);
+    const safe = String(host).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`\\b${safe}\\b`).test(body) && !tokens.includes(host)) tokens.push(host);
   }
   return tokens;
 }

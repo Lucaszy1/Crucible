@@ -10,9 +10,12 @@ export const DEFAULT_WEIGHTS = { web: 3, app: 3, db: 5, workstation: 1 };
 export const RECON_TOOLS = ["scan_host", "http_request", "list_files"];
 
 // Single shared host-state reducer. Every panel derives node state from
-// the event stream through this function and nothing else.
-export function reduceHostStates(eventList) {
-  const states = { web: "clean", app: "clean", db: "clean", workstation: "clean" };
+// the event stream through this function and nothing else. Hosts
+// default to the classic four; generated exercises pass their own.
+export function reduceHostStates(eventList, hosts) {
+  const names = Array.isArray(hosts) && hosts.length > 0 ? hosts : HOSTS;
+  const states = {};
+  for (const host of names) states[host] = "clean";
   for (const ev of eventList || []) {
     const host = eventHost(ev);
     if (!host || !(host in states)) continue;
@@ -206,11 +209,12 @@ export function formatArgs(args) {
 // kept local so this module stays dependency-free.
 const BLOCKED_ERROR = /outside|allowlist|sandbox|blocked|off-range|off range|unreachable|cut off|detached|no route/i;
 
-function isBlockedResult(ev) {
+function isBlockedResult(ev, knownHosts) {
   const r = (ev && ev.result) || {};
   if (r.ok !== false) return false;
   const host = eventHost(ev);
-  if (host && !HOSTS.includes(host)) return true;
+  const names = Array.isArray(knownHosts) && knownHosts.length > 0 ? knownHosts : HOSTS;
+  if (host && !names.includes(host)) return true;
   return BLOCKED_ERROR.test(String(r.error || ""));
 }
 
@@ -244,9 +248,15 @@ function isSecretReadEvent(ev) {
 // Contest pressure as a two-sided value in [-1, 1]: +1 means red
 // owns the exercise, -1 means blue holds it fully. Red milestones
 // push toward red weighted by progress; effective blue answers push
-// back; the value eases toward zero with every passing event.
-export function pressureValue(eventList) {
+// back; the value eases toward zero with every passing event. The
+// optional layout names the known hosts and the jewel host; without
+// it the classic four and db apply.
+export function pressureValue(eventList, layout) {
   const DECAY = 0.97;
+  const knownHosts = layout && Array.isArray(layout.hosts) && layout.hosts.length > 0
+    ? layout.hosts.map((host) => host.id)
+    : HOSTS;
+  const jewel = (layout && layout.jewel_host) || "db";
   let value = 0;
   const redTouched = new Set();
   for (const ev of eventList || []) {
@@ -259,12 +269,12 @@ export function pressureValue(eventList) {
       if (isSecretReadEvent(ev)) {
         value = 1;
       } else if (ev.tool === "try_credential" && r.authenticated === true) {
-        value += eventHost(ev) === "db" ? 0.35 : 0.3;
+        value += eventHost(ev) === jewel ? 0.35 : 0.3;
       } else if (isAdminRead(ev)) {
         value += 0.3;
       } else if (isConfigRead(ev)) {
         value += 0.25;
-      } else if (isBlockedResult(ev)) {
+      } else if (isBlockedResult(ev, knownHosts)) {
         value -= 0.1;
       }
     } else if (ev.actor === "blue" && r.ok === true) {
@@ -321,6 +331,110 @@ export function redProgress(eventList) {
   let level = 0;
   while (level < notches.length && notches[level]) level += 1;
   return { level, notches };
+}
+
+// A credential-bearing file read: a config or export style path
+// outside the secret tree, read successfully by red.
+function credsPath(ev) {
+  if (!ev || ev.actor !== "red" || ev.tool !== "read_file") return null;
+  if ((ev.result || {}).ok !== true) return null;
+  if (isSecretReadEvent(ev)) return null;
+  const path = String((ev.result || {}).path || (ev.args || {}).path || "");
+  if (!/\.ini$|\.env$|config|export/i.test(path)) return null;
+  return path;
+}
+
+function milestoneLabel(milestone, index) {
+  if (milestone.kind === "leak") return "Admin page leak";
+  if (milestone.kind === "signin") return `Sign-in ${milestone.host}`;
+  if (milestone.kind === "creds") return "Credential file read";
+  if (milestone.kind === "secret") return "Secret read";
+  return `Step ${index + 1}`;
+}
+
+// Red progress notches derived from the episode: the first admin
+// page leak, each sign-in on a new host, each credential file read,
+// and the secret read, in first-achieved order. The full event list
+// sizes the bar (three to five notches); the slice decides which
+// are lit. Each notch names the host red relied on, and a later
+// blue isolate or patch on that host drops it until red earns it
+// again, exactly like redProgress. Level is the longest held prefix.
+export function redNotches(fullEvents, sliceEvents) {
+  const milestones = [];
+  const seen = new Set();
+  for (const ev of fullEvents || []) {
+    if (!ev || ev.actor !== "red") continue;
+    let key = null;
+    let milestone = null;
+    if (isSecretReadEvent(ev)) {
+      key = "secret";
+      milestone = { kind: "secret", host: eventHost(ev) };
+    } else if (isAdminRead(ev)) {
+      key = "leak";
+      milestone = { kind: "leak", host: eventHost(ev) };
+    } else if (authHost(ev)) {
+      key = `signin:${authHost(ev)}`;
+      milestone = { kind: "signin", host: authHost(ev) };
+    } else {
+      const path = credsPath(ev);
+      if (path) {
+        key = `creds:${path}`;
+        milestone = { kind: "creds", host: eventHost(ev) };
+      }
+    }
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      milestones.push(milestone);
+    }
+  }
+  // Cap at five notches: the secret read always keeps the last slot.
+  let shaped = milestones;
+  if (shaped.length > 5) {
+    const secret = shaped.find((item) => item.kind === "secret");
+    shaped = shaped.slice(0, 4);
+    if (secret && !shaped.includes(secret)) shaped.push(secret);
+    shaped = shaped.slice(0, 5);
+  }
+  // Pad quiet episodes to three plain steps so the bar has a size.
+  while (shaped.length < 3) shaped.push({ kind: "step", host: null });
+  const slice = sliceEvents || [];
+  const achievedAt = shaped.map(() => null);
+  const containedAt = {};
+  slice.forEach((ev, i) => {
+    if (!ev) return;
+    shaped.forEach((milestone, n) => {
+      if (milestone.kind === "leak" && isAdminRead(ev)) achievedAt[n] = i;
+      else if (milestone.kind === "signin" && authHost(ev) === milestone.host) achievedAt[n] = i;
+      else if (milestone.kind === "creds" && credsPath(ev) && eventHost(ev) === milestone.host) achievedAt[n] = i;
+      else if (milestone.kind === "secret" && isSecretReadEvent(ev)) achievedAt[n] = i;
+    });
+    const r = ev.result || {};
+    if (ev.actor === "blue" && r.ok === true &&
+      (ev.tool === "isolate_host" || ev.tool === "patch_service")) {
+      const host = eventHost(ev);
+      if (host) containedAt[host] = i;
+    }
+  });
+  // Credential milestones re-achieve on any later creds read, so a
+  // second config read past containment relights the notch.
+  const notches = shaped.map((milestone, n) => {
+    if (achievedAt[n] === null) return false;
+    if (!milestone.host) return true;
+    return (containedAt[milestone.host] ?? -1) < achievedAt[n];
+  });
+  let level = 0;
+  while (level < notches.length && notches[level]) level += 1;
+  return {
+    total: shaped.length,
+    level,
+    notches,
+    milestones: shaped.map((milestone, n) => ({
+      kind: milestone.kind,
+      host: milestone.host,
+      label: milestoneLabel(milestone, n),
+      achieved: notches[n],
+    })),
+  };
 }
 
 // Honest display outcomes, derived from events only. The server
@@ -541,9 +655,10 @@ export function motionReduced() {
 // Blue network held blocks, one per host: clean (blue holds it),
 // breached (red is in), isolated (cut off, drawn striped), patched
 // (sign-in rotated, drawn solid). Probed or restored hosts count as
-// clean: blue still holds them.
-export function hostBlocks(eventList) {
-  const states = reduceHostStates(eventList);
+// clean: blue still holds them. Hosts default to the classic four.
+export function hostBlocks(eventList, hosts) {
+  const names = Array.isArray(hosts) && hosts.length > 0 ? hosts : HOSTS;
+  const states = reduceHostStates(eventList, names);
   const lastContain = {};
   for (const ev of eventList || []) {
     if (!ev || ev.actor !== "blue" || (ev.result || {}).ok !== true) continue;
@@ -552,7 +667,7 @@ export function hostBlocks(eventList) {
     if (host) lastContain[host] = ev.tool;
   }
   const blocks = {};
-  for (const host of HOSTS) {
+  for (const host of names) {
     const state = states[host];
     if (state === "signed-in" || state === "compromised") blocks[host] = "breached";
     else if (state === "isolated") blocks[host] = lastContain[host] === "patch_service" ? "patched" : "isolated";
