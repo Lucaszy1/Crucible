@@ -28,7 +28,7 @@ import {
 } from "./arena.js";
 import {
   cancelStage, firstAccessStage, flashStageHost, glitchStage, initStage,
-  loadStageArt, renderStageStatic, setStageActive, setStageLayout, stageNotify,
+  loadStageArt, renderStageStatic, setStageActive, setStageArt, setStageLayout, stageNotify,
 } from "./stage.js";
 import {
   classicLayout, layoutFromEvents, layoutHosts, layoutWeights, scenarioMeta, scenarioText,
@@ -1124,7 +1124,7 @@ async function boot() {
   if (els.classicBox) els.classicBox.checked = store.classic;
   loadStageArt("/assets/art/").then((art) => {
     if (stageRefs) {
-      stageRefs.art = art;
+      setStageArt(stageRefs, art);
       render(false);
     }
   });

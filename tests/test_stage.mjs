@@ -4,7 +4,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  applyCamera, blueLine, dollyTarget, frameBudget, guardianPulse, intrusionLevel,
+  applyCamera, blueLine, dollyTarget, frameBudget, frameP95, guardianPulse, intrusionLevel,
   laneFeed, redLine, stageLayout, stageWash, stepCamera,
 } from "../dashboard/js/stage.js";
 import { arenaGeometry, classicLayout, normalizeLayout } from "../dashboard/js/layout.js";
@@ -266,6 +266,16 @@ describe("entity levels", () => {
       low = next.low;
     }
     assert.equal(low, true);
+  });
+
+  it("reports frame time p95 for the debug overlay", () => {
+    assert.equal(frameP95([]), 0);
+    assert.equal(frameP95([16]), 16);
+    const samples = [];
+    for (let i = 0; i < 95; i += 1) samples.push(16);
+    for (let i = 0; i < 5; i += 1) samples.push(50);
+    assert.equal(frameP95(samples), 50);
+    assert.equal(frameP95([16, null, 0, -3, "x"]), 16);
   });
 
   it("recovers to full detail only when frames are fast again", () => {

@@ -409,6 +409,19 @@ export function initStage(canvas, opts) {
     lastT: 0,
     frameAvg: 16,
     lowDetail: false,
+    frame: null,
+    frameCtx: null,
+    cache: {},
+    sprites: null,
+    samples: [],
+    fps: 0,
+    fpsCount: 0,
+    fpsT: 0,
+    blankFrames: 0,
+    lastError: "",
+    debugEl: null,
+    debugInit: false,
+    debugTick: 0,
     raf: 0,
     active: true,
     staticOnly: false,
@@ -468,12 +481,64 @@ export function fitStage(refs) {
   canvas.height = Math.round(ch * dpr);
   refs.particles = makeParticles(Math.round(Math.min(110, Math.max(40, (cw * ch) / 16000))), cw, ch);
   relayoutStage(refs);
+  ensureFrame(refs);
+  buildStaticLayers(refs);
+  // Repaint at once: resizing clears the visible canvas, so never
+  // leave it blank waiting for the next tick.
+  drawStage(refs);
+}
+
+// Offscreen layer canvas, or null where the DOM is unavailable.
+function makeLayer(w, h) {
+  try {
+    if (typeof document === "undefined") return null;
+    const layer = document.createElement("canvas");
+    layer.width = Math.max(1, Math.round(w));
+    layer.height = Math.max(1, Math.round(h));
+    return layer;
+  } catch {
+    return null;
+  }
+}
+
+// Double-buffer surface in device pixels. A missing surface falls
+// back to painting the visible canvas directly.
+function ensureFrame(refs) {
+  const { cw, ch, dpr } = refs.geom;
+  const w = Math.max(1, Math.round(cw * dpr));
+  const h = Math.max(1, Math.round(ch * dpr));
+  if (refs.frame && refs.frameCtx && refs.frame.width === w && refs.frame.height === h) return;
+  refs.frame = makeLayer(w, h);
+  refs.frameCtx = null;
+  try {
+    refs.frameCtx = refs.frame ? refs.frame.getContext("2d") : null;
+  } catch {
+    refs.frameCtx = null;
+  }
+  if (!refs.frame || !refs.frameCtx) {
+    refs.frame = null;
+    refs.frameCtx = null;
+  }
 }
 
 export function setStageLayout(refs, layout) {
   if (!refs) return;
   refs.layout = layout;
   relayoutStage(refs);
+}
+
+// Swap art in (async load in the app, injected in tests), rebuild
+// the static layers, and repaint at once so the new art shows.
+export function setStageArt(refs, art) {
+  if (!refs) return;
+  refs.art = art || {};
+  buildStaticLayers(refs);
+  drawStage(refs);
+}
+
+// Static layer cache lands here; until then every frame paints direct.
+function buildStaticLayers(refs) {
+  void refs;
 }
 
 function relayoutStage(refs) {
@@ -760,6 +825,57 @@ export function setStageActive(refs, on) {
   if (refs.active && !refs.reduced) startStageLoop(refs);
 }
 
+// p95 of recent frame times in ms, for the debug overlay.
+export function frameP95(samples) {
+  const vals = (samples || []).filter((v) => typeof v === "number" && v > 0);
+  if (vals.length === 0) return 0;
+  const sorted = [...vals].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))];
+}
+
+function debugEnabled() {
+  try {
+    return typeof window !== "undefined" && typeof window.location !== "undefined" &&
+      /[?&]debug=1\b/.test(window.location.search || "");
+  } catch {
+    return false;
+  }
+}
+
+function ensureStageDebug(refs) {
+  if (refs.debugInit) return refs.debugEl;
+  refs.debugInit = true;
+  if (!debugEnabled()) return null;
+  try {
+    if (typeof document === "undefined") return null;
+    const host = el("arenaWrap") ||
+      (refs.canvas && refs.canvas.parentNode) ||
+      (typeof document.body !== "undefined" ? document.body : null);
+    if (!host || typeof host.appendChild !== "function") return null;
+    const box = document.createElement("div");
+    box.setAttribute("data-stage-debug", "1");
+    box.style.cssText = "position:absolute;left:8px;top:8px;z-index:30;font:10px/1.5 ui-monospace,Menlo,monospace;color:#9fe0b8;background:rgba(4,8,6,0.78);padding:4px 8px;border-radius:6px;pointer-events:none;white-space:pre;";
+    box.textContent = "stage …";
+    host.appendChild(box);
+    refs.debugEl = box;
+    return box;
+  } catch {
+    return null;
+  }
+}
+
+function updateStageDebug(refs, force) {
+  const box = ensureStageDebug(refs);
+  if (!box) return;
+  refs.debugTick = (refs.debugTick || 0) + 1;
+  if (!force && refs.debugTick % 20 !== 0) return;
+  const p95 = frameP95(refs.samples || []);
+  const avg = refs.frameAvg || 0;
+  box.textContent = `stage ${refs.fps || 0}fps ${avg.toFixed(1)}ms p95 ${p95.toFixed(1)} ` +
+    `${refs.lowDetail ? "LOW" : "FULL"} blanks ${refs.blankFrames || 0}` +
+    (refs.lastError ? `\n! ${refs.lastError}` : "");
+}
+
 // Rolling frame-time budget with hysteresis: slow machines drop to a
 // lower-detail pass (fewer particles, no grain) and recover cleanly.
 export function frameBudget(avg, low, dtMs) {
@@ -787,6 +903,15 @@ function startStageLoop(refs) {
     const budget = frameBudget(refs.frameAvg || 16, refs.lowDetail, dt);
     refs.frameAvg = budget.avg;
     refs.lowDetail = budget.low;
+    refs.samples.push(dt);
+    if (refs.samples.length > 120) refs.samples.shift();
+    refs.fpsCount += 1;
+    if (!refs.fpsT) refs.fpsT = t;
+    if (t - refs.fpsT >= 500) {
+      refs.fps = Math.round((refs.fpsCount * 1000) / (t - refs.fpsT));
+      refs.fpsCount = 0;
+      refs.fpsT = t;
+    }
     if (t < refs.hitstopUntil) {
       drawStage(refs);
       return;
@@ -850,9 +975,42 @@ function hostScreen(refs, id) {
 function drawStage(refs) {
   const ctx = refs.ctx;
   if (!ctx || !refs.stage) return;
+  ensureFrame(refs);
+  const target = refs.frameCtx || ctx;
+  const direct = target === ctx;
+  try {
+    paintFrame(refs, target);
+  } catch (err) {
+    // Blank-frame guard: a failed paint never reaches the screen,
+    // so the last good frame stays up instead of a cleared canvas.
+    notePaintError(refs, err);
+    return;
+  }
+  if (!direct) {
+    try {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(refs.frame, 0, 0);
+      ctx.restore();
+    } catch (err) {
+      notePaintError(refs, err);
+      return;
+    }
+  }
+  updateStageDebug(refs, false);
+}
+
+function notePaintError(refs, err) {
+  refs.blankFrames = (refs.blankFrames || 0) + 1;
+  const msg = err && err.message ? err.message : String(err);
+  refs.lastError = String(msg).slice(0, 160);
+  updateStageDebug(refs, true);
+}
+
+function paintFrame(refs, ctx) {
   const { cw, ch, dpr } = refs.geom;
   ctx.save();
-  ctx.scale(dpr, dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cw, ch);
   ctx.fillStyle = INK;
   ctx.fillRect(0, 0, cw, ch);
