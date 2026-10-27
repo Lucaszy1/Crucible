@@ -41,10 +41,10 @@ SYSTEM_PROMPT = (
     "is nothing new to check. Rules: call exactly one tool per turn, only "
     "target hosts web, app, db, and workstation, and put a one or two "
     "sentence reasoning summary in your reply text. When you report a "
-    "finding or take a containment action (block_ip, isolate_host, "
+    "finding or take a containment action (isolate_host, "
     "patch_service, restore_host), cite log line ids such as web:3 in an "
     "evidence_refs argument and in your reasoning text. Your only tools "
-    "are read_logs, list_processes, wait, block_ip, isolate_host, "
+    "are read_logs, list_processes, wait, isolate_host, "
     "patch_service, restore_host, and report_finding."
 )
 
@@ -52,14 +52,13 @@ ALLOWED_TOOLS = (
     "read_logs",
     "list_processes",
     "wait",
-    "block_ip",
     "isolate_host",
     "patch_service",
     "restore_host",
     "report_finding",
 )
 
-EVIDENCE_TOOLS = ("report_finding", "block_ip", "isolate_host", "patch_service", "restore_host")
+EVIDENCE_TOOLS = ("report_finding", "isolate_host", "patch_service", "restore_host")
 
 
 def _tool(name: str, description: str, properties: dict, required: list) -> dict:
@@ -98,15 +97,6 @@ TOOL_SCHEMAS = [
         "Do nothing for one turn when there is nothing new to check.",
         {"reason": {"type": "string"}},
         [],
-    ),
-    _tool(
-        "block_ip",
-        "Record a block for one IPv4 address.",
-        {
-            "ip": {"type": "string"},
-            "evidence_refs": {"type": "array", "items": {"type": "string"}},
-        },
-        ["ip"],
     ),
     _tool(
         "isolate_host",

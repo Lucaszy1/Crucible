@@ -23,7 +23,7 @@ from crucible.agents.auditor import (
 from crucible.agents.scripted_blue import ScriptedBlue
 from crucible.agents.scripted_red import ScriptedRed
 
-CONTAINMENT_TOOLS = ("isolate_host", "patch_service", "restore_host", "block_ip")
+CONTAINMENT_TOOLS = ("isolate_host", "patch_service", "restore_host")
 MAX_TURNS = 40
 
 DEFAULT_BUSINESS_WEIGHTS = {"web": 3, "app": 3, "db": 5, "workstation": 1}
@@ -39,7 +39,6 @@ _DISPATCH = {
     "read_logs": tools.read_logs,
     "list_processes": tools.list_processes,
     "wait": tools.wait,
-    "block_ip": tools.block_ip,
     "isolate_host": tools.isolate_host,
     "patch_service": tools.patch_service,
     "restore_host": tools.restore_host,

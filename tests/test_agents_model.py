@@ -70,16 +70,17 @@ def test_prompts_name_only_team_tools():
         assert name in RED_PROMPT
     assert "read_logs" not in RED_PROMPT
     assert "isolate_host" not in RED_PROMPT
-    for name in ("read_logs", "list_processes", "wait", "block_ip", "isolate_host",
+    for name in ("read_logs", "list_processes", "wait", "isolate_host",
                  "patch_service", "restore_host"):
         assert name in BLUE_PROMPT
     assert "scan_host" not in BLUE_PROMPT
     assert "try_credential" not in BLUE_PROMPT
+    assert "block_ip" not in BLUE_PROMPT
     red_names = {entry["function"]["name"] for entry in RED_SCHEMAS}
     blue_names = {entry["function"]["name"] for entry in BLUE_SCHEMAS}
     assert red_names == {"scan_host", "http_request", "try_credential",
                          "read_file", "list_files", "report_finding"}
-    assert blue_names == {"read_logs", "list_processes", "wait", "block_ip",
+    assert blue_names == {"read_logs", "list_processes", "wait",
                           "isolate_host", "patch_service", "restore_host",
                           "report_finding"}
 

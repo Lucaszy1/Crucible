@@ -71,7 +71,7 @@ Stack: Python 3, FastAPI, Docker SDK, plain JS dashboard with SSE (add a small g
 
 Red team tools: scan_host(host), http_request(host, path, method, body), try_credential(host, user, pass), read_file(host, path), list_files(host, path), report_finding(text).
 
-Blue team tools: read_logs(host, n), list_processes(host), block_ip(ip), isolate_host(host), patch_service(host, service), restore_host(host), report_finding(text).
+Blue team tools: read_logs(host, n), list_processes(host), isolate_host(host), patch_service(host, service), restore_host(host), report_finding(text).
 
 Every tool call emits an event: id, timestamp, actor, tool, args, result, reasoning_summary, evidence_refs (log line ids). Tools reject anything outside the allowlist.
 

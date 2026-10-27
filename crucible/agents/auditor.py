@@ -320,8 +320,6 @@ def _compact_result(tool: str, result: dict) -> str:
         return f"ok recorded as {result.get('id', '?')}"
     if tool == "wait":
         return f"ok waited ({str(result.get('reason', 'stood by'))[:60]})"
-    if tool == "block_ip":
-        return f"ok blocked {result.get('ip', '?')}"
     if tool == "isolate_host":
         return f"ok {result.get('host', '?')} detached"
     if tool == "patch_service":

@@ -8,7 +8,6 @@ wires these into the orchestrator turn loop with event logging.
 
 from __future__ import annotations
 
-import ipaddress
 import json
 import posixpath
 
@@ -27,7 +26,6 @@ __all__ = [
     "read_logs",
     "list_processes",
     "wait",
-    "block_ip",
     "isolate_host",
     "patch_service",
     "restore_host",
@@ -46,13 +44,12 @@ MAX_PATH_LEN = 512
 LOG_SOURCE = "controller"
 
 # Interim exercise state. The orchestrator takes ownership of this on day two.
-_state = {"authed": set(), "blocked": [], "findings": []}
+_state = {"authed": set(), "findings": []}
 
 
 def reset_state() -> None:
-    """Clear interim exercise state (signed-in hosts, blocks, findings)."""
+    """Clear interim exercise state (signed-in hosts, findings)."""
     _state["authed"].clear()
-    _state["blocked"].clear()
     _state["findings"].clear()
     sandbox.clear_log_offsets()
 
@@ -359,21 +356,6 @@ def wait(reason: str | None = None, **_ignored) -> dict:
     if reason:
         out["reason"] = str(reason)[:200]
     return out
-
-
-def block_ip(ip: str) -> dict:
-    """Record a block for one IPv4 address in the exercise firewall state."""
-    if not isinstance(ip, str):
-        raise ValueError(f"not an IPv4 address: {ip!r}")
-    try:
-        parsed = ipaddress.ip_address(ip)
-    except ValueError:
-        raise ValueError(f"not an IPv4 address: {ip!r}") from None
-    if parsed.version != 4:
-        raise ValueError(f"not an IPv4 address: {ip!r}")
-    if ip not in _state["blocked"]:
-        _state["blocked"].append(ip)
-    return {"ok": True, "ip": ip, "blocked": list(_state["blocked"])}
 
 
 def isolate_host(host: str) -> dict:

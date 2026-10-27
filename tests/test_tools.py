@@ -329,14 +329,22 @@ def test_backend_failures_return_errors(monkeypatch):
     assert tools.restore_host("web")["ok"] is False
 
 
-def test_block_ip_validates_and_dedupes():
-    out = tools.block_ip("10.0.0.9")
-    assert out == {"ok": True, "ip": "10.0.0.9", "blocked": ["10.0.0.9"]}
-    tools.block_ip("10.0.0.9")
-    assert tools.block_ip("10.0.0.10")["blocked"] == ["10.0.0.9", "10.0.0.10"]
-    for bad in ("999.1.1.1", "not-an-ip", "::1", "", None):
-        with pytest.raises(ValueError):
-            tools.block_ip(bad)
+def test_block_ip_tool_is_removed():
+    assert not hasattr(tools, "block_ip")
+    assert "block_ip" not in tools.__all__
+    assert "blocked" not in tools._state
+    from crucible import orchestrator
+
+    assert "block_ip" not in orchestrator.CONTAINMENT_TOOLS
+    assert "block_ip" not in orchestrator._DISPATCH
+    assert orchestrator.run_tool("block_ip", {"ip": "10.0.0.9"})["ok"] is False
+    from crucible.agents import blue as blue_agent
+
+    assert "block_ip" not in blue_agent.ALLOWED_TOOLS
+    assert "block_ip" not in blue_agent.EVIDENCE_TOOLS
+    assert "block_ip" not in blue_agent.SYSTEM_PROMPT
+    names = {entry["function"]["name"] for entry in blue_agent.TOOL_SCHEMAS}
+    assert "block_ip" not in names
 
 
 def test_patch_rejects_unknown_service():
