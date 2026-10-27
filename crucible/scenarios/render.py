@@ -40,10 +40,17 @@ def render(spec: dict) -> str:
         "# do not edit by hand.",
         "services:",
     ]
-    for name in hosts:
+    # One image plays every host, so only the first service builds it:
+    # a build stanza on every service makes compose build the same tag
+    # concurrently, and the parallel retags race (AlreadyExists / no
+    # such image). The rest reuse the local image by name.
+    for index, name in enumerate(hosts):
         lines.extend([
             f"  {name}:",
-            "    build: ./toyhost",
+        ])
+        if index == 0:
+            lines.append("    build: ./toyhost")
+        lines.extend([
             f"    image: {IMAGE}",
             f"    container_name: crucible-{name}",
             f"    hostname: {name}",

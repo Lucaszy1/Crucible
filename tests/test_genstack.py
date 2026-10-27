@@ -54,6 +54,13 @@ def test_render_services_network_limits_names(spec):
     assert "networks:\n  range:" in text
 
 
+def test_render_builds_shared_image_once(spec):
+    text = render.render(spec)
+    assert text.count("build: ./toyhost") == 1
+    names = [item["name"] for item in spec["hosts"]]
+    assert text.count(f"image: {render.IMAGE}") == len(names)
+
+
 def test_render_caps_containers_and_validates_names(spec):
     big = dict(spec)
     big["hosts"] = [{"name": f"h{n}"} for n in range(11)]
