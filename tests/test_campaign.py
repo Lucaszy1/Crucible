@@ -205,3 +205,38 @@ def test_bad_name_and_count_rejected(tmp_path, monkeypatch, capsys):
     assert campaign.main(["--name", "ok", "--episodes", "0", "--memory",
                           "on"]) == 1
     assert "at least 1" in capsys.readouterr().err
+
+
+def test_existing_dir_refuses_without_resume_or_force(tmp_path, monkeypatch,
+                                                      capsys):
+    _stub_common(monkeypatch, tmp_path)
+    _stub_exercise(monkeypatch, {}, [_score()])
+    _stub_referee(monkeypatch, {})
+    assert campaign.main(["--name", "dup", "--episodes", "1", "--memory",
+                          "off"]) == 0
+    capsys.readouterr()
+    assert campaign.main(["--name", "dup", "--episodes", "1", "--memory",
+                          "off"]) == 1
+    err = capsys.readouterr().err
+    assert "already exists" in err
+    assert "--resume" in err and "--force" in err
+
+
+def test_force_archives_old_dir_and_starts_over(tmp_path, monkeypatch, capsys):
+    seen = _stub_common(monkeypatch, tmp_path)
+    _stub_exercise(monkeypatch, seen, [_score()])
+    _stub_referee(monkeypatch, seen)
+    assert campaign.main(["--name", "redo", "--episodes", "1", "--memory",
+                          "off"]) == 0
+    old_csv = tmp_path / "runs" / "campaign-redo" / "summary.csv"
+    assert old_csv.exists()
+    assert campaign.main(["--name", "redo", "--episodes", "1", "--memory",
+                          "off", "--force"]) == 0
+    out = capsys.readouterr().out
+    assert "Archived previous campaign" in out
+    archived = list((tmp_path / "runs" / "archive").glob("campaign-redo-*"))
+    assert len(archived) == 1
+    assert (archived[0] / "summary.csv").exists()
+    assert seen["ids"] == ["redo-1", "redo-1"]
+    with (tmp_path / "runs" / "campaign-redo" / "summary.csv").open() as handle:
+        assert len(list(csv.DictReader(handle))) == 1
