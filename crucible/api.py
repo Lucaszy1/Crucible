@@ -542,6 +542,74 @@ def get_status() -> dict:
     return _snapshot_status()
 
 
+@app.get("/api/campaigns")
+def list_campaigns() -> dict:
+    """List learning campaigns with episode counts and mean score."""
+    found = []
+    try:
+        paths = sorted(_runs_dir().glob("campaign-*/summary.json"))
+    except OSError:
+        paths = []
+    for path in paths:
+        name = path.parent.name[len("campaign-") :]
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(state, dict):
+            continue
+        episodes = state.get("episodes", []) or []
+        scores = [row.get("blue_score") for row in episodes
+                  if isinstance(row.get("blue_score"), (int, float))]
+        found.append(
+            {
+                "name": name,
+                "memory": state.get("memory"),
+                "agents": state.get("agents"),
+                "episodes": len(episodes),
+                "mean_blue_score": round(sum(scores) / len(scores), 2) if scores else None,
+            }
+        )
+    return {"campaigns": found}
+
+
+@app.get("/api/campaigns/{name}")
+def get_campaign(name: str) -> dict:
+    """Return one campaign's episodes plus its current playbook rules."""
+    if not _RUN_ID_RE.match(name or ""):
+        raise HTTPException(status_code=404, detail=f"unknown campaign {name!r}")
+    directory = (_runs_dir() / f"campaign-{name}").resolve()
+    try:
+        directory.relative_to(_runs_dir().resolve())
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"unknown campaign {name!r}")
+    summary_path = directory / "summary.json"
+    if not summary_path.is_file():
+        raise HTTPException(status_code=404, detail=f"unknown campaign {name!r}")
+    try:
+        state = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=422, detail=f"campaign {name!r} is unreadable: {exc}")
+    rules = []
+    try:
+        saved = json.loads((directory / "playbook.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        saved = {}
+    if isinstance(saved, dict):
+        for entry in saved.get("rules", []) or []:
+            if isinstance(entry, dict) and entry.get("rule"):
+                rules.append({"rule": entry["rule"],
+                              "episode": entry.get("episode", "")})
+    return {
+        "name": name,
+        "memory": (state or {}).get("memory"),
+        "agents": (state or {}).get("agents"),
+        "episodes": (state or {}).get("episodes", []) or [],
+        "playbook": rules,
+    }
+
+
 @app.get("/api/config")
 def get_config() -> dict:
     """Return dashboard config: hosts, business weights, spend limit."""

@@ -264,3 +264,50 @@ def test_dashboard_index_served(client):
     res = client.get("/")
     assert res.status_code == 200
     assert "Operations Center" in res.text
+
+
+def _campaign_fixture(tmp_runs):
+    directory = tmp_runs / "campaign-mem1"
+    directory.mkdir()
+    (directory / "summary.json").write_text(json.dumps({
+        "name": "mem1", "memory": "on", "agents": "model",
+        "episodes": [
+            {"episode": "mem1-1", "episode_no": 1, "outcome": "blue_held",
+             "blue_score": 70.0, "downtime_pct": 5.0, "detection_delay": 3,
+             "time_to_contain": 4, "cost": 0.1, "playbook_rule_count": 1,
+             "referee_model": "muse-wonder-1.0"},
+            {"episode": "mem1-2", "episode_no": 2, "outcome": "blue_held",
+             "blue_score": 90.0, "downtime_pct": 2.0, "detection_delay": 1,
+             "time_to_contain": 3, "cost": 0.1, "playbook_rule_count": 2,
+             "referee_model": "muse-wonder-1.0"},
+        ],
+    }), encoding="utf-8")
+    (directory / "playbook.json").write_text(json.dumps({
+        "episode": "mem1-2", "model_used": "muse-wonder-1.0",
+        "rules": [{"rule": "Contain quickly.", "episode": "mem1-1"}],
+    }), encoding="utf-8")
+    return directory
+
+
+def test_campaigns_list_reports_counts_and_mean(client, tmp_runs):
+    _campaign_fixture(tmp_runs)
+    body = client.get("/api/campaigns").json()
+    assert body["campaigns"] == [
+        {"name": "mem1", "memory": "on", "agents": "model",
+         "episodes": 2, "mean_blue_score": 80.0}
+    ]
+
+
+def test_campaign_detail_returns_episodes_and_playbook(client, tmp_runs):
+    _campaign_fixture(tmp_runs)
+    body = client.get("/api/campaigns/mem1").json()
+    assert body["name"] == "mem1"
+    assert len(body["episodes"]) == 2
+    assert body["playbook"] == [{"rule": "Contain quickly.",
+                                 "episode": "mem1-1"}]
+
+
+def test_campaign_detail_rejects_unknown(client, tmp_runs):
+    _campaign_fixture(tmp_runs)
+    assert client.get("/api/campaigns/nope").status_code == 404
+    assert client.get("/api/campaigns/..%2F..%2Fnope").status_code == 404
