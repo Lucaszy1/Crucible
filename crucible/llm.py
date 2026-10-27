@@ -20,6 +20,19 @@ ROOT = Path(__file__).resolve().parent.parent
 CACHE_DIR = ROOT / ".llm_cache"
 SPEND_FILE = ROOT / "runs" / "spend.jsonl"
 
+
+def _load_env_file(path) -> bool:
+    """Load one dotenv file without overriding existing variables."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return False
+    load_dotenv(path, override=False)
+    return True
+
+
+_load_env_file(ROOT / ".env")
+
 BASE_URL = os.environ.get("MODEL_API_BASE", "https://api.meta.ai/v1")
 
 # Role names map to model IDs from the build spec. Pass a full model ID
@@ -227,12 +240,7 @@ def _retryable(exc: BaseException) -> bool:
 
 def _default_client():
     """Build an OpenAI-compatible client for the Meta Model API."""
-    try:
-        from dotenv import load_dotenv
-    except ImportError:  # pragma: no cover - optional helper
-        pass
-    else:
-        load_dotenv(ROOT / ".env")
+    _load_env_file(ROOT / ".env")
     try:
         from openai import OpenAI
     except ImportError as exc:

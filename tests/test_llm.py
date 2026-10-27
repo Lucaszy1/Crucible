@@ -1,6 +1,7 @@
 """Unit tests for the model client wrapper. No network calls here."""
 
 import json
+import os
 from datetime import date
 from types import SimpleNamespace
 
@@ -204,3 +205,21 @@ def test_chat_still_caches_valid_tool_call(isolated_storage):
     second = _repeat_chat(client, tools=tools)
     assert len(client.calls) == 1
     assert second["cached"] is True
+
+
+def test_load_env_file_reads_temp_dotenv(tmp_path, monkeypatch):
+    monkeypatch.delenv("LLM_DAILY_LIMIT_USD", raising=False)
+    env_path = tmp_path / ".env"
+    env_path.write_text("LLM_DAILY_LIMIT_USD=12.5\n", encoding="utf-8")
+    assert llm._load_env_file(env_path) is True
+    assert os.environ.get("LLM_DAILY_LIMIT_USD") == "12.5"
+    assert llm.daily_limit_usd() == pytest.approx(12.5)
+
+
+def test_load_env_file_does_not_override(tmp_path, monkeypatch):
+    monkeypatch.setenv("LLM_DAILY_LIMIT_USD", "7")
+    env_path = tmp_path / ".env"
+    env_path.write_text("LLM_DAILY_LIMIT_USD=99\n", encoding="utf-8")
+    llm._load_env_file(env_path)
+    assert os.environ.get("LLM_DAILY_LIMIT_USD") == "7"
+    assert llm.daily_limit_usd() == pytest.approx(7.0)
