@@ -311,6 +311,7 @@ def chat(
             return {**hit, "cached": True}
 
     check_spend_guard()
+    owned = client is None
     client = client if client is not None else _default_client()
 
     kwargs: dict = {"model": model, "messages": messages, **extra}
@@ -318,18 +319,26 @@ def chat(
         kwargs["tools"] = tools
 
     last_exc: BaseException | None = None
-    for attempt in range(max(1, max_retries)):
-        try:
-            response = client.chat.completions.create(**kwargs)
-            break
-        except Exception as exc:  # noqa: BLE001 - sorted below by retryable
-            last_exc = exc
-            if not _retryable(exc) or attempt + 1 >= max(1, max_retries):
-                raise
-            delay = (2**attempt) + random.uniform(0, 0.5)
-            time.sleep(delay)
-    else:  # pragma: no cover - loop always breaks or raises
-        raise last_exc  # type: ignore[misc]
+    try:
+        for attempt in range(max(1, max_retries)):
+            try:
+                response = client.chat.completions.create(**kwargs)
+                break
+            except Exception as exc:  # noqa: BLE001 - sorted below by retryable
+                last_exc = exc
+                if not _retryable(exc) or attempt + 1 >= max(1, max_retries):
+                    raise
+                delay = (2**attempt) + random.uniform(0, 0.5)
+                time.sleep(delay)
+        else:  # pragma: no cover - loop always breaks or raises
+            raise last_exc  # type: ignore[misc]
+    finally:
+        # A default client holds a connection pool; callers that pass
+        # their own client (tests, sharing) keep owning it.
+        if owned:
+            close = getattr(client, "close", None)
+            if callable(close):
+                close()
 
     choice = response.choices[0]
     message = choice.message

@@ -7,6 +7,7 @@ anything outside the sandbox, whatever the model was told.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import subprocess
 from functools import lru_cache
@@ -108,9 +109,27 @@ def _docker_client():
         raise SandboxError(f"cannot reach the docker daemon: {exc}") from exc
 
 
-def _container(host: str, client=None):
-    check_host(host)
+@contextlib.contextmanager
+def _client_scope(client=None):
+    """Yield a docker client, closing it when this scope created it.
+
+    Every docker.from_env() holds pool sockets, so a client created
+    for one operation must close before returning. Callers that pass
+    their own client keep owning it.
+    """
+    owned = client is None
     client = client if client is not None else _docker_client()
+    try:
+        yield client
+    finally:
+        if owned:
+            close = getattr(client, "close", None)
+            if callable(close):
+                close()
+
+
+def _container(host: str, client):
+    check_host(host)
     found = client.containers.list(
         filters={
             "label": [
@@ -128,7 +147,8 @@ def is_running(host: str) -> bool:
     """Report whether a host's container is up. Never raises for docker
     trouble; anything uncertain reads as not running."""
     try:
-        _container(host)
+        with _client_scope() as client:
+            _container(host, client)
     except (AllowlistError, SandboxError):
         return False
     return True
@@ -147,11 +167,12 @@ def exec(host: str, cmd: list, timeout: int = 30) -> dict:
     so failures can show what the command actually printed.
     """
     check_host(host)
-    container = _container(host)
-    try:
-        exit_code, output = container.exec_run(cmd, demux=True)
-    except Exception as exc:
-        raise SandboxError(f"exec on {host!r} failed: {exc}") from exc
+    with _client_scope() as client:
+        container = _container(host, client)
+        try:
+            exit_code, output = container.exec_run(cmd, demux=True)
+        except Exception as exc:
+            raise SandboxError(f"exec on {host!r} failed: {exc}") from exc
     if isinstance(output, tuple):
         out_bytes, err_bytes = output
     else:  # tolerate clients that ignore demux and merge the streams
@@ -169,14 +190,15 @@ def container_logs(host: str, tail: int | None = 100) -> list:
     the first line logged, so ids stay stable as logs grow.
     """
     check_host(host)
-    container = _container(host)
-    try:
-        if tail is None:
-            raw = container.logs()
-        else:
-            raw = container.logs(tail=max(1, tail))
-    except Exception as exc:
-        raise SandboxError(f"logs for {host!r} failed: {exc}") from exc
+    with _client_scope() as client:
+        container = _container(host, client)
+        try:
+            if tail is None:
+                raw = container.logs()
+            else:
+                raw = container.logs(tail=max(1, tail))
+        except Exception as exc:
+            raise SandboxError(f"logs for {host!r} failed: {exc}") from exc
     if isinstance(raw, bytes):
         raw = raw.decode("utf-8", errors="replace")
     return [line for line in raw.splitlines() if line.strip()]
@@ -193,32 +215,33 @@ def _range_network_name(container) -> str | None:
 
 def is_isolated(host: str) -> bool:
     """Report whether a host is detached from the range network."""
-    container = _container(host)
-    return _range_network_name(container) is None
+    with _client_scope() as client:
+        container = _container(host, client)
+        return _range_network_name(container) is None
 
 
 def isolate(host: str) -> dict:
     """Detach one host from the range network so peers cannot reach it."""
-    container = _container(host)
-    network_name = _range_network_name(container)
-    if network_name is None:
-        return {"host": host, "isolated": True, "note": "already detached"}
-    client = container.client
-    try:
-        client.networks.get(network_name).disconnect(container)
-    except Exception as exc:
-        raise SandboxError(f"isolate {host!r} failed: {exc}") from exc
+    with _client_scope() as client:
+        container = _container(host, client)
+        network_name = _range_network_name(container)
+        if network_name is None:
+            return {"host": host, "isolated": True, "note": "already detached"}
+        try:
+            client.networks.get(network_name).disconnect(container)
+        except Exception as exc:
+            raise SandboxError(f"isolate {host!r} failed: {exc}") from exc
     return {"host": host, "isolated": True}
 
 
 def reattach(host: str) -> dict:
     """Attach one host back to the range network."""
-    container = _container(host)
-    if _range_network_name(container) is not None:
-        return {"host": host, "isolated": False, "note": "already attached"}
-    client = container.client
-    try:
-        client.networks.get(f"{PROJECT}_range").connect(container)
-    except Exception as exc:
-        raise SandboxError(f"reattach {host!r} failed: {exc}") from exc
+    with _client_scope() as client:
+        container = _container(host, client)
+        if _range_network_name(container) is not None:
+            return {"host": host, "isolated": False, "note": "already attached"}
+        try:
+            client.networks.get(f"{PROJECT}_range").connect(container)
+        except Exception as exc:
+            raise SandboxError(f"reattach {host!r} failed: {exc}") from exc
     return {"host": host, "isolated": False}
