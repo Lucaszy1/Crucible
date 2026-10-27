@@ -63,7 +63,7 @@ export function mapGraph(layout) {
 // driven by the data-state attribute updateMap sets below.
 const STATE_COLORS = {
   clean: "#758f7f",
-  probed: "#c79a3b",
+  probed: "#e8ecf4",
   "signed-in": "#c26a2c",
   compromised: "#b3402e",
   isolated: "#2f6db3",

@@ -826,7 +826,6 @@ const RED = "#ff3b2f";
 const BLUE = "#2f7bff";
 const CYAN = "#7fd4ff";
 const GOLD = "#ffc83d";
-const AMBER = "#c79a3b";
 const MONO = "'JetBrains Mono',ui-monospace,Menlo,monospace";
 const DISP = "'Big Shoulders Display',Impact,'Arial Narrow',sans-serif";
 
@@ -1021,7 +1020,8 @@ function paintHosts(refs, ctx) {
     ctx.fill();
     const glowColor = state === "compromised" ? "255,59,47"
       : state === "isolated" ? "47,123,255"
-      : state === "probed" || state === "signed-in" ? "199,154,59" : "127,212,255";
+      : state === "probed" ? "232,236,244"
+      : state === "signed-in" ? "199,154,59" : "127,212,255";
     const mirror = ctx.createRadialGradient(at.x, at.y + r * 1.5, 2, at.x, at.y + r * 1.5, r * 1.6);
     mirror.addColorStop(0, `rgba(${glowColor},0.30)`);
     mirror.addColorStop(1, `rgba(${glowColor},0)`);
@@ -1096,9 +1096,10 @@ function paintBlock(ctx, x, y, r, t, state, small) {
   ctx.fillStyle = state === "compromised" ? "#2a0f0c" : state === "isolated" ? "#111722" : "#161c28";
   roundRectPath(ctx, x - r, y - r, s, s, small ? 5 : 9);
   ctx.fill();
+  // First touch reads white-hot; gold stays reserved for the crown jewel.
   const edge = state === "compromised" ? RED
     : state === "signed-in" ? "#ff7a5c"
-      : state === "probed" ? AMBER
+      : state === "probed" ? BONE
         : state === "isolated" ? "#4a5872" : "#8fa3c4";
   ctx.lineWidth = Math.max(1.5, r * 0.09);
   if (state === "compromised") {

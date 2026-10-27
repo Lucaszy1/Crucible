@@ -601,7 +601,7 @@ function draw(refs) {
 }
 
 function nodeTintColor(tint) {
-  if (tint === "probed") return GOLD;
+  if (tint === "probed") return BONE;
   if (tint === "signed" || tint === "comp") return RED;
   if (tint === "iso") return BLUE;
   if (tint === "patched") return BLUE_LIGHT;

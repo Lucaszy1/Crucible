@@ -129,7 +129,7 @@ const PALETTE = {
   link: "#2c3548",
   plate: "#1a2030",
   edge: "#5b6678",
-  probed: "#c79a3b",
+  probed: "#e8ecf4",
   red: "#ff3b2f",
   redSoft: "rgba(255,59,47,0.28)",
   blue: "#2f7bff",
