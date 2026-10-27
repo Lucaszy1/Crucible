@@ -205,7 +205,10 @@ def test_campaign_reports_intrusion_conditional_numbers(tmp_path, monkeypatch,
                           "detection_delay", "time_to_contain", "cost",
                           "playbook_rule_count"]
     assert header[8:] == ["sensors", "intrusion", "contained_after_intrusion",
-                          "secret_read", "relevant_detection_delay"]
+                          "secret_read", "relevant_detection_delay",
+                          "scenario_id", "scenario_seed",
+                          "scenario_difficulty"]
+    assert rows[0]["scenario_id"] == "classic"
 
 
 def test_thirds_compare_first_vs_last(tmp_path, monkeypatch, capsys):

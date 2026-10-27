@@ -17,6 +17,7 @@ import sys
 
 from crucible import llm, orchestrator, sandbox, tools
 from crucible.agents import ModelBlue, ModelRed, ScriptedBlue, ScriptedRed
+from crucible.scenarios import select, stack
 
 
 def parse_args(argv=None):
@@ -88,6 +89,12 @@ def parse_args(argv=None):
         default=None,
         help="Reasoning effort for blue's calls only (default: today's "
         "behavior; omit sends no reasoning_effort field at all)",
+    )
+    parser.add_argument(
+        "--scenario",
+        default="classic",
+        help="classic runs the hand-built range; "
+        "gen:<seed>:<difficulty> runs a generated spec",
     )
     return parser.parse_args(argv)
 
@@ -269,6 +276,19 @@ def exercise_cost_for_id(exercise_id: str | None) -> float:
 
 def main(argv=None) -> int:
     args = parse_args(argv)
+    try:
+        key = select.parse_token(args.scenario)
+    except ValueError as exc:
+        print(f"run_exercise: {exc}", file=sys.stderr)
+        return 1
+    try:
+        info = stack.activate(key)
+    except ValueError as exc:
+        print(f"run_exercise: {exc}", file=sys.stderr)
+        return 1
+    # scenario= rides along only for generated runs so the classic
+    # call shape stays exactly as it was.
+    extra = {"scenario": info} if info else {}
     if args.agents == "model":
         try:
             blue_client = llm.custom_client(args.blue_base_url, args.blue_api_key_env)
@@ -293,9 +313,8 @@ def main(argv=None) -> int:
 
     spend_start = _spend_line_count()
     try:
-        tools.restore_host("web")
-        tools.restore_host("app")
-        tools.restore_host("db")
+        for host in sandbox.active_hosts():
+            tools.restore_host(host)
         result = orchestrator.run_exercise(
             red,
             blue,
@@ -305,6 +324,7 @@ def main(argv=None) -> int:
             audit=args.audit,
             sensors=args.sensors,
             blue_reasoning_effort=args.blue_reasoning_effort,
+            **extra,
         )
     finally:
         print("Stopping sandbox...")
@@ -313,8 +333,9 @@ def main(argv=None) -> int:
         except sandbox.SandboxError as exc:
             print(f"Sandbox stop noted: {exc}", file=sys.stderr)
         tools.reset_state()
+        stack.deactivate()
 
-    print(f"Exercise done (agents={args.agents})")
+    print(f"Exercise done (agents={args.agents}, scenario={select.label(key)})")
     for line in _summary(result["score"]):
         print(line)
     model_driven, fallback = _count_driven_vs_fallback(result["events"])

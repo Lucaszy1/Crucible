@@ -27,6 +27,8 @@ from pathlib import Path
 from crucible import events, llm, orchestrator, run_exercise, sandbox, tools
 from crucible.agents import ModelBlue, ModelRed, ScriptedBlue, ScriptedRed
 from crucible.agents import referee
+from crucible.scenarios import select, stack
+from crucible.scenarios.schema import DIFFICULTIES
 
 CSV_FIELDS = (
     "episode",
@@ -42,6 +44,9 @@ CSV_FIELDS = (
     "contained_after_intrusion",
     "secret_read",
     "relevant_detection_delay",
+    "scenario_id",
+    "scenario_seed",
+    "scenario_difficulty",
 )
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -51,7 +56,7 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Run a learning campaign.")
     parser.add_argument("--name", help="Campaign name (single-arm mode)")
     parser.add_argument("--episodes", type=int, required=True,
-                        help="Total episodes to run per arm")
+                        help="Episodes to run per arm per scenario")
     parser.add_argument("--memory", choices=("on", "off"),
                         help="on: blue reads the playbook; off: control")
     parser.add_argument("--arms",
@@ -87,6 +92,19 @@ def parse_args(argv=None):
                         help="Continue an existing campaign instead of starting over")
     parser.add_argument("--force", action="store_true",
                         help="Archive the existing campaign dir and start over")
+    parser.add_argument("--scenarios", default=None,
+                        help="Comma list of classic and "
+                        "gen:<seed>:<difficulty> (default: classic only)")
+    parser.add_argument("--scenario-set", choices=("train", "heldout"),
+                        default=None,
+                        help="Append the named seed set at --difficulty")
+    parser.add_argument("--difficulty", choices=list(DIFFICULTIES),
+                        default="medium",
+                        help="Difficulty for --scenario-set seeds "
+                        "(default: medium)")
+    parser.add_argument("--freeze-playbook", action="store_true",
+                        help="Blue still reads the playbook but the referee "
+                        "never updates it (for held-out evaluation)")
     return parser.parse_args(argv)
 
 
@@ -123,7 +141,8 @@ def _write_csv(path: Path, rows: list) -> None:
         for row in rows:
             out = {key: row.get(key) for key in CSV_FIELDS}
             for key in ("detection_delay", "time_to_contain",
-                        "relevant_detection_delay"):
+                        "relevant_detection_delay", "scenario_seed",
+                        "scenario_difficulty"):
                 if out[key] is None:
                     out[key] = ""
             writer.writerow(out)
@@ -208,7 +227,8 @@ def _archive_dir(campaign_dir: Path, name: str) -> Path:
     return target
 
 
-def _open_arm(name: str, memory: str, total: int, args) -> dict | None:
+def _open_arm(name: str, memory: str, total: int, args,
+              labels: list) -> dict | None:
     """Load or start one arm's state; None with an error printed on failure."""
     campaign_dir = _campaign_dir(name)
     summary_path = campaign_dir / "summary.json"
@@ -229,6 +249,15 @@ def _open_arm(name: str, memory: str, total: int, args) -> dict | None:
             print(f"campaign: resume sensors flag differs from the saved "
                   f"campaign {name!r} ({state.get('sensors')}); aborting",
                   file=sys.stderr)
+            return None
+        if state.get("scenarios", ["classic"]) != labels:
+            print(f"campaign: resume scenario set differs from the saved "
+                  f"campaign {name!r} ({state.get('scenarios')}); aborting",
+                  file=sys.stderr)
+            return None
+        if state.get("playbook_frozen", False) != bool(args.freeze_playbook):
+            print(f"campaign: resume freeze flag differs from the saved "
+                  f"campaign {name!r}; aborting", file=sys.stderr)
             return None
         rows = list(state.get("episodes", []) or [])
         if len(rows) >= total:
@@ -251,13 +280,16 @@ def _open_arm(name: str, memory: str, total: int, args) -> dict | None:
               f"memory={memory}, agents={args.agents}...")
     return {"name": name, "memory": memory, "dir": campaign_dir,
             "summary_path": summary_path, "rows": rows, "playbook": playbook,
-            "sensors": args.sensors}
+            "sensors": args.sensors, "scenarios": labels,
+            "playbook_frozen": bool(args.freeze_playbook)}
 
 
 def _run_episode(arm: dict, number: int, args, seed: str | None,
-               blue_client=None) -> None:
+               blue_client=None, scenario: dict | None = None,
+               label: str = "classic", grouped: bool = False) -> None:
     """Run one episode for one arm and persist its summaries."""
-    exercise_id = f"{arm['name']}-{number}"
+    exercise_id = f"{arm['name']}-{label}-{number}" if grouped \
+        else f"{arm['name']}-{number}"
     rules = arm["playbook"].get("rules", []) or []
     if args.agents == "model":
         red = ModelRed(exercise_id=exercise_id,
@@ -270,18 +302,19 @@ def _run_episode(arm: dict, number: int, args, seed: str | None,
     else:
         red = ScriptedRed()
         blue = ScriptedBlue()
-    for host in ("web", "app", "db", "workstation"):
+    for host in sandbox.active_hosts():
         tools.restore_host(host)
     spend_start = run_exercise._spend_line_count()
+    extra = {"scenario": scenario} if scenario else {}
     result = orchestrator.run_exercise(
         red, blue, max_turns=args.max_turns,
         run_path=arm["dir"] / f"{exercise_id}.jsonl",
         exercise_id=exercise_id, audit=args.audit,
         sensors=args.sensors, seed=seed,
-        blue_reasoning_effort=args.blue_reasoning_effort)
+        blue_reasoning_effort=args.blue_reasoning_effort, **extra)
     score = result.get("score", {}) or {}
     referee_model = None
-    if arm["memory"] == "on":
+    if arm["memory"] == "on" and not args.freeze_playbook:
         review = referee.review_episode(
             result.get("events", []), score, exercise_id, arm["playbook"],
             use_cache=not args.no_cache)
@@ -314,6 +347,10 @@ def _run_episode(arm: dict, number: int, args, seed: str | None,
         "secret_read": score.get("secret_read", score.get(
             "secret_exfiltrated", False)),
         "relevant_detection_delay": score.get("relevant_detection_delay"),
+        "scenario": label,
+        "scenario_id": (scenario or {}).get("scenario_id", "classic"),
+        "scenario_seed": (scenario or {}).get("seed"),
+        "scenario_difficulty": (scenario or {}).get("difficulty"),
         "referee_model": referee_model,
         "red_admin": admin,
         "red_in": got_in,
@@ -328,6 +365,10 @@ def _run_episode(arm: dict, number: int, args, seed: str | None,
                                      "memory": arm["memory"],
                                      "agents": args.agents,
                                      "sensors": args.sensors,
+                                     "scenarios": arm.get("scenarios",
+                                                          ["classic"]),
+                                     "playbook_frozen": bool(
+                                         args.freeze_playbook),
                                      "episodes": arm["rows"]})
 
 
@@ -341,6 +382,8 @@ def _report_arm(arm: dict) -> float:
     total_cost = sum(float(row.get("cost", 0.0) or 0.0) for row in rows)
     print(f"Campaign done: {len(rows)} episodes (name={arm['name']})")
     print(f"Sensors: {arm.get('sensors', 'on')}")
+    if arm.get("playbook_frozen"):
+        print("Playbook: frozen (referee never updated it)")
     print("episode | outcome | blue_score | cost")
     for row in rows:
         print(f"{row['episode']} | {row['outcome']} | {row['blue_score']} "
@@ -377,10 +420,18 @@ def main(argv=None) -> int:
     except ValueError as exc:
         print(f"campaign: {exc}", file=sys.stderr)
         return 1
-    total = int(args.episodes)
-    if total < 1:
+    per_scenario = int(args.episodes)
+    if per_scenario < 1:
         print("--episodes must be at least 1", file=sys.stderr)
         return 1
+    try:
+        keys = select.selection(args.scenarios, args.scenario_set,
+                                args.difficulty)
+    except ValueError as exc:
+        print(f"campaign: {exc}", file=sys.stderr)
+        return 1
+    labels = [select.label(key) for key in keys]
+    total = per_scenario * len(keys)
     try:
         blue_client = llm.custom_client(args.blue_base_url, args.blue_api_key_env)
     except RuntimeError as exc:
@@ -390,28 +441,50 @@ def main(argv=None) -> int:
 
     arms = []
     for name, memory in specs:
-        arm = _open_arm(name, memory, total, args)
+        arm = _open_arm(name, memory, total, args, labels)
         if arm is None:
             return 1
         arms.append(arm)
     if not args.resume:
         referee.save_playbook(referee.empty_playbook())
 
-    print("Booting sandbox...")
+    grouped = len(keys) > 1
+    built = False
     try:
-        sandbox.start()
-    except sandbox.SandboxError as exc:
-        print(f"Sandbox boot failed: {exc}", file=sys.stderr)
-        print("Check that Docker is running, then try again.", file=sys.stderr)
-        return 1
-
-    try:
-        for number in range(1, total + 1):
-            for arm in arms:
-                if len(arm["rows"]) >= number:
-                    continue
-                seed = f"pair-{number}" if len(arms) > 1 else None
-                _run_episode(arm, number, args, seed, blue_client)
+        for key in keys:
+            label = select.label(key)
+            try:
+                info = stack.activate(key)
+            except ValueError as exc:
+                print(f"campaign: {exc}", file=sys.stderr)
+                return 1
+            print(f"Booting sandbox (scenario={label})...")
+            try:
+                if built:
+                    sandbox.start_warm()
+                else:
+                    sandbox.start()
+            except sandbox.SandboxError as exc:
+                print(f"Sandbox boot failed: {exc}", file=sys.stderr)
+                print("Check that Docker is running, then try again.",
+                      file=sys.stderr)
+                return 1
+            built = True
+            for number in range(1, per_scenario + 1):
+                for arm in arms:
+                    done = {(row.get("scenario", "classic"),
+                             row.get("episode_no")) for row in arm["rows"]}
+                    if (label, number) in done:
+                        continue
+                    seed = f"pair-{label}-{number}" if len(arms) > 1 \
+                        and grouped else (
+                            f"pair-{number}" if len(arms) > 1 else None)
+                    _run_episode(arm, number, args, seed, blue_client,
+                                 info, label, grouped)
+            try:
+                sandbox.stop()
+            except sandbox.SandboxError as exc:
+                print(f"Sandbox stop noted: {exc}", file=sys.stderr)
     finally:
         print("Stopping sandbox...")
         try:
@@ -419,6 +492,7 @@ def main(argv=None) -> int:
         except sandbox.SandboxError as exc:
             print(f"Sandbox stop noted: {exc}", file=sys.stderr)
         tools.reset_state()
+        stack.deactivate()
 
     for arm in arms:
         _report_arm(arm)

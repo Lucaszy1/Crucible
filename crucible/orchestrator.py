@@ -672,6 +672,7 @@ def run_exercise(
     sensors: str = "on",
     seed: str | None = None,
     blue_reasoning_effort: str | None = None,
+    scenario: dict | None = None,
 ) -> dict:
     """Run one full exercise with alternating red and blue moves.
 
@@ -685,8 +686,10 @@ def run_exercise(
     clean-start check is recorded as the first (system) event; agents
     never see system events and scoring skips them like auditor events.
     That first event records the sensors mode, the blue reasoning
-    effort ("default" when the flag is unset), and the seed when given
-    in its args so ablations stay reproducible from the log.
+    effort ("default" when the flag is unset), the seed when given,
+    and the scenario identity (scenario_id, seed, difficulty;
+    "classic" with null seed and difficulty when no spec runs) in
+    its args so ablations stay reproducible from the log.
 
     Audit modes: off skips judging, end audits every blue action after
     the loop, live audits each blue action right after it is logged.
@@ -708,9 +711,13 @@ def run_exercise(
     tools.reset_state()
     check = tools.begin_episode()
     writer = events.EventWriter(run_path if run_path else events.new_run_path(exercise_id))
+    info = scenario or {}
     first_args: dict = {
         "sensors": sensors,
         "blue_reasoning_effort": blue_reasoning_effort or "default",
+        "scenario_id": info.get("scenario_id", "classic"),
+        "scenario_seed": info.get("seed"),
+        "scenario_difficulty": info.get("difficulty"),
     }
     if seed is not None:
         first_args["seed"] = str(seed)

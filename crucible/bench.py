@@ -36,6 +36,8 @@ from pathlib import Path
 from crucible import events, llm, orchestrator, run_exercise, sandbox, tools
 from crucible.agents import ModelBlue, ModelRed
 from crucible.agents import referee
+from crucible.scenarios import select, stack
+from crucible.scenarios.schema import DIFFICULTIES
 
 RED_PROFILES = ("chain", "noisy", "model")
 SENSOR_MODES = ("on", "off")
@@ -59,6 +61,9 @@ CSV_FIELDS = (
     "blue_score",
     "cost",
     "blue_reasoning_effort",
+    "scenario_id",
+    "scenario_seed",
+    "scenario_difficulty",
 )
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -148,12 +153,22 @@ def chain_plan() -> list:
 
 
 class ChainRed:
-    """Scripted red that always runs the full chain, deterministically."""
+    """Scripted red that always runs the full chain, deterministically.
+
+    Under a generated spec the plan is the spec's derived chain.
+    """
 
     actor = "red"
 
-    def __init__(self):
-        self._plan = chain_plan()
+    def __init__(self, spec=None):
+        if spec is None:
+            spec = sandbox.active_spec()
+        if spec is not None:
+            from crucible.scenarios import chain as chain_mod
+
+            self._plan = chain_mod.chain_plan(spec)
+        else:
+            self._plan = chain_plan()
         self._step = 0
 
     def next_action(self, turn: int, history: list) -> dict | None:
@@ -224,13 +239,23 @@ def noisy_plan(seed: str) -> list:
 
 
 class NoisyRed:
-    """Scripted chain red with seeded decoys, still zero model calls."""
+    """Scripted chain red with seeded decoys, still zero model calls.
+
+    Under a generated spec the plan is the spec's derived noisy chain.
+    """
 
     actor = "red"
 
-    def __init__(self, seed: str):
+    def __init__(self, seed: str, spec=None):
         self._seed = seed
-        self._plan = noisy_plan(seed)
+        if spec is None:
+            spec = sandbox.active_spec()
+        if spec is not None:
+            from crucible.scenarios import chain as chain_mod
+
+            self._plan = chain_mod.noisy_plan(spec, seed)
+        else:
+            self._plan = noisy_plan(seed)
         self._step = 0
 
     def next_action(self, turn: int, history: list) -> dict | None:
@@ -254,7 +279,7 @@ def parse_args(argv=None):
     parser.add_argument("--memory", default="off",
                         help="Comma-separated blue memory modes: on, off")
     parser.add_argument("--episodes-per-cell", type=int, default=10,
-                        help="Episodes per cell (default 10)")
+                        help="Episodes per cell per scenario (default 10)")
     parser.add_argument("--blue-model", default=None,
                         help="Model id for blue (default: the blue role model)")
     parser.add_argument("--blue-base-url", default=None,
@@ -279,6 +304,19 @@ def parse_args(argv=None):
                         help="Continue an existing benchmark instead of starting over")
     parser.add_argument("--force", action="store_true",
                         help="Archive the existing benchmark dir and start over")
+    parser.add_argument("--scenarios", default=None,
+                        help="Comma list of classic and "
+                        "gen:<seed>:<difficulty> (default: classic only)")
+    parser.add_argument("--scenario-set", choices=("train", "heldout"),
+                        default=None,
+                        help="Append the named seed set at --difficulty")
+    parser.add_argument("--difficulty", choices=list(DIFFICULTIES),
+                        default="medium",
+                        help="Difficulty for --scenario-set seeds "
+                        "(default: medium)")
+    parser.add_argument("--freeze-playbook", action="store_true",
+                        help="Blue still reads cell playbooks but the referee "
+                        "never updates them (for held-out evaluation)")
     return parser.parse_args(argv)
 
 
@@ -327,7 +365,8 @@ def _write_csv(path: Path, rows: list) -> None:
         for row in rows:
             out = {key: row.get(key) for key in CSV_FIELDS}
             for key in ("relevant_detection_delay", "detection_delay",
-                        "time_to_contain"):
+                        "time_to_contain", "scenario_seed",
+                        "scenario_difficulty"):
                 if out[key] is None:
                     out[key] = ""
             writer.writerow(out)
@@ -355,7 +394,8 @@ def _archive_dir(bench_dir: Path, name: str) -> Path:
     return target
 
 
-def _open_bench(name: str, cells: list, per_cell: int, args) -> dict | None:
+def _open_bench(name: str, cells: list, per_cell: int, args,
+                labels: list) -> dict | None:
     """Load or start the benchmark state; None with an error on failure."""
     bench_dir = _bench_dir(name)
     summary_path = bench_dir / "summary.json"
@@ -373,6 +413,14 @@ def _open_bench(name: str, cells: list, per_cell: int, args) -> dict | None:
             return None
         if state.get("episodes_per_cell") != per_cell:
             print(f"bench: resume episodes-per-cell differs from the saved "
+                  f"benchmark {name!r}; aborting", file=sys.stderr)
+            return None
+        if state.get("scenarios", ["classic"]) != labels:
+            print(f"bench: resume scenario set differs from the saved "
+                  f"benchmark {name!r}; aborting", file=sys.stderr)
+            return None
+        if state.get("playbook_frozen", False) != bool(args.freeze_playbook):
+            print(f"bench: resume freeze flag differs from the saved "
                   f"benchmark {name!r}; aborting", file=sys.stderr)
             return None
         rows = list(state.get("episodes", []) or [])
@@ -393,14 +441,23 @@ def _open_bench(name: str, cells: list, per_cell: int, args) -> dict | None:
             playbooks[cell["key"]] = referee.empty_playbook()
         print(f"Starting benchmark {name}: {len(cells)} cells x "
               f"{per_cell} episodes...")
+    frozen = bool(args.freeze_playbook)
+    if frozen and not args.resume:
+        print("Playbooks frozen: blue reads them but the referee "
+              "never updates them.")
     return {"name": name, "dir": bench_dir, "summary_path": summary_path,
-            "rows": rows, "playbooks": playbooks}
+            "rows": rows, "playbooks": playbooks, "scenarios": labels,
+            "playbook_frozen": frozen}
 
 
-def _run_episode(bench: dict, cell: dict, rep: int, args, client) -> dict:
+def _run_episode(bench: dict, cell: dict, rep: int, args, client,
+               scenario: dict | None = None, label: str = "classic",
+               grouped: bool = False) -> dict:
     """Run one episode for one cell and persist the summaries."""
-    exercise_id = f"{cell['key']}-{rep}"
-    seed = f"{bench['name']}:{cell['key']}:{rep}"
+    exercise_id = f"{label}-{cell['key']}-{rep}" if grouped \
+        else f"{cell['key']}-{rep}"
+    seed = f"{bench['name']}:{label}:{cell['key']}:{rep}" if grouped \
+        else f"{bench['name']}:{cell['key']}:{rep}"
     rules = bench["playbooks"][cell["key"]].get("rules", []) or []
     if cell["red"] == "chain":
         red = ChainRed()
@@ -414,17 +471,18 @@ def _run_episode(bench: dict, cell: dict, rep: int, args, client) -> dict:
                      playbook=rules if cell["memory"] == "on" else None,
                      seed=seed, client=client, model=args.blue_model,
                      reasoning_effort=args.blue_reasoning_effort)
-    for host in ("web", "app", "db", "workstation"):
+    for host in sandbox.active_hosts():
         tools.restore_host(host)
     spend_start = run_exercise._spend_line_count()
+    extra = {"scenario": scenario} if scenario else {}
     result = orchestrator.run_exercise(
         red, blue, max_turns=args.max_turns,
         run_path=bench["dir"] / f"{exercise_id}.jsonl",
         exercise_id=exercise_id, audit=args.audit,
         sensors=cell["sensors"], seed=seed,
-        blue_reasoning_effort=args.blue_reasoning_effort)
+        blue_reasoning_effort=args.blue_reasoning_effort, **extra)
     score = result.get("score", {}) or {}
-    if cell["memory"] == "on":
+    if cell["memory"] == "on" and not args.freeze_playbook:
         review = referee.review_episode(
             result.get("events", []), score, exercise_id,
             bench["playbooks"][cell["key"]], use_cache=not args.no_cache)
@@ -454,6 +512,10 @@ def _run_episode(bench: dict, cell: dict, rep: int, args, client) -> dict:
         "blue_score": score.get("blue_score", 0),
         "cost": round(cost, 6),
         "blue_reasoning_effort": args.blue_reasoning_effort or "default",
+        "scenario": label,
+        "scenario_id": (scenario or {}).get("scenario_id", "classic"),
+        "scenario_seed": (scenario or {}).get("seed"),
+        "scenario_difficulty": (scenario or {}).get("difficulty"),
     })
     latest = bench["rows"][-1]
     print(f"{exercise_id}: outcome={latest['outcome']} "
@@ -464,6 +526,8 @@ def _run_episode(bench: dict, cell: dict, rep: int, args, client) -> dict:
         "name": bench["name"],
         "cells": [cell["key"] for cell in _cells(args)],
         "episodes_per_cell": args.episodes_per_cell,
+        "scenarios": bench.get("scenarios", ["classic"]),
+        "playbook_frozen": bool(args.freeze_playbook),
         "episodes": bench["rows"],
     })
     return result
@@ -475,6 +539,8 @@ def _report(bench: dict) -> float:
     effort = bench.get("blue_reasoning_effort", "default")
     print(f"Benchmark done: {len(rows)} episodes (name={bench['name']}, "
           f"blue_reasoning_effort={effort})")
+    if bench.get("playbook_frozen"):
+        print("Playbooks: frozen (referee never updated them)")
     print("cell | n | intr | secret% | contain% | med-rel-delay | "
           "med-contain | mean-downtime")
     cells = []
@@ -524,6 +590,13 @@ def main(argv=None) -> int:
     if per_cell < 1:
         print("--episodes-per-cell must be at least 1", file=sys.stderr)
         return 1
+    try:
+        keys = select.selection(args.scenarios, args.scenario_set,
+                                args.difficulty)
+    except ValueError as exc:
+        print(f"bench: {exc}", file=sys.stderr)
+        return 1
+    labels = [select.label(key) for key in keys]
     if args.spend_cap_usd is None:
         cap = llm.daily_limit_usd()
     else:
@@ -532,7 +605,7 @@ def main(argv=None) -> int:
         print("--spend-cap-usd must be positive", file=sys.stderr)
         return 1
 
-    bench = _open_bench(name, cells, per_cell, args)
+    bench = _open_bench(name, cells, per_cell, args, labels)
     if bench is None:
         return 1
     bench["blue_reasoning_effort"] = args.blue_reasoning_effort or "default"
@@ -543,40 +616,60 @@ def main(argv=None) -> int:
         return 1
     bench_start = run_exercise._spend_line_count()
 
-    print("Booting sandbox...")
-    try:
-        sandbox.start()
-    except sandbox.SandboxError as exc:
-        print(f"Sandbox boot failed: {exc}", file=sys.stderr)
-        print("Check that Docker is running, then try again.", file=sys.stderr)
-        return 1
-
+    grouped = len(keys) > 1
+    built = False
     done = {row.get("episode") for row in bench["rows"]}
     try:
-        for rep in range(1, per_cell + 1):
-            for cell in cells:
-                if f"{cell['key']}-{rep}" in done:
-                    continue
-                try:
-                    spent = llm.spent_today()
-                except (OSError, ValueError):
-                    spent = 0.0
-                if spent >= cap:
-                    print(f"bench: spend guard hit ${spent:.2f} of "
-                          f"${cap:.2f}; stopping with "
-                          f"{len(bench['rows'])} episodes done "
-                          f"(resume later to continue)", file=sys.stderr)
-                    return 2
-                result = _run_episode(bench, cell, rep, args, client)
-                latest_id = bench["rows"][-1]["episode"]
-                done.add(latest_id)
-                if run_exercise._spend_cap_hit(result.get("events", [])):
-                    run_exercise._warn_spend_cap()
-                    print(f"bench: spend cap degraded {latest_id}; "
-                          f"stopping instead of recording degraded "
-                          f"episodes as clean ones.",
-                          file=sys.stderr)
-                    return 2
+        for key in keys:
+            label = select.label(key)
+            try:
+                info = stack.activate(key)
+            except ValueError as exc:
+                print(f"bench: {exc}", file=sys.stderr)
+                return 1
+            print(f"Booting sandbox (scenario={label})...")
+            try:
+                if built:
+                    sandbox.start_warm()
+                else:
+                    sandbox.start()
+            except sandbox.SandboxError as exc:
+                print(f"Sandbox boot failed: {exc}", file=sys.stderr)
+                print("Check that Docker is running, then try again.",
+                      file=sys.stderr)
+                return 1
+            built = True
+            for rep in range(1, per_cell + 1):
+                for cell in cells:
+                    want = f"{label}-{cell['key']}-{rep}" if grouped \
+                        else f"{cell['key']}-{rep}"
+                    if want in done:
+                        continue
+                    try:
+                        spent = llm.spent_today()
+                    except (OSError, ValueError):
+                        spent = 0.0
+                    if spent >= cap:
+                        print(f"bench: spend guard hit ${spent:.2f} of "
+                              f"${cap:.2f}; stopping with "
+                              f"{len(bench['rows'])} episodes done "
+                              f"(resume later to continue)", file=sys.stderr)
+                        return 2
+                    result = _run_episode(bench, cell, rep, args, client,
+                                          info, label, grouped)
+                    latest_id = bench["rows"][-1]["episode"]
+                    done.add(latest_id)
+                    if run_exercise._spend_cap_hit(result.get("events", [])):
+                        run_exercise._warn_spend_cap()
+                        print(f"bench: spend cap degraded {latest_id}; "
+                              f"stopping instead of recording degraded "
+                              f"episodes as clean ones.",
+                              file=sys.stderr)
+                        return 2
+            try:
+                sandbox.stop()
+            except sandbox.SandboxError as exc:
+                print(f"Sandbox stop noted: {exc}", file=sys.stderr)
     finally:
         print("Stopping sandbox...")
         try:
@@ -584,6 +677,7 @@ def main(argv=None) -> int:
         except sandbox.SandboxError as exc:
             print(f"Sandbox stop noted: {exc}", file=sys.stderr)
         tools.reset_state()
+        stack.deactivate()
         close = getattr(client, "close", None)
         if callable(close):
             close()

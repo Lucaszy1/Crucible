@@ -197,7 +197,11 @@ def test_batch_reports_intrusion_conditional_numbers(tmp_path, monkeypatch,
     ]
     assert header[15:] == ["sensors", "intrusion",
                            "contained_after_intrusion", "secret_read",
-                           "relevant_detection_delay"]
+                           "relevant_detection_delay", "scenario_id",
+                           "scenario_seed", "scenario_difficulty"]
+    assert rows[0]["scenario_id"] == "classic"
+    assert rows[0]["scenario_seed"] == ""
+    assert rows[0]["scenario_difficulty"] == ""
 
 
 def test_batch_model_flag_uses_cache_option(tmp_path, monkeypatch):

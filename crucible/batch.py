@@ -19,6 +19,8 @@ from pathlib import Path
 
 from crucible import events, llm, orchestrator, run_exercise, sandbox, tools
 from crucible.agents import ModelBlue, ModelRed, ScriptedBlue, ScriptedRed
+from crucible.scenarios import select, stack
+from crucible.scenarios.schema import DIFFICULTIES
 
 CSV_FIELDS = (
     "exercise_id",
@@ -41,6 +43,9 @@ CSV_FIELDS = (
     "contained_after_intrusion",
     "secret_read",
     "relevant_detection_delay",
+    "scenario_id",
+    "scenario_seed",
+    "scenario_difficulty",
 )
 
 
@@ -50,7 +55,7 @@ def parse_args(argv=None):
         "--count",
         type=int,
         required=True,
-        help="Number of exercises to run",
+        help="Exercises to run per scenario",
     )
     parser.add_argument(
         "--agents",
@@ -114,6 +119,24 @@ def parse_args(argv=None):
         help="Reasoning effort for blue's calls only (default: today's "
         "behavior; omit sends no reasoning_effort field at all)",
     )
+    parser.add_argument(
+        "--scenarios",
+        default=None,
+        help="Comma list of classic and gen:<seed>:<difficulty> "
+        "(default: classic only)",
+    )
+    parser.add_argument(
+        "--scenario-set",
+        choices=("train", "heldout"),
+        default=None,
+        help="Append the named seed set at --difficulty",
+    )
+    parser.add_argument(
+        "--difficulty",
+        choices=list(DIFFICULTIES),
+        default="medium",
+        help="Difficulty for --scenario-set seeds (default: medium)",
+    )
     return parser.parse_args(argv)
 
 
@@ -140,11 +163,33 @@ def _red_attempts(event_list: list) -> str:
     return ", ".join(f"{host}={counts[host]}" for host in sorted(counts))
 
 
+def _boot(built: bool) -> None:
+    """Boot the sandbox, building images only once per batch."""
+    if built:
+        sandbox.start_warm()
+    else:
+        sandbox.start()
+
+
+def _stop_quiet() -> None:
+    """Stop the sandbox, noting docker trouble instead of raising."""
+    try:
+        sandbox.stop()
+    except sandbox.SandboxError as exc:
+        print(f"Sandbox stop noted: {exc}", file=sys.stderr)
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
     count = int(args.count)
     if count < 1:
         print("--count must be at least 1", file=sys.stderr)
+        return 1
+    try:
+        keys = select.selection(args.scenarios, args.scenario_set,
+                                args.difficulty)
+    except ValueError as exc:
+        print(f"batch: {exc}", file=sys.stderr)
         return 1
     try:
         blue_client = llm.custom_client(args.blue_base_url, args.blue_api_key_env)
@@ -153,97 +198,115 @@ def main(argv=None) -> int:
         return 1
     batch_start = run_exercise._spend_line_count()
 
-    print(f"Booting sandbox for a batch of {count} {args.agents} exercises...")
-    try:
-        sandbox.start()
-    except sandbox.SandboxError as exc:
-        print(f"Sandbox boot failed: {exc}", file=sys.stderr)
-        print("Check that Docker is running, then try again.", file=sys.stderr)
-        return 1
-
     rows: list[dict] = []
+    built = False
     try:
-        for index in range(count):
-            exercise_id = f"{args.prefix}-{index + 1}"
-            if args.agents == "model":
-                red = ModelRed(exercise_id=exercise_id, use_cache=not args.no_cache)
-                blue = ModelBlue(exercise_id=exercise_id, use_cache=not args.no_cache,
-                                 client=blue_client, model=args.blue_model,
-                                 reasoning_effort=args.blue_reasoning_effort)
-            else:
-                red = ScriptedRed()
-                blue = ScriptedBlue()
-            tools.restore_host("web")
-            tools.restore_host("app")
-            tools.restore_host("db")
-            tools.restore_host("workstation")
-            spend_start = run_exercise._spend_line_count()
-            result = orchestrator.run_exercise(
-                red,
-                blue,
-                max_turns=args.max_turns,
-                exercise_id=exercise_id,
-                audit=args.audit,
-                sensors=args.sensors,
-                blue_reasoning_effort=args.blue_reasoning_effort,
-            )
-            if run_exercise._spend_cap_hit(result.get("events", [])):
-                run_exercise._warn_spend_cap()
-                if args.strict and args.agents == "model":
-                    print(
-                        f"Strict mode: spend cap hit on {exercise_id}; "
-                        f"aborting batch instead of recording scripted "
-                        f"games as model games.",
-                        file=sys.stderr,
-                    )
-                    return 2
-            score = result.get("score", {}) or {}
-            cost = run_exercise.exercise_cost_since(spend_start)
-            model_turns, fallback_turns = run_exercise._count_driven_vs_fallback(
-                result.get("events", [])
-            )
-            rows.append(
-                {
-                    "exercise_id": exercise_id,
-                    "outcome": score.get("outcome", "unknown"),
-                    "detection_delay": score.get("detection_delay"),
-                    "time_to_contain": score.get("time_to_contain"),
-                    "downtime_cost": score.get("downtime_cost", 0),
-                    "downtime_pct": score.get("downtime_pct", 0.0),
-                    "blue_score": score.get("blue_score", 0),
-                    "justified_pct": score.get("justified_pct"),
-                    "unsupported_count": score.get("unsupported_count", 0),
-                    "invalid_refs_count": score.get("invalid_refs_count", 0),
-                    "mean_audit_score": score.get("mean_audit_score"),
-                    "red_attempts": _red_attempts(result.get("events", [])),
-                    "model_turns": model_turns,
-                    "fallback_turns": fallback_turns,
-                    "estimated_cost_usd": round(cost, 6),
-                    "sensors": score.get("sensors", args.sensors),
-                    "intrusion": score.get("intrusion", False),
-                    "contained_after_intrusion": score.get(
-                        "contained_after_intrusion", False),
-                    "secret_read": score.get("secret_read", score.get(
-                        "secret_exfiltrated", False)),
-                    "relevant_detection_delay": score.get(
-                        "relevant_detection_delay"),
-                }
-            )
-            delay = score.get("detection_delay")
-            print(
-                f"{exercise_id}: outcome={score.get('outcome', 'unknown')} "
-                f"delay={delay if delay is not None else 'no'} "
-                f"downtime={score.get('downtime_pct', 0.0)}% "
-                f"blue_score={score.get('blue_score', 0)} "
-                f"cost=${cost:.4f}"
-            )
+        for key in keys:
+            label = select.label(key)
+            try:
+                info = stack.activate(key)
+            except ValueError as exc:
+                print(f"batch: {exc}", file=sys.stderr)
+                return 1
+            extra = {"scenario": info} if info else {}
+            print(f"Booting sandbox for {count} {args.agents} exercises "
+                  f"(scenario={label})...")
+            try:
+                _boot(built)
+            except sandbox.SandboxError as exc:
+                print(f"Sandbox boot failed: {exc}", file=sys.stderr)
+                print("Check that Docker is running, then try again.",
+                      file=sys.stderr)
+                return 1
+            built = True
+            grouped = len(keys) > 1
+            for index in range(count):
+                exercise_id = f"{args.prefix}-{label}-{index + 1}" \
+                    if grouped else f"{args.prefix}-{index + 1}"
+                if args.agents == "model":
+                    red = ModelRed(exercise_id=exercise_id,
+                                   use_cache=not args.no_cache)
+                    blue = ModelBlue(exercise_id=exercise_id,
+                                     use_cache=not args.no_cache,
+                                     client=blue_client,
+                                     model=args.blue_model,
+                                     reasoning_effort=args.blue_reasoning_effort)
+                else:
+                    red = ScriptedRed()
+                    blue = ScriptedBlue()
+                for host in sandbox.active_hosts():
+                    tools.restore_host(host)
+                spend_start = run_exercise._spend_line_count()
+                result = orchestrator.run_exercise(
+                    red,
+                    blue,
+                    max_turns=args.max_turns,
+                    exercise_id=exercise_id,
+                    audit=args.audit,
+                    sensors=args.sensors,
+                    blue_reasoning_effort=args.blue_reasoning_effort,
+                    **extra,
+                )
+                if run_exercise._spend_cap_hit(result.get("events", [])):
+                    run_exercise._warn_spend_cap()
+                    if args.strict and args.agents == "model":
+                        print(
+                            f"Strict mode: spend cap hit on {exercise_id}; "
+                            f"aborting batch instead of recording scripted "
+                            f"games as model games.",
+                            file=sys.stderr,
+                        )
+                        return 2
+                score = result.get("score", {}) or {}
+                cost = run_exercise.exercise_cost_since(spend_start)
+                model_turns, fallback_turns = run_exercise._count_driven_vs_fallback(
+                    result.get("events", [])
+                )
+                rows.append(
+                    {
+                        "exercise_id": exercise_id,
+                        "outcome": score.get("outcome", "unknown"),
+                        "detection_delay": score.get("detection_delay"),
+                        "time_to_contain": score.get("time_to_contain"),
+                        "downtime_cost": score.get("downtime_cost", 0),
+                        "downtime_pct": score.get("downtime_pct", 0.0),
+                        "blue_score": score.get("blue_score", 0),
+                        "justified_pct": score.get("justified_pct"),
+                        "unsupported_count": score.get("unsupported_count", 0),
+                        "invalid_refs_count": score.get("invalid_refs_count", 0),
+                        "mean_audit_score": score.get("mean_audit_score"),
+                        "red_attempts": _red_attempts(result.get("events", [])),
+                        "model_turns": model_turns,
+                        "fallback_turns": fallback_turns,
+                        "estimated_cost_usd": round(cost, 6),
+                        "sensors": score.get("sensors", args.sensors),
+                        "intrusion": score.get("intrusion", False),
+                        "contained_after_intrusion": score.get(
+                            "contained_after_intrusion", False),
+                        "secret_read": score.get("secret_read", score.get(
+                            "secret_exfiltrated", False)),
+                        "relevant_detection_delay": score.get(
+                            "relevant_detection_delay"),
+                        "scenario_id": (info or {}).get("scenario_id",
+                                                       "classic"),
+                        "scenario_seed": (info or {}).get("seed"),
+                        "scenario_difficulty": (info or {}).get("difficulty"),
+                    }
+                )
+                delay = score.get("detection_delay")
+                print(
+                    f"{exercise_id}: outcome={score.get('outcome', 'unknown')} "
+                    f"delay={delay if delay is not None else 'no'} "
+                    f"downtime={score.get('downtime_pct', 0.0)}% "
+                    f"blue_score={score.get('blue_score', 0)} "
+                    f"cost=${cost:.4f}"
+                )
+            _stop_quiet()
     finally:
         print("Stopping sandbox...")
-        try:
-            sandbox.stop()
-        except sandbox.SandboxError as exc:
-            print(f"Sandbox stop noted: {exc}", file=sys.stderr)
+        _stop_quiet()
         tools.reset_state()
+        stack.deactivate()
 
     path = _csv_path(args.prefix)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -253,7 +316,8 @@ def main(argv=None) -> int:
         for row in rows:
             out = dict(row)
             for key in ("detection_delay", "time_to_contain", "justified_pct",
-                        "mean_audit_score", "relevant_detection_delay"):
+                        "mean_audit_score", "relevant_detection_delay",
+                        "scenario_seed", "scenario_difficulty"):
                 if out[key] is None:
                     out[key] = ""
             writer.writerow(out)
@@ -268,7 +332,8 @@ def main(argv=None) -> int:
     mean_downtime = _mean([row["downtime_pct"] for row in rows])
     total_cost = sum(row["estimated_cost_usd"] for row in rows)
 
-    print(f"Batch done: {len(rows)} exercises (prefix={args.prefix})")
+    print(f"Batch done: {len(rows)} exercises (prefix={args.prefix}, "
+          f"scenarios={len(keys)})")
     print(f"Sensors: {args.sensors}")
     print(f"Red wins: {red_wins}, blue holds: {blue_holds}, stalemates: {stalemates}")
     if mean_delay is None:
