@@ -491,11 +491,11 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
   border-radius: 6px; overflow: hidden;
 }
 .arena-pressure-red {
-  position: absolute; left: 0; top: 0; bottom: 0;
+  position: absolute; left: 0; top: 0; height: 50%;
   background: var(--arena-red);
 }
 .arena-pressure-blue {
-  position: absolute; right: 0; top: 0; bottom: 0;
+  position: absolute; left: 0; bottom: 0; height: 50%;
   background: var(--arena-blue);
 }
 .arena-mid {

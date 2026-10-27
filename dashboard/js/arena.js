@@ -339,7 +339,7 @@ async function pop(node, ms) {
 
 function markText(fxLayer, pos, text, cls, dy) {
   const mark = el("text", {
-    x: pos.x, y: pos.y + (dy || -38), class: `arena-fx-mark ${cls || "red"}`,
+    x: pos.x, y: pos.y + (dy === undefined ? -54 : dy), class: `arena-fx-mark ${cls || "red"}`,
   }, text);
   fxLayer.append(mark);
   return mark;
@@ -584,7 +584,7 @@ async function playStep(refs, ui, step, ev, speed, myRun) {
       });
       fx.append(tick);
       await pop(tick, 260);
-      const mark = markText(fx, pos, step.mark || "Patched", "ink", 52);
+      const mark = markText(fx, pos, step.mark || "Patched", "ink");
       await fadeInOut(mark, 300, Math.max(200, ms - 300));
       tick.remove();
       mark.remove();
