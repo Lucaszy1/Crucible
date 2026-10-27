@@ -27,6 +27,10 @@ import {
   initArena, renderArenaStatic, setArenaActive, setArenaLayout, toggleArenaSound,
 } from "./arena.js";
 import {
+  cancelStage, firstAccessStage, flashStageHost, glitchStage, initStage,
+  loadStageArt, renderStageStatic, setStageActive, setStageLayout, stageNotify,
+} from "./stage.js";
+import {
   classicLayout, layoutFromEvents, layoutHosts, layoutWeights, scenarioMeta, scenarioText,
 } from "./layout.js";
 
@@ -128,6 +132,7 @@ const els = {
   presentBtn: document.getElementById("presentBtn"),
   settingsBtn: document.getElementById("settingsBtn"),
   settingsPop: document.getElementById("settingsPop"),
+  classicBox: document.getElementById("classicBox"),
 };
 
 const controls = {
@@ -171,6 +176,7 @@ const store = {
   opening: null,
   advance: null,
   presentLoop: false,
+  classic: false,
   thoughtState: null,
   lobby: { runs: [], cards: [], featuredIds: [], autoplay: false, armByEpisode: new Map(), loading: true },
 };
@@ -196,6 +202,48 @@ function reducedMotion() {
 
 let mapRefs = null;
 let arenaRefs = null;
+let stageRefs = null;
+
+// The cinematic stage and the flat arena share one canvas and one
+// call shape; the toggle picks which one paints and animates.
+function sceneView() {
+  if (store.classic) {
+    return {
+      refs: arenaRefs, setLayout: setArenaLayout, renderStatic: renderArenaStatic,
+      notify: arenaNotify, flash: flashArenaHost, firstAccess: firstAccessStinger,
+      glitch: glitchStinger, cancel: cancelArena, setActive: setArenaActive,
+    };
+  }
+  return {
+    refs: stageRefs, setLayout: setStageLayout, renderStatic: renderStageStatic,
+    notify: stageNotify, flash: flashStageHost, firstAccess: firstAccessStage,
+    glitch: glitchStage, cancel: cancelStage, setActive: setStageActive,
+  };
+}
+
+function cancelScene() {
+  const view = sceneView();
+  if (view.refs) view.cancel(view.refs);
+}
+
+function glitchScene() {
+  const view = sceneView();
+  if (view.refs) view.glitch(view.refs);
+}
+
+function setSceneActive(onArena) {
+  if (arenaRefs) setArenaActive(arenaRefs, store.classic && onArena);
+  if (stageRefs) setStageActive(stageRefs, !store.classic && onArena);
+}
+
+function applyClassic(on) {
+  store.classic = Boolean(on);
+  saveBool("crucible-classic", store.classic);
+  if (els.classicBox) els.classicBox.checked = store.classic;
+  cancelScene();
+  setSceneActive(!els.arenaView.hidden);
+  render(false);
+}
 
 function arenaScoreEls() {
   return { outcome: els.arenaOutcome, blue: els.arenaBlue, downtime: els.arenaDowntime };
@@ -246,6 +294,7 @@ function applyLayout(layout, meta) {
   store.scenario = scenarioText(meta || { id: "classic" });
   store.weights = { ...layoutWeights(store.layout) };
   if (arenaRefs) setArenaLayout(arenaRefs, store.layout);
+  if (stageRefs) setStageLayout(stageRefs, store.layout);
   mapRefs = initMap(els.map, store.weights, store.layout);
 }
 
@@ -274,8 +323,9 @@ function render(animate) {
   const states = reduceHostStates(slice, hosts);
   updateMap(mapRefs, states, slice, animate);
   const display = store.events.length > 0 ? displayOutcome(store.events) : null;
-  const arenaStates = renderArenaStatic(
-    arenaRefs, store.events, store.cursor,
+  const view = sceneView();
+  const arenaStates = view.renderStatic(
+    view.refs, store.events, store.cursor,
     {
       weights: store.weights, finalScore: store.finalScore, label: store.label,
       display: display ? { label: display.label, line: outcomeLine(display.key) } : null,
@@ -287,11 +337,11 @@ function render(animate) {
     const ev = store.events[store.cursor - 1];
     if (ev && store.arenaCursor !== store.cursor) {
       store.arenaCursor = store.cursor;
-      arenaNotify(arenaRefs, ev, arenaStates.states, store.speed);
+      view.notify(view.refs, ev, arenaStates.states, store.speed);
       if (!store.firstAccessShown && store.firstAuthIndex !== null &&
         store.cursor - 1 === store.firstAuthIndex) {
         store.firstAccessShown = true;
-        firstAccessStinger(arenaRefs, eventHost(ev));
+        view.firstAccess(view.refs, eventHost(ev));
       }
     }
   } else {
@@ -324,7 +374,10 @@ function render(animate) {
   store.thoughtState = renderThoughts(thoughtPanels(), slice, {
     reduced: reducedMotion(),
     hosts,
-    onFlash: (host) => flashArenaHost(arenaRefs, host),
+    onFlash: (host) => {
+      const flashView = sceneView();
+      if (flashView.refs) flashView.flash(flashView.refs, host);
+    },
   }, store.thoughtState);
   renderTechniques(
     { stages: els.stages, redTech: els.redTech, blueTech: els.blueTech },
@@ -373,7 +426,7 @@ function playReplay() {
     store.finalScore = null;
     hideEndCard(endEls());
     cancelAdvance();
-    cancelArena(arenaRefs);
+    cancelScene();
   }
   stopTimer();
   hideEndCard(endEls());
@@ -390,7 +443,7 @@ function pauseReplay() {
 
 function jump(index) {
   if (store.mode !== "replay") return;
-  cancelArena(arenaRefs);
+  cancelScene();
   hideEndCard(endEls());
   cancelAdvance();
   store.cursor = Math.max(0, Math.min(store.events.length, index));
@@ -424,7 +477,7 @@ async function openExercise(runId, opts) {
   cancelAdvance();
   closeLive();
   stopTimer();
-  cancelArena(arenaRefs);
+  cancelScene();
   notice("");
   setMode("replay", `Replaying ${runId}`);
   switchTab("arena");
@@ -490,7 +543,7 @@ async function beginRun(agents, scenarioToken) {
   hideEndCard(endEls());
   hideDeal(els.dealSlot);
   cancelAdvance();
-  cancelArena(arenaRefs);
+  cancelScene();
   notice("");
   controls.run.disabled = true;
   try {
@@ -524,7 +577,7 @@ function beginFakeLive(path) {
   destroyOpening();
   hideEndCard(endEls());
   cancelAdvance();
-  cancelArena(arenaRefs);
+  cancelScene();
   notice("");
   setMode("live", `Live feed ${path}`);
   switchTab("arena");
@@ -696,7 +749,7 @@ function showEndCardFor() {
   const audits = reduceAudits(store.events, store.events.length);
   const nextId = nextFeaturedId();
   showEndCard(endEls(), stats, audits.summary.justifiedPct, nextId);
-  if (stats.key === "secret-exposed") glitchStinger(arenaRefs);
+  if (stats.key === "secret-exposed") glitchScene();
   const auto = store.presentLoop || (store.lobby.autoplay && store.mode === "replay");
   if (auto && nextId) scheduleAdvance(nextId);
 }
@@ -886,7 +939,7 @@ function switchTab(name) {
     store.learnLoaded = true;
     loadLearning();
   }
-  setArenaActive(arenaRefs, active === "arena");
+  setSceneActive(active === "arena");
 }
 
 async function drawLearning() {
@@ -1066,6 +1119,15 @@ async function boot() {
   }
   mapRefs = initMap(els.map, store.weights);
   arenaRefs = initArena(els.arenaCanvas);
+  store.classic = loadBool("crucible-classic", false);
+  stageRefs = initStage(els.arenaCanvas, { reduced: reducedMotion() });
+  if (els.classicBox) els.classicBox.checked = store.classic;
+  loadStageArt("/assets/art/").then((art) => {
+    if (stageRefs) {
+      stageRefs.art = art;
+      render(false);
+    }
+  });
   try {
     store.attackMap = await fetchAttackMap();
   } catch (err) {
@@ -1081,7 +1143,7 @@ async function boot() {
     onReplay: () => {
       hideEndCard(endEls());
       cancelAdvance();
-      cancelArena(arenaRefs);
+      cancelScene();
       store.cursor = 0;
       store.firstAccessShown = false;
       store.finalScore = null;
@@ -1108,6 +1170,9 @@ async function boot() {
     store.lobby.autoplay = els.autoplayBox.checked;
     saveBool("crucible-autoplay", store.lobby.autoplay);
   });
+  if (els.classicBox) {
+    els.classicBox.addEventListener("change", () => applyClassic(els.classicBox.checked));
+  }
   els.settingsBtn.addEventListener("click", (click) => {
     click.stopPropagation();
     setSettings(els.settingsPop.hidden);
