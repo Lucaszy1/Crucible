@@ -135,6 +135,38 @@ select {
 }
 .notice.error { border-color: var(--red); color: #ffd7d7; background: #230c0c; }
 
+/* View tabs */
+.tabs-main { display: flex; gap: 4px; padding: 10px 20px 0; }
+.tabs-main button {
+  background: var(--panel); color: var(--muted);
+  border: 1px solid var(--border); border-bottom: none;
+  border-radius: 6px 6px 0 0; padding: 6px 18px;
+  font-size: 13px; cursor: pointer;
+}
+.tabs-main button.active { color: var(--cyan); background: var(--panel-2); }
+
+/* Learning view */
+#learnView { padding: 12px 20px 20px; display: grid; gap: 12px; grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr); align-items: start; }
+#learnView[hidden] { display: none; }
+.learn-controls { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; margin-bottom: 10px; }
+.learn-legend { margin-top: 0; }
+#learnSvg { width: 100%; height: auto; display: block; }
+.chart-grid { stroke: #1d2a3a; stroke-width: 1; }
+.chart-axis { fill: var(--muted); font-size: 11px; font-family: var(--mono); text-anchor: end; }
+.chart-axis.chart-x { text-anchor: middle; }
+.chart-empty { fill: var(--muted); font-size: 13px; text-anchor: middle; }
+.chart-mem { fill: none; stroke: var(--cyan); stroke-width: 2; }
+.chart-mem-roll { fill: none; stroke: var(--cyan); stroke-width: 1.5; stroke-dasharray: 5 4; opacity: 0.7; }
+.chart-mem-dot { fill: var(--cyan); }
+.chart-ctl { fill: none; stroke: var(--amber); stroke-width: 2; }
+.chart-ctl-roll { fill: none; stroke: var(--amber); stroke-width: 1.5; stroke-dasharray: 5 4; opacity: 0.7; }
+.chart-ctl-dot { fill: var(--amber); }
+.play-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.play-table th { text-align: left; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--border); }
+.play-table td { padding: 6px 8px 6px 0; border-bottom: 1px solid var(--border); vertical-align: top; }
+.play-table tr:last-child td { border-bottom: none; }
+.episode-cell { font-family: var(--mono); color: var(--cyan); white-space: nowrap; }
+
 /* Grid */
 .grid {
   display: grid; gap: 12px; padding: 12px 20px 20px;
@@ -360,6 +392,8 @@ select {
   .stream { max-height: 360px; }
   .coverage-grid { grid-template-columns: 1fr; }
   .coverage { margin: 0 12px 12px; }
+  #learnView { grid-template-columns: 1fr; padding: 8px 12px 12px; }
+  .tabs-main { padding-left: 12px; padding-right: 12px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

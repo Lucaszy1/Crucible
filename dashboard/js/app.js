@@ -1,5 +1,6 @@
 // Operations Center bootstrap: live and replay modes, render loop.
-import { fetchAttackMap, fetchConfig, fetchRun, fetchRuns, fetchStatus, openLive, startExercise } from "./api.js";
+import { fetchAttackMap, fetchCampaign, fetchCampaigns, fetchConfig, fetchRun, fetchRuns, fetchStatus, openLive, startExercise } from "./api.js";
+import { fillCampaignSelects, renderLearn } from "./learn.js";
 import { reduceHostStates } from "./state.js";
 import { initMap, updateMap } from "./network.js";
 import { renderStreams } from "./streams.js";
@@ -47,6 +48,17 @@ const els = {
   auditCost: document.getElementById("auditCost"),
   auditCount: document.getElementById("auditCount"),
   auditSummary: document.getElementById("auditSummary"),
+  tabOps: document.getElementById("tabOps"),
+  tabLearn: document.getElementById("tabLearn"),
+  opsView: document.getElementById("opsView"),
+  learnView: document.getElementById("learnView"),
+  memSelect: document.getElementById("memSelect"),
+  ctlSelect: document.getElementById("ctlSelect"),
+  learnSvg: document.getElementById("learnSvg"),
+  legendMem: document.getElementById("legendMem"),
+  legendCtl: document.getElementById("legendCtl"),
+  playBody: document.getElementById("playBody"),
+  playEmpty: document.getElementById("playEmpty"),
 };
 
 const controls = {
@@ -338,6 +350,45 @@ async function pollStatus() {
   }
 }
 
+function switchTab(learn) {
+  els.tabOps.classList.toggle("active", !learn);
+  els.tabLearn.classList.toggle("active", learn);
+  els.tabOps.setAttribute("aria-selected", String(!learn));
+  els.tabLearn.setAttribute("aria-selected", String(learn));
+  els.opsView.hidden = learn;
+  els.learnView.hidden = !learn;
+  if (learn && !store.learnLoaded) {
+    store.learnLoaded = true;
+    loadLearning();
+  }
+}
+
+async function drawLearning() {
+  try {
+    const [mem, ctl] = await Promise.all([
+      els.memSelect.value ? fetchCampaign(els.memSelect.value) : Promise.resolve(null),
+      els.ctlSelect.value ? fetchCampaign(els.ctlSelect.value) : Promise.resolve(null),
+    ]);
+    renderLearn(
+      { svg: els.learnSvg, legendMem: els.legendMem, legendCtl: els.legendCtl, table: els.playBody, empty: els.playEmpty },
+      mem, ctl,
+    );
+  } catch (err) {
+    notice(`Could not load campaigns: ${err.message}`, true);
+  }
+}
+
+async function loadLearning() {
+  try {
+    const data = await fetchCampaigns();
+    fillCampaignSelects(els.memSelect, data.campaigns || [], "on");
+    fillCampaignSelects(els.ctlSelect, data.campaigns || [], "off");
+    await drawLearning();
+  } catch (err) {
+    notice(`Could not list campaigns: ${err.message}`, true);
+  }
+}
+
 // Replay shortcuts: space toggles play and pause, arrows step one event.
 function onShortcut(ev) {
   if (ev.defaultPrevented) return;
@@ -381,6 +432,10 @@ async function boot() {
       if (store.playing) playReplay();
     },
   });
+  els.tabOps.addEventListener("click", () => switchTab(false));
+  els.tabLearn.addEventListener("click", () => switchTab(true));
+  els.memSelect.addEventListener("change", drawLearning);
+  els.ctlSelect.addEventListener("change", drawLearning);
   els.play.addEventListener("click", playReplay);
   els.pause.addEventListener("click", pauseReplay);
   els.scrubber.addEventListener("input", () => jump(Number(els.scrubber.value)));

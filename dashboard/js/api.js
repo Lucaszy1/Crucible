@@ -26,6 +26,14 @@ export function fetchAttackMap() {
   return getJson("/attack_map.json");
 }
 
+export function fetchCampaigns() {
+  return getJson("/api/campaigns");
+}
+
+export function fetchCampaign(name) {
+  return getJson(`/api/campaigns/${encodeURIComponent(name)}`);
+}
+
 export async function startExercise(agents, exerciseId) {
   const res = await fetch("/api/exercise/start", {
     method: "POST",

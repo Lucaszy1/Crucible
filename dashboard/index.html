@@ -70,6 +70,12 @@
 
 <div id="notice" class="notice" hidden></div>
 
+<nav class="tabs-main" aria-label="Views">
+  <button id="tabOps" class="active" aria-selected="true">Operations</button>
+  <button id="tabLearn" aria-selected="false">Learning</button>
+</nav>
+
+<div id="opsView">
 <main class="grid">
   <div class="col col-left">
     <section class="panel map-panel" aria-label="Network map">
@@ -156,6 +162,37 @@
     </div>
   </div>
 </section>
+</div>
+
+<div id="learnView" hidden>
+  <section class="panel learn-pick" aria-label="Campaign comparison">
+    <h2>Learning curve</h2>
+    <div class="learn-controls">
+      <div class="control-group">
+        <label for="memSelect">Memory</label>
+        <select id="memSelect"><option value="">Loading campaigns…</option></select>
+      </div>
+      <div class="control-group">
+        <label for="ctlSelect">Control</label>
+        <select id="ctlSelect"><option value="">Loading campaigns…</option></select>
+      </div>
+      <div class="legend learn-legend">
+        <span><i class="sw" data-state="isolated"></i><span id="legendMem">memory</span></span>
+        <span><i class="sw" data-state="probed"></i><span id="legendCtl">control</span></span>
+        <span class="empty">solid per episode, dashed rolling mean</span>
+      </div>
+    </div>
+    <svg id="learnSvg" viewBox="0 0 660 280" role="img" aria-label="Blue score per episode"></svg>
+  </section>
+  <section class="panel" aria-label="Playbook">
+    <h2>Playbook</h2>
+    <p id="playEmpty" class="empty">Pick a memory campaign to see its rules.</p>
+    <table class="play-table" aria-label="Playbook rules">
+      <thead><tr><th>Rule</th><th>From</th></tr></thead>
+      <tbody id="playBody"></tbody>
+    </table>
+  </section>
+</div>
 
 <div id="confirmOverlay" class="overlay" hidden>
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
