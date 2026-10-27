@@ -56,8 +56,8 @@ def parse_args(argv=None):
     parser.add_argument(
         "--max-turns",
         type=int,
-        default=30,
-        help="Turns to attempt per exercise, capped at 30",
+        default=40,
+        help="Turns to attempt per exercise, capped at 40",
     )
     parser.add_argument(
         "--no-cache",
@@ -121,6 +121,7 @@ def main(argv=None) -> int:
                 red = ScriptedRed()
                 blue = ScriptedBlue()
             tools.restore_host("web")
+            tools.restore_host("app")
             tools.restore_host("db")
             tools.restore_host("workstation")
             spend_start = run_exercise._spend_line_count()

@@ -35,8 +35,8 @@ def parse_args(argv=None):
     parser.add_argument(
         "--max-turns",
         type=int,
-        default=30,
-        help="Turns to attempt, capped at 30",
+        default=40,
+        help="Turns to attempt, capped at 40",
     )
     parser.add_argument(
         "--out",
@@ -182,6 +182,7 @@ def main(argv=None) -> int:
     spend_start = _spend_line_count()
     try:
         tools.restore_host("web")
+        tools.restore_host("app")
         tools.restore_host("db")
         result = orchestrator.run_exercise(
             red,

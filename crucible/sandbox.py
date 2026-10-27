@@ -18,7 +18,7 @@ COMPOSE_FILE = SANDBOX_DIR / "docker-compose.yml"
 PROJECT = "crucible"
 
 # The only hosts agents may touch. Enforced here in code.
-ALLOWED_HOSTS = ("web", "db", "workstation")
+ALLOWED_HOSTS = ("web", "app", "db", "workstation")
 
 
 class AllowlistError(ValueError):
@@ -66,7 +66,7 @@ def _compose(*args: str, timeout: int) -> str:
 
 
 def start() -> dict:
-    """Build the images and bring the three hosts up.
+    """Build the images and bring the four hosts up.
 
     Raises SandboxError with the missing host names when any host is
     still down after compose reports success, instead of handing back
@@ -86,7 +86,7 @@ def start() -> dict:
 def stop() -> dict:
     """Stop the range and remove its containers."""
     _compose("down", timeout=120)
-    return {"web": False, "db": False, "workstation": False}
+    return {"web": False, "app": False, "db": False, "workstation": False}
 
 
 def reset() -> dict:

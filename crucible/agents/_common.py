@@ -13,11 +13,11 @@ MAX_TOKENS = 1536
 TEMPERATURE = 0.0
 HISTORY_LIMIT = 6
 REASONING_LIMIT = 400
-DEFAULT_MAX_TURNS = 30
+DEFAULT_MAX_TURNS = 40
 COMPACT_DETAIL_LIMIT = 200
 LAST_RESULT_LIMIT = 1500
 
-_EVIDENCE_RE = re.compile(r"\b(web|db|workstation):\d+\b")
+_EVIDENCE_RE = re.compile(r"\b(web|app|db|workstation):\d+\b")
 
 
 def summarize_history(history: list, limit: int = HISTORY_LIMIT) -> str:
