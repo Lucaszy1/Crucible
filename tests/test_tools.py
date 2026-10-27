@@ -531,3 +531,68 @@ def test_begin_episode_returns_passing_check(monkeypatch):
     assert out == {"ok": True, "attempts": 1,
                    "checks": {"ok": True, "failures": {}, "hosts": []}}
     assert calls == [1]
+
+
+def _gen_docker(monkeypatch, spec, cmp_code=0, passwd_hosts=()):
+    """Fake a generated range: cmp exit plus hosts carrying passwd files."""
+    from crucible.scenarios import compat
+
+    shipped = compat.as_classic_dict(spec)["shipped_defaults"]
+    sandbox.set_active_spec(spec)
+    monkeypatch.setattr(sandbox, "_raw_logs",
+                        lambda host, tail=None: [])
+
+    def fake_exec(host, cmd, timeout=30):
+        if cmd[:3] == ["test", "!", "-e"]:
+            if cmd[3] == tools.PATCH_FLAG:
+                code = 0
+            else:
+                # Absence probe: passes only where no gate may exist.
+                present = host in shipped or host in passwd_hosts
+                code = 0 if not present else 1
+            return {"exit_code": code, "output": "", "stdout": "",
+                    "stderr": ""}
+        if cmd[:2] == ["cmp", "-s"]:
+            code = cmp_code if host in shipped else 1
+            return {"exit_code": code, "output": "", "stdout": "",
+                    "stderr": ""}
+        return {"exit_code": 0, "output": "", "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(sandbox, "exec", fake_exec)
+    sandbox.note_log_offsets()
+    return shipped
+
+
+def test_gen_clean_start_passes_for_every_host_kind(monkeypatch):
+    from crucible.scenarios import generate
+
+    try:
+        spec = generate.generate(1, "easy")
+        shipped = _gen_docker(monkeypatch, spec)
+        # The seed covers every host kind: gated hosts with accounts,
+        # a no-gate workstation without, and gated roles without.
+        assert "granite" in shipped
+        assert "lantern" not in shipped
+        assert "harborlight" not in shipped
+        out = tools.clean_start_check()
+        assert out == {"ok": True, "failures": {},
+                       "hosts": list(sandbox.active_hosts())}
+    finally:
+        sandbox.set_active_spec(None)
+
+
+def test_gen_clean_start_catches_rotated_and_leftover(monkeypatch):
+    from crucible.scenarios import generate
+
+    try:
+        spec = generate.generate(1, "easy")
+        _gen_docker(monkeypatch, spec, cmp_code=1,
+                    passwd_hosts=("harborlight",))
+        out = tools.clean_start_check()
+        assert out["ok"] is False
+        assert out["failures"]["credentials:granite"] == \
+            "credentials differ from shipped defaults"
+        assert out["failures"]["credentials:harborlight"] == \
+            "unexpected sign-in gate"
+    finally:
+        sandbox.set_active_spec(None)

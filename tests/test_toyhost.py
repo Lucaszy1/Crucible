@@ -281,6 +281,72 @@ def test_missing_paths_fail_without_logging(tmp_path):
     assert _log_lines(tmp_path) == []
 
 
+# -- credential state (clean-start contract) ---------------------------
+#
+# The clean-start check treats a passwd file on an account-less host
+# as an unexpected gate, and compares live vs shipped files on hosts
+# with accounts. write_state must agree: passwd files exist if and
+# only if the host has accounts.
+
+
+def _write_state_for(spec, host, tmp_path):
+    state = tmp_path / "state"
+    toyhost.write_state(toyhost.host_config(spec, host), str(state))
+    return state
+
+
+def test_write_state_writes_passwd_with_accounts(tmp_path, spec):
+    weak = next(step for step in spec["path"]
+                if step["kind"] == "weak_creds")
+    state = _write_state_for(spec, weak["host"], tmp_path)
+    line = f"{weak['account']}:{weak['password']}"
+    live = (state / "passwd").read_text().splitlines()
+    shipped = (state / "passwd.shipped").read_text().splitlines()
+    assert line in live
+    assert live == shipped
+    assert (state / "role").read_text()
+
+
+def test_write_state_omits_passwd_without_accounts(tmp_path):
+    spec = generate.generate(1, "easy")
+    # harborlight is a gated-role host with no accounts; lantern is a
+    # no-gate workstation. Neither may carry passwd files.
+    for host in ("harborlight", "lantern"):
+        assert toyhost.host_config(spec, host)["accounts"] == {}
+        state = _write_state_for(spec, host, tmp_path / host)
+        assert not (state / "passwd").exists()
+        assert not (state / "passwd.shipped").exists()
+        assert (state / "role").read_text()
+        assert (state / "gated.txt").exists()
+
+
+def test_signin_without_passwd_files(tmp_path):
+    for role, want, key in (("workstation", "NO_GATE",
+                             "signin_fail_nogate"),
+                            ("web portal", "AUTH_FAIL", "signin_fail")):
+        target = tmp_path / role.replace(" ", "_")
+        target.mkdir()
+        state, env = _make_state(target, role=role)
+        (state / "passwd").unlink()
+        (state / "passwd.shipped").unlink()
+        done = run_script("signin.sh", ["probeuser", "probepass",
+                                        "controller"], env)
+        assert done.stdout.strip() == want
+        line = _log_lines(target)[0]
+        assert simulate.LINE_FORMATS[key].match(line), line
+        assert "no-gate" in line if want == "NO_GATE" else "no-gate" not in line
+
+
+def test_account_sets_match_shipped_defaults(spec):
+    from crucible.scenarios import compat
+
+    for candidate in (spec, generate.generate(1, "easy")):
+        shipped = compat.as_classic_dict(candidate)["shipped_defaults"]
+        for host in [item["name"] for item in candidate["hosts"]]:
+            accounts = toyhost.host_config(candidate, host)["accounts"]
+            assert bool(accounts) == (host in shipped), host
+
+
 # -- rotate / reset ----------------------------------------------------
 
 

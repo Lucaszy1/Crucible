@@ -9,8 +9,8 @@ print to this process's stdout, which is PID 1's stdout inside the
 container. Passwords never reach the logs.
 
 Layout under TOYHOST_STATE (/run/toyhost by default):
-  passwd.shipped  pristine user:password lines for this host
-  passwd          live copy the signin handler checks
+  passwd.shipped  pristine user:password lines (only with accounts)
+  passwd          live copy the signin handler checks (only with accounts)
   session         touched on any successful sign-in; gates file reads
   gated.txt       file paths whose list/read needs the session flag
   role            the host's role (workstation gates always fail)
@@ -223,17 +223,24 @@ def noise_loop(spec: dict, host: str, seed: str) -> None:
 
 
 def write_state(config: dict, state_dir: str = STATE_DIR) -> None:
-    """Write the credential, gate, and role files handlers read."""
+    """Write the credential, gate, and role files handlers read.
+
+    Hosts with no accounts get no passwd files at all: the
+    clean-start check treats any passwd file there as an unexpected
+    gate. The handlers already tolerate the absence (NO_GATE on
+    workstations, AUTH_FAIL elsewhere, ROTATE/RESET_NONE).
+    """
     os.makedirs(state_dir, exist_ok=True)
     accounts = config.get("accounts", {}) or {}
-    shipped = "".join(f"{user}:{password}\n"
-                      for user, password in sorted(accounts.items()))
-    with open(os.path.join(state_dir, "passwd.shipped"), "w",
-              encoding="utf-8") as handle:
-        handle.write(shipped)
-    with open(os.path.join(state_dir, "passwd"), "w",
-              encoding="utf-8") as handle:
-        handle.write(shipped)
+    if accounts:
+        shipped = "".join(f"{user}:{password}\n"
+                          for user, password in sorted(accounts.items()))
+        with open(os.path.join(state_dir, "passwd.shipped"), "w",
+                  encoding="utf-8") as handle:
+            handle.write(shipped)
+        with open(os.path.join(state_dir, "passwd"), "w",
+                  encoding="utf-8") as handle:
+            handle.write(shipped)
     with open(os.path.join(state_dir, "role"), "w",
               encoding="utf-8") as handle:
         handle.write(str(config.get("role", "")))
