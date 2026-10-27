@@ -79,7 +79,7 @@ Every tool call emits an event: id, timestamp, actor, tool, args, result, reason
 
 ### Must have (done by end of Day 6)
 1. Sandbox with 4 containers (web, app, db, workstation) and a deliberately weak scenario.
-2. Red team and blue team agents with tool calling, turn-based loop, deterministic seed.
+2. Red team and blue team agents with tool calling, turn-based loop, episode seed for cache keys (sampling still diverges between runs).
 3. Live Operations Center dashboard: animated network graph (host states: clean, probed, compromised, isolated, restored), side-by-side agent reasoning streams, event timeline with MITRE ATT&CK tags, containment timer, scoreboard.
 4. Auditor agent: scores every blue action as justified or not, citing the exact log line. Shown live and in the final scorecard. This is the verifiable-agents story.
 5. Voice commands via Muse Voice Transcribe: judge can say "isolate the file server" and the operations center executes it as a human blue-team action.

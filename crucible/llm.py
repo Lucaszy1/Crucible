@@ -311,8 +311,10 @@ def chat(
     Returns a plain dict with content, tool_calls, usage, model, and a
     cached flag. Tests may pass a fake client; production passes none and
     gets a real Meta Model API client. The cache key includes the
-    exercise id, plus the episode seed when one is given, so matched
-    arms never share entries. A None temperature resolves per role.
+    exercise id, plus the episode seed when one is given, so paired
+    arms never share entries. The seed only splits cache keys; it
+    does not match play between arms. A None temperature resolves
+    per role.
     """
     model = model_for(role)
     effort = (reasoning_effort or "").strip() or reasoning_effort_default()

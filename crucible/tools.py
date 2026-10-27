@@ -32,6 +32,8 @@ __all__ = [
     "patch_service",
     "restore_host",
     "reset_state",
+    "begin_episode",
+    "clean_start_check",
 ]
 
 PATCH_FLAG = "/tmp/patched"
@@ -52,6 +54,7 @@ def reset_state() -> None:
     _state["authed"].clear()
     _state["blocked"].clear()
     _state["findings"].clear()
+    sandbox.clear_log_offsets()
 
 
 def _scenario() -> dict:
@@ -82,6 +85,38 @@ def _valid_dir_path(path: str) -> str:
         if clean == bare or clean.startswith(root):
             return clean
     raise ValueError(f"path {path!r} is outside readable roots {roots}")
+
+
+def _clean_token(text: str) -> str:
+    """Keep log-safe characters so a blocked line stays one line."""
+    return "".join(
+        ch if ch.isalnum() or ch in "_./:=-" else "_"
+        for ch in str(text or "")
+    )[:160]
+
+
+def _refuse_when_isolated(host: str, action: str, detail: str) -> dict | None:
+    """Refuse a red action against a detached host.
+
+    Returns an unreachable result after appending one blocked line to
+    the host's own log so blue sees the attempt, or None when the
+    host is attached. An unreadable isolation state fails open here;
+    the action's own exec surfaces real docker trouble.
+    """
+    try:
+        isolated = sandbox.is_isolated(host)
+    except SandboxError:
+        return None
+    if not isolated:
+        return None
+    line = f"blocked {action} {detail} from={LOG_SOURCE}"
+    try:
+        sandbox.exec(host, ["sh", "-c",
+                            f"printf '%s\\n' '{line}' >>/proc/1/fd/1 2>/dev/null || true"])
+    except SandboxError:
+        pass
+    return {"ok": False,
+            "error": f"host {host!r} is unreachable (isolated from the range)"}
 
 
 # Red team tools.
@@ -162,6 +197,9 @@ def http_request(host: str, path: str, method: str = "GET", body: str | None = N
         return {"ok": False, "error": f"host {host!r} is not up"}
     if not sandbox.is_running("workstation"):
         return {"ok": False, "error": "workstation relay is not up"}
+    refused = _refuse_when_isolated(host, "http-request", f"path={_clean_token(path)}")
+    if refused is not None:
+        return refused
     url = f"http://{host}:{port}{path}"
     data_repr = repr(body.encode("utf-8")) if body is not None else "None"
     script = _relay_script(url, method, data_repr)
@@ -191,7 +229,8 @@ def try_credential(host: str, user: str, password: str) -> dict:
     credential files. The scenario file only documents the shipped default;
     nothing here compares against it. A hit marks the host signed-in for
     later file reads. The gate logs every attempt (user and source,
-    never the password) to the container log blue reads.
+    never the password) to the container log blue reads. A detached
+    host refuses the attempt as unreachable and logs one blocked line.
     """
     sandbox.check_host(host)
     if not user or not isinstance(user, str):
@@ -200,6 +239,9 @@ def try_credential(host: str, user: str, password: str) -> dict:
         raise ValueError("password must be a non-empty string")
     if not sandbox.is_running(host):
         return {"ok": False, "error": f"host {host!r} is not up"}
+    refused = _refuse_when_isolated(host, "signin", f"user={_clean_token(user)}")
+    if refused is not None:
+        return refused
     try:
         done = sandbox.exec(host, ["signin", user, password, LOG_SOURCE])
     except SandboxError as exc:
@@ -225,6 +267,9 @@ def read_file(host: str, path: str) -> dict:
     """
     sandbox.check_host(host)
     clean = _valid_path(path)
+    refused = _refuse_when_isolated(host, "file-read", f"path={_clean_token(clean)}")
+    if refused is not None:
+        return refused
     if clean.startswith("/secret/") and host not in _state["authed"]:
         return {"ok": False, "error": f"sign-in on {host!r} is required first"}
     try:
@@ -247,6 +292,9 @@ def list_files(host: str, path: str) -> dict:
     """
     sandbox.check_host(host)
     clean = _valid_dir_path(path)
+    refused = _refuse_when_isolated(host, "dir-list", f"path={_clean_token(clean)}")
+    if refused is not None:
+        return refused
     if (clean == "/secret" or clean.startswith("/secret/")) and host not in _state["authed"]:
         return {"ok": False, "error": f"sign-in on {host!r} is required first"}
     try:
@@ -274,19 +322,21 @@ def report_finding(text: str) -> dict:
 def read_logs(host: str, n: int = 50) -> dict:
     """Return recent log lines from one sandbox host with stable line ids.
 
-    Ids count from the first line the host ever logged, so db:3 names the
-    same line on later reads even after more lines arrive.
+    Lines cover only the current exercise: the episode scope recorded
+    at episode start hides earlier lines, so ids restart at 0 per
+    episode (db:0 names this exercise's first db line) and stay stable
+    on later reads even after more lines arrive.
     """
     sandbox.check_host(host)
     if isinstance(n, bool) or not isinstance(n, int):
         raise ValueError("n must be an integer")
     n = max(1, min(200, n))
     try:
-        all_lines = sandbox.container_logs(host, tail=None)
+        scoped_lines = sandbox.container_logs(host, tail=None)
     except SandboxError as exc:
         return {"ok": False, "error": str(exc)}
-    window = all_lines[-n:]
-    start = len(all_lines) - len(window)
+    window = scoped_lines[-n:]
+    start = len(scoped_lines) - len(window)
     return {"ok": True, "host": host,
             "lines": [{"id": f"{host}:{start + i}", "line": line}
                       for i, line in enumerate(window)]}
@@ -388,3 +438,108 @@ def restore_host(host: str) -> dict:
     cleaned = done["exit_code"] == 0
     return {"ok": True, "host": host, "reattached": not net.get("isolated", True),
             "patch_cleared": cleaned, "sign_in_reset": gate_reset}
+
+
+def _credential_account_names() -> set:
+    """Collect credential account names that must not appear pre-move-1."""
+    shipped = (_scenario().get("shipped_defaults", {}) or {})
+    names = set()
+    if isinstance(shipped, dict):
+        for entry in shipped.values():
+            if isinstance(entry, dict):
+                user = entry.get("user")
+                if isinstance(user, str) and user.strip():
+                    names.add(user.strip())
+    return names
+
+
+def clean_start_check() -> dict:
+    """Verify the range matches a fresh episode start.
+
+    Checks every host for detachment, patch flags, off-default
+    credentials, and any in-scope log line naming a credential
+    account or reading the secret. Never raises for docker trouble;
+    unreadable state fails the check instead.
+    """
+    failures = {}
+    for host in sandbox.ALLOWED_HOSTS:
+        try:
+            isolated = sandbox.is_isolated(host)
+        except SandboxError as exc:
+            failures[f"isolated:{host}"] = f"unreadable: {exc}"
+            continue
+        if isolated:
+            failures[f"isolated:{host}"] = "host detached from range network"
+    for host in sandbox.ALLOWED_HOSTS:
+        try:
+            done = sandbox.exec(host, ["test", "!", "-e", PATCH_FLAG])
+        except SandboxError as exc:
+            failures[f"patch:{host}"] = f"unreadable: {exc}"
+            continue
+        if done["exit_code"] != 0:
+            failures[f"patch:{host}"] = "patch flag present"
+    shipped = (_scenario().get("shipped_defaults", {}) or {})
+    for host in ("app", "db"):
+        want = shipped.get(host, {}) or {}
+        try:
+            user = sandbox.exec(host, ["cat", "/secret/.toy_user"])
+            secret = sandbox.exec(host, ["cat", "/secret/.toy_pass"])
+        except SandboxError as exc:
+            failures[f"credentials:{host}"] = f"unreadable: {exc}"
+            continue
+        if user["exit_code"] != 0 or secret["exit_code"] != 0:
+            failures[f"credentials:{host}"] = "credential files missing"
+        elif user["output"] != want.get("user") or secret["output"] != want.get("pass"):
+            failures[f"credentials:{host}"] = "credentials differ from shipped defaults"
+    for host in ("web", "workstation"):
+        try:
+            probe = sandbox.exec(host, ["cat", "/secret/.toy_pass"])
+        except SandboxError as exc:
+            failures[f"credentials:{host}"] = f"unreadable: {exc}"
+            continue
+        if probe["exit_code"] == 0:
+            failures[f"credentials:{host}"] = "unexpected sign-in gate"
+    recorded = set(sandbox.log_offsets())
+    if recorded != set(sandbox.ALLOWED_HOSTS):
+        failures["scope"] = "episode log scope not recorded"
+    names = _credential_account_names()
+    for host in sandbox.ALLOWED_HOSTS:
+        try:
+            lines = sandbox.container_logs(host, tail=None)
+        except SandboxError as exc:
+            failures[f"logs:{host}"] = f"unreadable: {exc}"
+            continue
+        for line in lines:
+            if any(name in line for name in names):
+                failures[f"scope:{host}"] = "account name in this-episode logs"
+                break
+            if "file read path=/secret/" in line:
+                failures[f"secret:{host}"] = "secret read in this-episode logs"
+                break
+    return {"ok": not failures, "failures": failures,
+            "hosts": list(sandbox.ALLOWED_HOSTS)}
+
+
+def begin_episode() -> dict:
+    """Restore every host, scope logs to this episode, verify clean start.
+
+    Runs the clean-start check after the restore; on failure resets
+    once more and checks again, then raises SandboxError when the
+    range still fails. Returns the passing check with its attempt.
+    """
+    last = {"ok": False, "failures": {"episode": "check never ran"}, "hosts": []}
+    for attempt in (1, 2):
+        for host in sandbox.ALLOWED_HOSTS:
+            restore_host(host)
+        try:
+            sandbox.note_log_offsets()
+            last = clean_start_check()
+        except SandboxError as exc:
+            last = {"ok": False, "failures": {"scope": str(exc)},
+                    "hosts": list(sandbox.ALLOWED_HOSTS)}
+        if last.get("ok"):
+            return {"ok": True, "attempts": attempt, "checks": last}
+    raise SandboxError(
+        "range failed clean-start check twice: "
+        + json.dumps(last.get("failures", {}), sort_keys=True)
+    )

@@ -183,12 +183,38 @@ def exec(host: str, cmd: list, timeout: int = 30) -> dict:
             "stderr": stderr}
 
 
-def container_logs(host: str, tail: int | None = 100) -> list:
-    """Return stdout lines from one sandbox host.
+# Episode log scope: per-host line counts recorded when an episode
+# starts. While set, container_logs returns only lines logged after
+# the offset, so one exercise never sees another's log lines.
+_LOG_OFFSETS: dict = {}
 
-    tail=None returns every line. read_logs uses that to number ids from
-    the first line logged, so ids stay stable as logs grow.
+
+def note_log_offsets(hosts=None) -> dict:
+    """Record each host's current log length as this episode's scope start.
+
+    Later container_logs calls return only newer lines. Returns a copy
+    of the recorded offsets.
     """
+    targets = list(hosts) if hosts else list(ALLOWED_HOSTS)
+    offsets = {}
+    for host in targets:
+        offsets[check_host(host)] = len(_raw_logs(host, tail=None))
+    _LOG_OFFSETS.update(offsets)
+    return dict(offsets)
+
+
+def clear_log_offsets() -> None:
+    """Drop any recorded episode scope, restoring full-stream reads."""
+    _LOG_OFFSETS.clear()
+
+
+def log_offsets() -> dict:
+    """Return a copy of the recorded episode log offsets."""
+    return dict(_LOG_OFFSETS)
+
+
+def _raw_logs(host: str, tail: int | None) -> list:
+    """Return stdout lines from one sandbox host, ignoring any scope."""
     check_host(host)
     with _client_scope() as client:
         container = _container(host, client)
@@ -202,6 +228,24 @@ def container_logs(host: str, tail: int | None = 100) -> list:
     if isinstance(raw, bytes):
         raw = raw.decode("utf-8", errors="replace")
     return [line for line in raw.splitlines() if line.strip()]
+
+
+def container_logs(host: str, tail: int | None = 100) -> list:
+    """Return stdout lines from one sandbox host.
+
+    tail=None returns every line. While an episode scope is recorded
+    (see note_log_offsets), only lines logged after the scope start
+    are returned, so ids computed from this list restart at 0 per
+    episode and stay stable as logs grow. With no scope recorded,
+    tail=None returns the full stream.
+    """
+    check_host(host)
+    if host in _LOG_OFFSETS:
+        scoped = _raw_logs(host, tail=None)[_LOG_OFFSETS[host]:]
+        if tail is None:
+            return scoped
+        return scoped[-max(1, tail):]
+    return _raw_logs(host, tail)
 
 
 def _range_network_name(container) -> str | None:

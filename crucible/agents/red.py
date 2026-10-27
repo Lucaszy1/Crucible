@@ -121,7 +121,7 @@ TOOL_SCHEMAS = [
 
 def _build_messages(turn: int, history: list,
                     max_turns: int = _common.DEFAULT_MAX_TURNS) -> list:
-    recent = _common.summarize_history(history)
+    recent = _common.summarize_own_recent(history, ACTOR)
     own = _common.summarize_own_history(history, ACTOR)
     last_result = _common.format_last_result(history, ACTOR)
     known = _common.red_known_state(history)
@@ -133,7 +133,7 @@ def _build_messages(turn: int, history: list,
         f"What you already know: {known}\n"
         f"Your most recent tool result:\n{last_result}\n"
         f"Your previous moves:\n{own}\n"
-        f"Recent exercise moves:\n{recent}\n"
+        f"Your recent moves:\n{recent}\n"
         "Reply text must hold a one or two sentence reasoning summary."
     )
     return [

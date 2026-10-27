@@ -154,9 +154,13 @@ def _down_hosts(history: list) -> dict:
     Mirrors scoring: a successful isolate_host or patch_service marks the
     host down, a successful restore_host clears it, failed actions change
     nothing. Patched hosts count as down because they accrue cost too.
+    Only blue's own actions count; red cannot contain, and numbering
+    still counts every event so turn counts stay stable.
     """
     down: dict = {}
     for index, event in enumerate(history or [], start=1):
+        if event.get("actor") != ACTOR:
+            continue
         result = event.get("result", {}) or {}
         if result.get("ok") is not True:
             continue
@@ -205,20 +209,23 @@ def _lessons_text(playbook: list | None) -> str:
 def _build_messages(turn: int, history: list,
                     max_turns: int = _common.DEFAULT_MAX_TURNS,
                     playbook: list | None = None) -> list:
-    recent = _common.summarize_history(history)
+    recent = _common.summarize_own_recent(history, ACTOR)
     own = _common.summarize_own_history(history, ACTOR)
     last_result = _common.format_last_result(history, ACTOR)
     isolated = _isolated_hosts_line(history)
     lessons = _lessons_text(playbook)
     remaining = max(0, int(max_turns) - int(turn) + 1)
+    moves_so_far = max(0, int(turn) - 1)
     user_text = (
         f"This is turn {turn} of {max_turns}. "
         f"Turns remaining (including this one): {remaining}. "
         f"Call exactly one blue team tool for this turn. "
+        f"Log lines cover only this exercise. "
+        f"Moves so far this exercise: {moves_so_far}. "
         f"{lessons}"
         f"Your most recent tool result:\n{last_result}\n"
         f"Your previous moves:\n{own}\n"
-        f"Recent exercise moves:\n{recent}\n"
+        f"Your recent moves:\n{recent}\n"
         f"{isolated}\n"
         "Reply text must hold a one or two sentence reasoning summary. "
         "Cite log line ids when you report or contain."

@@ -40,6 +40,18 @@ def summarize_history(history: list, limit: int = HISTORY_LIMIT) -> str:
     return "\n".join(lines)
 
 
+def summarize_own_recent(history: list, actor: str,
+                         limit: int = HISTORY_LIMIT) -> str:
+    """Render one team's own recent moves with args and reasoning.
+
+    Information boundary: agent prompts build their recent-moves
+    section from this, so neither team ever sees the other team's
+    report text or reasoning summaries.
+    """
+    own = [event for event in (history or []) if event.get("actor") == actor]
+    return summarize_history(own, limit=limit)
+
+
 def _squash(text: str) -> str:
     """Collapse whitespace so a note stays on one line."""
     return " ".join(str(text or "").split())

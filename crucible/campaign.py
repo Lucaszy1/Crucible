@@ -52,7 +52,9 @@ def parse_args(argv=None):
     parser.add_argument("--arms",
                         help="Two arms as name,name (first memory on, second "
                         "off) or name:on,name:off; interleaves episodes "
-                        "pair by pair with matched seeds")
+                        "pair by pair. Arms pair by episode index only; "
+                        "the shared pair seed only splits cache keys, "
+                        "play still diverges.")
     parser.add_argument("--agents", choices=("scripted", "model"),
                         default="scripted",
                         help="scripted is free, model uses Muse Spark")
