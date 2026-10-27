@@ -11,6 +11,7 @@ import { reduceAudits, renderAuditor } from "./audit.js";
 import { renderScoreboard, renderScoreDetails } from "./scoreboard.js";
 import { focusEvidenceRef, renderEvidence } from "./evidence.js";
 import { fillRuns, initControls, serverStatus, setServer, showConfirm } from "./controls.js";
+import { arenaNotify, cancelArena, initArena, renderArenaStatic, toggleArenaSound } from "./arena.js";
 
 const REPLAY_INTERVAL_MS = 1200;
 
@@ -46,9 +47,32 @@ const els = {
   auditChips: document.getElementById("auditChips"),
   auditCost: document.getElementById("auditCost"),
   auditSummary: document.getElementById("auditSummary"),
+  tabArena: document.getElementById("tabArena"),
   tabStory: document.getElementById("tabStory"),
   tabDetails: document.getElementById("tabDetails"),
   tabLearn: document.getElementById("tabLearn"),
+  arenaView: document.getElementById("arenaView"),
+  arenaSvg: document.getElementById("arenaSvg"),
+  arenaRedLine: document.getElementById("arenaRedLine"),
+  arenaBlueLine: document.getElementById("arenaBlueLine"),
+  arenaCaption: document.getElementById("arenaCaption"),
+  arenaRedBar: document.getElementById("arenaRedBar"),
+  arenaBlueBar: document.getElementById("arenaBlueBar"),
+  arenaRedPct: document.getElementById("arenaRedPct"),
+  arenaBluePct: document.getElementById("arenaBluePct"),
+  arenaVerdict: document.getElementById("arenaVerdict"),
+  arenaVerdictIcon: document.getElementById("arenaVerdictIcon"),
+  arenaVerdictWord: document.getElementById("arenaVerdictWord"),
+  arenaBanner: document.getElementById("arenaBanner"),
+  arenaVignette: document.getElementById("arenaVignette"),
+  arenaOutcome: document.getElementById("arenaOutcome"),
+  arenaBlue: document.getElementById("arenaBlue"),
+  arenaDowntime: document.getElementById("arenaDowntime"),
+  arenaPlay: document.getElementById("arenaPlay"),
+  arenaPause: document.getElementById("arenaPause"),
+  arenaScrubber: document.getElementById("arenaScrubber"),
+  arenaPosition: document.getElementById("arenaPosition"),
+  soundBtn: document.getElementById("soundBtn"),
   storyView: document.getElementById("storyView"),
   detailsView: document.getElementById("detailsView"),
   learnView: document.getElementById("learnView"),
@@ -99,9 +123,29 @@ const store = {
   label: "No exercise loaded",
   liveSource: null,
   animateNext: false,
+  arenaCursor: 0,
 };
 
 let mapRefs = null;
+let arenaRefs = null;
+
+function arenaUi() {
+  return {
+    redLine: els.arenaRedLine, blueLine: els.arenaBlueLine, caption: els.arenaCaption,
+    redBar: els.arenaRedBar, blueBar: els.arenaBlueBar,
+    redPct: els.arenaRedPct, bluePct: els.arenaBluePct,
+    verdict: els.arenaVerdict, verdictIcon: els.arenaVerdictIcon, verdictWord: els.arenaVerdictWord,
+    banner: els.arenaBanner, vignette: els.arenaVignette,
+  };
+}
+
+function arenaScoreEls() {
+  return { outcome: els.arenaOutcome, blue: els.arenaBlue, downtime: els.arenaDowntime };
+}
+
+function arenaTransportEls() {
+  return { scrubber: els.arenaScrubber, position: els.arenaPosition, play: els.arenaPlay, pause: els.arenaPause };
+}
 
 function notice(text, isError) {
   if (!text) {
@@ -157,6 +201,16 @@ function render(animate) {
   const slice = store.events.slice(0, store.cursor);
   const states = reduceHostStates(slice);
   updateMap(mapRefs, states, slice, animate);
+  const arenaStates = renderArenaStatic(arenaRefs, arenaUi(), store.events, store.cursor);
+  if (animate && store.cursor > 0) {
+    const ev = store.events[store.cursor - 1];
+    if (ev && store.arenaCursor !== store.cursor) {
+      store.arenaCursor = store.cursor;
+      arenaNotify(arenaRefs, arenaUi(), ev, arenaStates.states, store.speed);
+    }
+  } else {
+    store.arenaCursor = store.cursor;
+  }
   const audits = reduceAudits(store.events, store.cursor);
   renderFeed(els.feed, store.events, store.cursor, store.attackMap, onEvidenceRef, audits.byTarget, {
     autoscroll: store.mode === "live",
@@ -177,11 +231,13 @@ function render(animate) {
     { scrubber: els.scrubber, position: els.position, play: els.play, pause: els.pause },
     store.cursor, store.events.length, store.playing, canScrub,
   );
+  renderTransport(arenaTransportEls(), store.cursor, store.events.length, store.playing, canScrub);
   renderAttack(
     { stages: els.stages, redTech: els.redTech, blueTech: els.blueTech },
     store.attackMap, store.events, store.cursor,
   );
   renderScoreboard(scoreEls(), store.events, store.cursor, store.weights, store.spend, store.finalScore);
+  renderScoreboard(arenaScoreEls(), store.events, store.cursor, store.weights, store.spend, store.finalScore);
   renderScoreDetails(scoreEls(), store.events, store.cursor, store.weights, store.spend, store.finalScore);
   renderEvidence({ chips: els.chips, tabs: els.tabs, viewer: els.viewer }, store.events, store.cursor);
   els.eventCount.textContent = `${store.events.length} event${store.events.length === 1 ? "" : "s"}`;
@@ -207,7 +263,10 @@ function tickReplay() {
 
 function playReplay() {
   if (store.mode !== "replay" || store.events.length === 0) return;
-  if (store.cursor >= store.events.length) store.cursor = 0;
+  if (store.cursor >= store.events.length) {
+    store.cursor = 0;
+    cancelArena(arenaRefs, arenaUi());
+  }
   stopTimer();
   store.playing = true;
   store.timer = setInterval(tickReplay, REPLAY_INTERVAL_MS / store.speed);
@@ -221,6 +280,7 @@ function pauseReplay() {
 
 function jump(index) {
   if (store.mode !== "replay") return;
+  cancelArena(arenaRefs, arenaUi());
   store.cursor = Math.max(0, Math.min(store.events.length, index));
   store.finalScore = store.cursor >= store.events.length ? store.finalScore : null;
   if (store.replayScore && store.cursor >= store.events.length) store.finalScore = store.replayScore;
@@ -237,6 +297,7 @@ function closeLive() {
 async function loadReplay(runId, autoplay) {
   closeLive();
   stopTimer();
+  cancelArena(arenaRefs, arenaUi());
   notice("");
   setMode("replay", `Replaying ${runId}`);
   store.events = [];
@@ -265,6 +326,7 @@ async function loadReplay(runId, autoplay) {
 async function beginRun(agents) {
   closeLive();
   stopTimer();
+  cancelArena(arenaRefs, arenaUi());
   notice("");
   controls.run.disabled = true;
   try {
@@ -367,6 +429,7 @@ async function pollStatus() {
       notice(spend.last_warning, false);
     }
     renderScoreboard(scoreEls(), store.events, store.cursor, store.weights, store.spend, store.finalScore);
+    renderScoreboard(arenaScoreEls(), store.events, store.cursor, store.weights, store.spend, store.finalScore);
     renderScoreDetails(scoreEls(), store.events, store.cursor, store.weights, store.spend, store.finalScore);
   } catch (err) {
     setServer(controls, "down", "Server unreachable");
@@ -374,13 +437,14 @@ async function pollStatus() {
 }
 
 const TABS = {
+  arena: ["tabArena", "arenaView"],
   story: ["tabStory", "storyView"],
   details: ["tabDetails", "detailsView"],
   learn: ["tabLearn", "learnView"],
 };
 
 function switchTab(name) {
-  const active = TABS[name] ? name : "story";
+  const active = TABS[name] ? name : "arena";
   for (const [key, [tabId, viewId]] of Object.entries(TABS)) {
     const on = key === active;
     els[tabId].classList.toggle("active", on);
@@ -436,6 +500,13 @@ function toggleTheme() {
 function setPresent(on) {
   document.body.classList.toggle("present", on);
   els.presentBtn.textContent = on ? "Exit present" : "Present";
+  if (on) switchTab("arena");
+}
+
+function toggleSound() {
+  const on = toggleArenaSound();
+  els.soundBtn.textContent = on ? "Sound on" : "Sound off";
+  els.soundBtn.setAttribute("aria-pressed", String(on));
 }
 
 function togglePresent() {
@@ -447,7 +518,8 @@ function setSettings(open) {
   els.settingsBtn.setAttribute("aria-expanded", String(open));
 }
 
-// Shortcuts: P toggles presentation, arrows and space drive replay.
+// Shortcuts: P toggles presentation, A/S switch views, M toggles
+// arena sound, arrows and space drive replay.
 function onShortcut(ev) {
   if (ev.defaultPrevented) return;
   const tag = (ev.target && ev.target.tagName) || "";
@@ -461,6 +533,21 @@ function onShortcut(ev) {
   if (ev.key === "p" || ev.key === "P") {
     ev.preventDefault();
     togglePresent();
+    return;
+  }
+  if (ev.key === "a" || ev.key === "A") {
+    ev.preventDefault();
+    switchTab("arena");
+    return;
+  }
+  if (ev.key === "s" || ev.key === "S") {
+    ev.preventDefault();
+    switchTab("story");
+    return;
+  }
+  if (ev.key === "m" || ev.key === "M") {
+    ev.preventDefault();
+    toggleSound();
     return;
   }
   if (store.mode !== "replay" || store.events.length === 0) return;
@@ -494,6 +581,7 @@ async function boot() {
     notice("Could not load range config, using default host weights.", false);
   }
   mapRefs = initMap(els.map, store.weights);
+  arenaRefs = initArena(els.arenaSvg);
   try {
     store.attackMap = await fetchAttackMap();
   } catch (err) {
@@ -507,6 +595,7 @@ async function boot() {
       if (store.playing) playReplay();
     },
   });
+  els.tabArena.addEventListener("click", () => switchTab("arena"));
   els.tabStory.addEventListener("click", () => switchTab("story"));
   els.tabDetails.addEventListener("click", () => switchTab("details"));
   els.tabLearn.addEventListener("click", () => switchTab("learn"));
@@ -523,6 +612,10 @@ async function boot() {
   els.play.addEventListener("click", playReplay);
   els.pause.addEventListener("click", pauseReplay);
   els.scrubber.addEventListener("input", () => jump(Number(els.scrubber.value)));
+  els.arenaPlay.addEventListener("click", playReplay);
+  els.arenaPause.addEventListener("click", pauseReplay);
+  els.arenaScrubber.addEventListener("input", () => jump(Number(els.arenaScrubber.value)));
+  els.soundBtn.addEventListener("click", toggleSound);
   document.addEventListener("keydown", onShortcut);
   render(false);
   await refreshRuns(true);
