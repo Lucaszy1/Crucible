@@ -67,7 +67,7 @@ def test_batch_writes_csv_and_summary(tmp_path, monkeypatch, capsys):
         "demo-3": ("stalemate", None, None, 0, 0.0, 100.0, 0.00),
     }
 
-    def fake_exercise(red, blue, max_turns=30, run_path=None, exercise_id=None):
+    def fake_exercise(red, blue, max_turns=30, run_path=None, exercise_id=None, audit="off"):
         outcome, delay, contain, down, pct, blue, cost = plans[exercise_id]
         if cost:
             llm.record_spend(model="muse-spark-1.3", input_tokens=1000,
@@ -146,7 +146,7 @@ def test_batch_model_flag_uses_cache_option(tmp_path, monkeypatch):
             seen.setdefault("blue_cache", []).append(kwargs.get("use_cache", True))
             super().__init__(*args, **kwargs)
 
-    def fake_exercise(red, blue, max_turns=30, run_path=None, exercise_id=None):
+    def fake_exercise(red, blue, max_turns=30, run_path=None, exercise_id=None, audit="off"):
         return {"events": [], "score": {"outcome": "stalemate",
                                        "detection_delay": None,
                                        "time_to_contain": None,
@@ -168,7 +168,7 @@ def test_batch_model_flag_uses_cache_option(tmp_path, monkeypatch):
 def test_batch_mean_handles_no_detections(tmp_path, monkeypatch, capsys):
     _stub_common(monkeypatch, tmp_path)
 
-    def fake_exercise(red, blue, max_turns=30, run_path=None, exercise_id=None):
+    def fake_exercise(red, blue, max_turns=30, run_path=None, exercise_id=None, audit="off"):
         return {"events": [],
                 "score": {"outcome": "stalemate", "detection_delay": None,
                           "time_to_contain": None, "downtime_cost": 0,
@@ -209,7 +209,7 @@ def test_batch_warns_on_spend_cap(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("LLM_DAILY_LIMIT_USD", "5")
     monkeypatch.setattr(llm, "spent_today", lambda *a, **k: 5.0)
 
-    def fake_exercise(red, blue, max_turns=30, run_path=None, exercise_id=None):
+    def fake_exercise(red, blue, max_turns=30, run_path=None, exercise_id=None, audit="off"):
         return {"events": [_cap_event()], "score": _cap_score(),
                 "run_path": str(tmp_path / "x.jsonl")}
 
@@ -230,7 +230,7 @@ def test_batch_strict_aborts_on_spend_cap(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(llm, "spent_today", lambda *a, **k: 5.0)
     ran = []
 
-    def fake_exercise(red, blue, max_turns=30, run_path=None, exercise_id=None):
+    def fake_exercise(red, blue, max_turns=30, run_path=None, exercise_id=None, audit="off"):
         ran.append(exercise_id)
         return {"events": [_cap_event()], "score": _cap_score(),
                 "run_path": str(tmp_path / "x.jsonl")}

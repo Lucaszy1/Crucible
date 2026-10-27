@@ -493,3 +493,129 @@ def test_auditor_events_do_not_shift_scoring():
         assert scored[key] == plain[key], key
     assert scored["justified_pct"] == 100.0
     assert scored["mean_audit_score"] == 8.0
+
+
+# CLI flags, batch CSV, and API listing.
+
+
+def test_run_exercise_audit_flag_defaults_to_end():
+    from crucible import run_exercise
+
+    assert run_exercise.parse_args(["--agents", "scripted"]).audit == "end"
+    assert run_exercise.parse_args(["--audit", "off"]).audit == "off"
+    assert run_exercise.parse_args(["--audit", "live"]).audit == "live"
+
+
+def test_run_exercise_passes_audit_mode(tmp_path, monkeypatch, capsys):
+    from crucible import orchestrator, run_exercise, sandbox
+
+    seen = {}
+    monkeypatch.setattr(sandbox, "start", lambda: {"web": True})
+    monkeypatch.setattr(sandbox, "stop", lambda: True)
+    monkeypatch.setattr(run_exercise.tools, "restore_host",
+                        lambda host: {"ok": True, "host": host})
+    monkeypatch.setattr(run_exercise.tools, "reset_state", lambda: None)
+
+    def fake_exercise(red, blue, max_turns=12, run_path=None,
+                      exercise_id=None, audit="off"):
+        seen["audit"] = audit
+        return {"events": [],
+                "score": {"turns_used": 0, "total_events": 0,
+                          "time_to_detect": None, "detection_delay": None,
+                          "time_to_contain": None, "hosts_compromised": 0,
+                          "compromised_hosts": [],
+                          "secret_exfiltrated": False, "outcome": "stalemate",
+                          "downtime_cost": 0, "downtime_pct": 0.0,
+                          "blue_score": 100.0, "justified_pct": 75.0,
+                          "unsupported_count": 1, "invalid_refs_count": 0,
+                          "mean_audit_score": 7.5},
+                "run_path": str(tmp_path / "fake.jsonl")}
+
+    monkeypatch.setattr(orchestrator, "run_exercise", fake_exercise)
+    monkeypatch.setattr(run_exercise.orchestrator, "run_exercise", fake_exercise)
+    assert run_exercise.main(["--agents", "scripted", "--audit", "live"]) == 0
+    assert seen["audit"] == "live"
+    out = capsys.readouterr().out
+    assert "Audit justified: 75.0%" in out
+    assert "Audit unsupported: 1" in out
+    assert "Audit invalid refs: 0" in out
+    assert "Audit mean score: 7.5" in out
+
+
+def test_batch_audit_flag_defaults_off_and_allows_end():
+    from crucible import batch
+
+    assert batch.parse_args(["--count", "1", "--prefix", "x"]).audit == "off"
+    args = batch.parse_args(["--count", "1", "--prefix", "x", "--audit", "end"])
+    assert args.audit == "end"
+    with pytest.raises(SystemExit):
+        batch.parse_args(["--count", "1", "--prefix", "x", "--audit", "live"])
+
+
+def test_batch_csv_carries_audit_metrics(tmp_path, monkeypatch):
+    import csv
+
+    from crucible import batch, events, llm, orchestrator, sandbox
+
+    monkeypatch.setattr(sandbox, "start", lambda: {"web": True})
+    monkeypatch.setattr(sandbox, "stop", lambda: True)
+    monkeypatch.setattr(batch.tools, "restore_host",
+                        lambda host: {"ok": True, "host": host})
+    monkeypatch.setattr(batch.tools, "reset_state", lambda: None)
+    monkeypatch.setattr(events, "RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(llm, "SPEND_FILE", tmp_path / "spend.jsonl")
+    seen = {}
+
+    def fake_exercise(red, blue, max_turns=30, run_path=None,
+                      exercise_id=None, audit="off"):
+        seen[exercise_id] = audit
+        return {"events": [],
+                "score": {"outcome": "blue_held", "detection_delay": 2,
+                          "time_to_contain": 4, "downtime_cost": 3,
+                          "downtime_pct": 6.25, "blue_score": 93.75,
+                          "justified_pct": 80.0, "unsupported_count": 1,
+                          "invalid_refs_count": 2, "mean_audit_score": 6.5},
+                "run_path": str(tmp_path / "x.jsonl")}
+
+    monkeypatch.setattr(orchestrator, "run_exercise", fake_exercise)
+    monkeypatch.setattr(batch.orchestrator, "run_exercise", fake_exercise)
+    assert batch.main(["--count", "1", "--prefix", "au",
+                       "--audit", "end"]) == 0
+    assert seen == {"au-1": "end"}
+    with (tmp_path / "runs" / "batch-au.csv").open(encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows[0]["justified_pct"] == "80.0"
+    assert rows[0]["unsupported_count"] == "1"
+    assert rows[0]["invalid_refs_count"] == "2"
+    assert rows[0]["mean_audit_score"] == "6.5"
+
+
+def test_api_listing_carries_audit_metrics(tmp_path, monkeypatch):
+    import json as jsonlib
+
+    from fastapi.testclient import TestClient
+
+    import crucible.api as api
+    from crucible import events, llm
+
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    monkeypatch.setattr(events, "RUNS_DIR", runs)
+    monkeypatch.setattr(llm, "SPEND_FILE", runs / "spend.jsonl")
+    log = [
+        _evt(1, "blue", "read_logs", {"host": "db"}, {"ok": True}),
+        _evt(2, "auditor", "audit", {"target_event_id": "evt-0001"},
+             {"ok": True, "target_event_id": "evt-0001",
+              "verdict": "unsupported", "score": 3, "rationale": "No proof.",
+              "evidence_checked": ["db:9"], "refs_valid": False,
+              "model_used": "muse-wonder-1.0", "estimated_cost_usd": 0.01}),
+    ]
+    (runs / "audited.jsonl").write_text(
+        "\n".join(jsonlib.dumps(entry) for entry in log) + "\n",
+        encoding="utf-8")
+    with TestClient(api.app) as client:
+        body = client.get("/api/runs").json()
+    assert body["runs"][0]["justified_pct"] == 0.0
+    assert body["runs"][0]["unsupported_count"] == 1
+    assert body["runs"][0]["invalid_refs_count"] == 1
+    assert body["runs"][0]["mean_audit_score"] == 3.0

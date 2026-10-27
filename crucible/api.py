@@ -251,7 +251,8 @@ def _run_live_exercise(
 
     Mirrors run_exercise.main: boots the sandbox, runs the turn loop with
     scripted or model agents, then stops the range. Each event reaches
-    subscribers through the patched writer. Tests replace this function
+    subscribers through the patched writer, including live auditor
+    verdicts on every blue action. Tests replace this function
     with a fake runner; production always uses this real one.
     """
     if agents == "model":
@@ -277,6 +278,7 @@ def _run_live_exercise(
         result = orchestrator.run_exercise(
             red, blue, max_turns=orchestrator.MAX_TURNS,
             run_path=run_path, exercise_id=exercise_id,
+            audit="live",
         )
     finally:
         events.EventWriter = original_writer  # type: ignore[assignment]
@@ -342,6 +344,10 @@ def list_runs() -> dict:
             "events": 0,
             "outcome": None,
             "blue_score": None,
+            "justified_pct": None,
+            "unsupported_count": 0,
+            "invalid_refs_count": 0,
+            "mean_audit_score": None,
             "mtime": None,
         }
         try:
@@ -360,6 +366,10 @@ def list_runs() -> dict:
         if score is not None:
             entry["outcome"] = score.get("outcome")
             entry["blue_score"] = score.get("blue_score")
+            entry["justified_pct"] = score.get("justified_pct")
+            entry["unsupported_count"] = score.get("unsupported_count", 0)
+            entry["invalid_refs_count"] = score.get("invalid_refs_count", 0)
+            entry["mean_audit_score"] = score.get("mean_audit_score")
         runs.append(entry)
     runs.sort(key=lambda item: item["mtime"] or "", reverse=True)
     return {"runs": runs}

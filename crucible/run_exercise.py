@@ -53,6 +53,13 @@ def parse_args(argv=None):
         action="store_true",
         help="Skip the on-disk model response cache for this run",
     )
+    parser.add_argument(
+        "--audit",
+        choices=("off", "end", "live"),
+        default="end",
+        help="off skips judging, end audits after the exercise, "
+        "live audits each blue action as it happens",
+    )
     return parser.parse_args(argv)
 
 
@@ -104,7 +111,7 @@ def _summary(score: dict) -> list:
         downtime_pct = f"{float(score.get('downtime_pct', 0.0)):.2f}%"
     except (TypeError, ValueError):
         downtime_pct = f"{score.get('downtime_pct', 0.0)}%"
-    return [
+    lines = [
         f"Turns used: {score.get('turns_used')} of {score.get('total_events')} events",
         f"Outcome: {score.get('outcome', 'unknown')}",
         f"Detected at event: {detect if detect is not None else 'no'}",
@@ -116,6 +123,15 @@ def _summary(score: dict) -> list:
         f"Downtime: {downtime_pct}",
         f"Blue score: {score.get('blue_score', 0)}",
     ]
+    justified = score.get("justified_pct")
+    if justified is None:
+        lines.append("Audits: none")
+    else:
+        lines.append(f"Audit justified: {justified}%")
+        lines.append(f"Audit unsupported: {score.get('unsupported_count', 0)}")
+        lines.append(f"Audit invalid refs: {score.get('invalid_refs_count', 0)}")
+        lines.append(f"Audit mean score: {score.get('mean_audit_score')}")
+    return lines
 
 
 def _spend_line_count() -> int:
@@ -195,6 +211,7 @@ def main(argv=None) -> int:
             max_turns=args.max_turns,
             run_path=args.out,
             exercise_id=args.exercise_id,
+            audit=args.audit,
         )
     finally:
         print("Stopping sandbox...")

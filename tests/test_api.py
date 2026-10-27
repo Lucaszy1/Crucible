@@ -87,6 +87,10 @@ def test_runs_list_reports_outcome_and_score(client):
             "events": 30,
             "outcome": "red_succeeded",
             "blue_score": 0,
+            "justified_pct": None,
+            "unsupported_count": 0,
+            "invalid_refs_count": 0,
+            "mean_audit_score": None,
             "mtime": body["runs"][0]["mtime"],
         }
     ]

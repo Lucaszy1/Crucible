@@ -28,6 +28,10 @@ CSV_FIELDS = (
     "downtime_cost",
     "downtime_pct",
     "blue_score",
+    "justified_pct",
+    "unsupported_count",
+    "invalid_refs_count",
+    "mean_audit_score",
     "red_attempts",
     "model_turns",
     "fallback_turns",
@@ -69,6 +73,12 @@ def parse_args(argv=None):
         "--strict",
         action="store_true",
         help="Abort the batch if the spend cap forces scripted fallback",
+    )
+    parser.add_argument(
+        "--audit",
+        choices=("off", "end"),
+        default="off",
+        help="off skips judging (saves cost), end audits after each exercise",
     )
     return parser.parse_args(argv)
 
@@ -131,6 +141,7 @@ def main(argv=None) -> int:
                 blue,
                 max_turns=args.max_turns,
                 exercise_id=exercise_id,
+                audit=args.audit,
             )
             if run_exercise._spend_cap_hit(result.get("events", [])):
                 run_exercise._warn_spend_cap()
@@ -156,6 +167,10 @@ def main(argv=None) -> int:
                     "downtime_cost": score.get("downtime_cost", 0),
                     "downtime_pct": score.get("downtime_pct", 0.0),
                     "blue_score": score.get("blue_score", 0),
+                    "justified_pct": score.get("justified_pct"),
+                    "unsupported_count": score.get("unsupported_count", 0),
+                    "invalid_refs_count": score.get("invalid_refs_count", 0),
+                    "mean_audit_score": score.get("mean_audit_score"),
                     "red_attempts": _red_attempts(result.get("events", [])),
                     "model_turns": model_turns,
                     "fallback_turns": fallback_turns,
@@ -185,10 +200,10 @@ def main(argv=None) -> int:
         writer.writeheader()
         for row in rows:
             out = dict(row)
-            if out["detection_delay"] is None:
-                out["detection_delay"] = ""
-            if out["time_to_contain"] is None:
-                out["time_to_contain"] = ""
+            for key in ("detection_delay", "time_to_contain", "justified_pct",
+                        "mean_audit_score"):
+                if out[key] is None:
+                    out[key] = ""
             writer.writerow(out)
 
     red_wins = sum(1 for row in rows if row["outcome"] == "red_succeeded")
