@@ -466,6 +466,25 @@ def test_blue_prompt_check_data_host_early_and_restore_after():
     assert "once red has stopped" in BLUE_PROMPT
 
 
+def test_blue_prompt_urges_narrow_contain_patch_and_restore():
+    assert "every turn" in BLUE_PROMPT
+    assert "stays isolated or patched" in BLUE_PROMPT
+    assert "contain narrowly" in BLUE_PROMPT
+    assert "host red is actually using" in BLUE_PROMPT
+    assert "prefer patch_service" in BLUE_PROMPT
+    assert "close the hole" in BLUE_PROMPT
+    assert "or the hole is closed" in BLUE_PROMPT
+
+
+def test_blue_prompt_gives_no_scoring_formula():
+    assert "business_weights" not in BLUE_PROMPT
+    assert "downtime_cost" not in BLUE_PROMPT
+    assert "downtime_pct" not in BLUE_PROMPT
+    assert "blue_score" not in BLUE_PROMPT
+    assert "percent" not in BLUE_PROMPT
+    assert "100" not in BLUE_PROMPT
+
+
 def test_red_messages_carry_remaining_turns_and_own_history():
     messages = red_build_messages(5, _mixed_history(), 20)
     user_text = messages[1]["content"]
