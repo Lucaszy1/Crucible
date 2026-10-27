@@ -728,8 +728,7 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
 }
 .deal-id { margin: 0; font-family: var(--mono); font-size: 18px; font-weight: 700; color: #f2efe8; }
 .deal-meta { margin: 0; font-size: 13px; color: #8791a3; }
-.deal-thumb { margin: 6px 0; }
-.deal-thumb .lobby-dot { width: 15px; height: 15px; }
+.deal-thumb { margin: 6px 0; max-width: 100%; }
 .deal-btns { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
 .deal-btns .btn { background: #f2efe8; border-color: #f2efe8; color: #10131a; }
 .deal-btns .btn:not(.primary) { background: transparent; color: #f2efe8; border-color: #2c3548; }
@@ -749,8 +748,7 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
 .feature-card[data-tone="red"] { border-left-color: var(--red); }
 .feature-card[data-tone="blue"] { border-left-color: var(--accent); }
 .feature-card[data-tone="amber"] { border-left-color: var(--amber); }
-.feature-thumb { flex: none; align-self: center; }
-.feature-thumb .lobby-dot { width: 14px; height: 14px; }
+.feature-thumb { flex: none; align-self: center; max-width: 100%; }
 .feature-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1; }
 .feature-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .feature-story { margin: 0; font-size: 14px; }
@@ -784,16 +782,12 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
   border: 1px solid var(--border); border-radius: 6px; padding: 1px 8px;
 }
 .lobby-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: auto; }
-.lobby-states { display: flex; gap: 5px; }
-.lobby-thumb { display: inline-flex; gap: 5px; align-items: end; }
-.lobby-col { display: inline-flex; flex-direction: column; gap: 4px; }
-.lobby-dot { width: 11px; height: 11px; border-radius: 50%; background: var(--node-clean); }
-.lobby-dot[data-jewel="1"] { outline: 2px solid var(--amber); outline-offset: 1px; }
-.lobby-dot[data-state="probed"] { background: var(--node-probed); }
-.lobby-dot[data-state="signed-in"] { background: var(--node-signed-in); }
-.lobby-dot[data-state="compromised"] { background: var(--node-compromised); }
-.lobby-dot[data-state="isolated"] { background: var(--node-isolated); }
-.lobby-dot[data-state="restored"] { background: var(--node-restored); }
+.lobby-states { display: block; }
+canvas.lobby-thumb {
+  display: block; border-radius: 6px; background: #10131a;
+  border: 1px solid var(--border); max-width: 100%;
+}
+canvas.lobby-thumb:focus-visible { outline: 2px solid #8fb8ff; outline-offset: 2px; }
 
 /* Move timeline strip along the bottom edge of the stage. */
 .move-strip {
