@@ -74,6 +74,30 @@ def active_compose_file() -> Path:
     return GEN_COMPOSE_FILE
 
 
+def layout_for_spec(spec: dict) -> dict:
+    """Return the blue-visible structure of one generated spec.
+
+    Pure helper behind scenario_layout and the lobby preview: host
+    ids, roles, segments, links, weights, and the crown jewel host
+    only. No vulnerabilities, accounts, passwords, or file paths.
+    """
+    hosts = []
+    for host in (spec or {}).get("hosts", []):
+        hosts.append({
+            "id": host.get("name", ""),
+            "role": host.get("role", ""),
+            "segment": host.get("segment", "internal"),
+            "links": list(host.get("links", []) or []),
+            "weight": host.get("weight", 1),
+        })
+    return {
+        "scenario_id": (spec or {}).get("scenario_id", ""),
+        "hosts": hosts,
+        "jewel_host": ((spec or {}).get("jewel", {}) or {}).get(
+            "host", ""),
+    }
+
+
 def scenario_layout() -> dict:
     """Return the blue-visible range structure for the dashboard.
 
@@ -82,21 +106,7 @@ def scenario_layout() -> dict:
     or file paths. The classic range emits the same shape.
     """
     if _ACTIVE_SPEC is not None:
-        hosts = []
-        for host in _ACTIVE_SPEC.get("hosts", []):
-            hosts.append({
-                "id": host.get("name", ""),
-                "role": host.get("role", ""),
-                "segment": host.get("segment", "internal"),
-                "links": list(host.get("links", []) or []),
-                "weight": host.get("weight", 1),
-            })
-        return {
-            "scenario_id": _ACTIVE_SPEC.get("scenario_id", ""),
-            "hosts": hosts,
-            "jewel_host": (_ACTIVE_SPEC.get("jewel", {}) or {}).get(
-                "host", ""),
-        }
+        return layout_for_spec(_ACTIVE_SPEC)
     inventory = blue_inventory()
     hosts = []
     for name, entry in (inventory.get("hosts", {}) or {}).items():

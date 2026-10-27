@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 
 from crucible import events, llm, orchestrator, sandbox, tools
 from crucible.agents import ModelBlue, ModelRed, ScriptedBlue, ScriptedRed
+from crucible.scenarios import generate, select, stack
 from crucible.run_exercise import SPEND_CAP_MARKER
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -171,6 +172,10 @@ class ExerciseStart(BaseModel):
     exercise_id: str | None = Field(
         default=None, description="Optional name for the jsonl log under runs/"
     )
+    scenario: str | None = Field(
+        default=None,
+        description="Scenario token: 'classic' (default) or 'gen:<seed>:<difficulty>'",
+    )
 
 
 # Live exercise state. Guarded by _state_lock; only one runs at a time.
@@ -179,6 +184,7 @@ _live_state: dict[str, Any] = {
     "running": False,
     "exercise_id": None,
     "agents": None,
+    "scenario": None,
     "run_id": None,
     "started_at": None,
     "spend_at_start": 0.0,
@@ -222,6 +228,7 @@ def _snapshot_status() -> dict:
         "running": state["running"],
         "exercise_id": state["exercise_id"],
         "agents": state["agents"],
+        "scenario": state.get("scenario"),
         "run_id": state["run_id"],
         "started_at": state["started_at"],
         "spent_today": round(spent, 4),
@@ -245,15 +252,17 @@ class _LiveWriter(events.EventWriter):
 
 
 def _run_live_exercise(
-    agents: str, exercise_id: str, run_path: Path, publish
+    agents: str, exercise_id: str, run_path: Path, publish,
+    scenario_key="classic",
 ) -> dict:
     """Run one exercise through the orchestrator, publishing live events.
 
-    Mirrors run_exercise.main: boots the sandbox, runs the turn loop with
-    scripted or model agents, then stops the range. Each event reaches
-    subscribers through the patched writer, including live auditor
-    verdicts on every blue action. Tests replace this function
-    with a fake runner; production always uses this real one.
+    Mirrors run_exercise.main: activates the scenario, boots the
+    sandbox, runs the turn loop with scripted or model agents, then
+    stops the range. Each event reaches subscribers through the
+    patched writer, including live auditor verdicts on every blue
+    action. Tests replace this function with a fake runner;
+    production always uses this real one.
     """
     if agents == "model":
         red = ModelRed(exercise_id=exercise_id)
@@ -262,6 +271,10 @@ def _run_live_exercise(
         red = ScriptedRed()
         blue = ScriptedBlue()
 
+    try:
+        info = stack.activate(scenario_key)
+    except ValueError as exc:
+        raise RuntimeError(f"scenario activation failed: {exc}") from exc
     publish({"type": "status", "phase": "booting", "exercise_id": exercise_id})
     try:
         sandbox.start()
@@ -272,13 +285,14 @@ def _run_live_exercise(
     original_writer = events.EventWriter
     events.EventWriter = _LiveWriter  # type: ignore[assignment]
     try:
-        tools.restore_host("web")
-        tools.restore_host("app")
-        tools.restore_host("db")
+        for host in sandbox.active_hosts():
+            tools.restore_host(host)
+        extra = {"scenario": info} if info else {}
         result = orchestrator.run_exercise(
             red, blue, max_turns=orchestrator.MAX_TURNS,
             run_path=run_path, exercise_id=exercise_id,
             audit="live",
+            **extra,
         )
     finally:
         events.EventWriter = original_writer  # type: ignore[assignment]
@@ -287,15 +301,19 @@ def _run_live_exercise(
         except sandbox.SandboxError as exc:
             publish({"type": "note", "text": f"sandbox stop noted: {exc}"})
         tools.reset_state()
+        stack.deactivate()
     result["exercise_cost"] = _cost_since(spend_start)
     result["spend_cap_hit"] = _spend_cap_hit(result.get("events", []))
     return result
 
 
-def _exercise_thread(agents: str, exercise_id: str, run_path: Path) -> None:
+def _exercise_thread(
+    agents: str, exercise_id: str, run_path: Path, scenario_key="classic",
+) -> None:
     """Background body for one exercise: run, score, publish the outcome."""
     try:
-        result = _run_live_exercise(agents, exercise_id, run_path, _publish)
+        result = _run_live_exercise(
+            agents, exercise_id, run_path, _publish, scenario_key)
     except Exception as exc:  # noqa: BLE001 - failure must reach the UI
         with _state_lock:
             _live_state["running"] = False
@@ -459,6 +477,10 @@ def start_exercise(body: ExerciseStart) -> dict:
         raise HTTPException(
             status_code=422, detail='agents must be "scripted" or "model"'
         )
+    try:
+        scenario_key = select.parse_token((body.scenario or "").strip() or "classic")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
     with _state_lock:
         if _live_state["running"]:
             raise HTTPException(
@@ -500,6 +522,7 @@ def start_exercise(body: ExerciseStart) -> dict:
                 "running": True,
                 "exercise_id": exercise_id,
                 "agents": agents,
+                "scenario": select.label(scenario_key),
                 "run_id": run_path.stem,
                 "started_at": datetime.now(timezone.utc).isoformat(),
                 "warning": warning,
@@ -522,7 +545,7 @@ def start_exercise(body: ExerciseStart) -> dict:
     )
     worker = threading.Thread(
         target=_exercise_thread,
-        args=(agents, exercise_id, run_path),
+        args=(agents, exercise_id, run_path, scenario_key),
         daemon=True,
         name=f"crucible-exercise-{exercise_id}",
     )
@@ -531,8 +554,39 @@ def start_exercise(body: ExerciseStart) -> dict:
         "exercise_id": exercise_id,
         "run_id": run_path.stem,
         "agents": agents,
+        "scenario": select.label(scenario_key),
         "warning": warning,
         "live": "/api/live",
+    }
+
+
+@app.get("/api/scenario/preview")
+def scenario_preview(scenario: str = Query(default="classic")) -> dict:
+    """Preview a generated scenario's blue-visible structure.
+
+    The lobby deals an unseen network before starting a live
+    exercise; this returns its identity and range layout (hosts,
+    roles, segments, links, weights, crown jewel host) with no
+    vulnerabilities, accounts, or paths. Generated tokens only.
+    """
+    try:
+        key = select.parse_token(scenario)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if select.is_classic(key):
+        raise HTTPException(
+            status_code=422, detail="preview needs a 'gen:<seed>:<difficulty>' token"
+        )
+    _kind, seed, difficulty = key
+    spec = generate.generate(seed, difficulty)
+    layout = sandbox.layout_for_spec(spec)
+    return {
+        "scenario": select.label(key),
+        "scenario_id": spec["scenario_id"],
+        "seed": seed,
+        "difficulty": difficulty,
+        "host_count": len(layout["hosts"]),
+        "layout": layout,
     }
 
 

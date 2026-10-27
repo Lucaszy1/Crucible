@@ -42,6 +42,7 @@ def client(tmp_runs):
                 "running": False,
                 "exercise_id": None,
                 "agents": None,
+                "scenario": None,
                 "run_id": None,
                 "started_at": None,
                 "spend_at_start": 0.0,
@@ -163,7 +164,7 @@ def _canned_event(number, actor="red", tool="scan_host"):
 def test_start_with_fake_runner_streams_live_events(client, monkeypatch):
     seen = []
 
-    def fake(agents, exercise_id, run_path, publish):
+    def fake(agents, exercise_id, run_path, publish, scenario_key="classic"):
         first = _canned_event(1)
         second = _canned_event(2, actor="blue", tool="read_logs")
         publish({"type": "event", "event": first})
@@ -203,7 +204,7 @@ def test_start_rejects_bad_agents_value(client):
 def test_only_one_exercise_at_a_time(client, monkeypatch):
     release = threading.Event()
 
-    def blocking(agents, exercise_id, run_path, publish):
+    def blocking(agents, exercise_id, run_path, publish, scenario_key="classic"):
         assert release.wait(timeout=10)
         return {
             "events": [],
@@ -226,7 +227,7 @@ def test_only_one_exercise_at_a_time(client, monkeypatch):
 
 
 def test_model_start_warns_when_spend_cap_blocks(client, monkeypatch):
-    def fake(agents, exercise_id, run_path, publish):
+    def fake(agents, exercise_id, run_path, publish, scenario_key="classic"):
         return {
             "events": [],
             "score": {"outcome": "stalemate"},
@@ -248,7 +249,7 @@ def test_model_start_warns_when_spend_cap_blocks(client, monkeypatch):
 
 
 def test_failed_exercise_publishes_error(client, monkeypatch):
-    def failing(agents, exercise_id, run_path, publish):
+    def failing(agents, exercise_id, run_path, publish, scenario_key="classic"):
         raise RuntimeError("sandbox boot failed: demo outage")
 
     monkeypatch.setattr(api, "_run_live_exercise", failing)
@@ -323,3 +324,69 @@ def test_campaigns_list_shows_both_arms(client, tmp_runs):
     body = client.get("/api/campaigns").json()
     assert [item["name"] for item in body["campaigns"]] == ["ctrl1", "mem1"]
     assert body["campaigns"][0]["memory"] == "off"
+
+
+def test_start_records_scenario_and_passes_it_to_runner(client, monkeypatch):
+    seen = []
+
+    def fake(agents, exercise_id, run_path, publish, scenario_key="classic"):
+        seen.append(scenario_key)
+        return {
+            "events": [],
+            "score": {"outcome": "stalemate"},
+            "run_path": str(run_path),
+            "exercise_cost": 0.0,
+            "spend_cap_hit": False,
+        }
+
+    monkeypatch.setattr(api, "_run_live_exercise", fake)
+    res = client.post(
+        "/api/exercise/start",
+        json={"agents": "scripted", "scenario": "gen:9001:medium"},
+    )
+    assert res.status_code == 202
+    assert res.json()["scenario"] == "gen-9001-medium"
+    assert _wait_idle(client)
+    assert seen == [("gen", 9001, "medium")]
+    assert client.get("/api/status").json()["scenario"] == "gen-9001-medium"
+
+
+def test_start_rejects_bad_scenario_token(client):
+    res = client.post(
+        "/api/exercise/start", json={"agents": "scripted", "scenario": "gen:xx"}
+    )
+    assert res.status_code == 422
+    res = client.post(
+        "/api/exercise/start",
+        json={"agents": "scripted", "scenario": "gen:9001:brutal"},
+    )
+    assert res.status_code == 422
+
+
+def test_scenario_preview_returns_blue_visible_layout(client):
+    first = client.get("/api/scenario/preview", params={"scenario": "gen:9001:medium"})
+    assert first.status_code == 200
+    body = first.json()
+    assert body["seed"] == 9001
+    assert body["difficulty"] == "medium"
+    assert body["host_count"] == len(body["layout"]["hosts"])
+    assert 6 <= body["host_count"] <= 10
+    for host in body["layout"]["hosts"]:
+        assert set(host) == {"id", "role", "segment", "links", "weight"}
+    assert set(body["layout"]) == {"scenario_id", "hosts", "jewel_host"}
+    assert body["layout"]["jewel_host"] in {
+        host["id"] for host in body["layout"]["hosts"]
+    }
+    text = json.dumps(body).lower()
+    assert "password" not in text
+    assert "weakness" not in text
+    second = client.get("/api/scenario/preview", params={"scenario": "gen:9001:medium"})
+    assert second.json() == body
+
+
+def test_scenario_preview_rejects_classic_and_garbage(client):
+    assert client.get("/api/scenario/preview").status_code == 422
+    res = client.get("/api/scenario/preview", params={"scenario": "classic"})
+    assert res.status_code == 422
+    res = client.get("/api/scenario/preview", params={"scenario": "nope"})
+    assert res.status_code == 422
