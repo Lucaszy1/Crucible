@@ -4,7 +4,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  applyCamera, blueLine, dollyTarget, frameBudget, frameP95, guardianPulse, intrusionLevel,
+  applyCamera, blueLine, clashOrbX, dollyTarget, frameBudget, frameP95, guardianPulse, intrusionLevel,
   laneFeed, paintGuardian, paintIntrusion, redLine, stageLayout, stageWash, stepCamera,
 } from "../dashboard/js/stage.js";
 import { arenaGeometry, classicLayout, normalizeLayout } from "../dashboard/js/layout.js";
@@ -321,6 +321,15 @@ describe("entity levels", () => {
     assert.doesNotThrow(() => paintGuardian(stub, {}, {}, 64, 64, 52, 0.15, 0));
     assert.ok(calls.includes("clip"), "texture path clips");
     assert.ok(calls.includes("fillText"), "glyphs paint");
+  });
+
+  it("slides the clash orb with the score tug", () => {
+    assert.equal(clashOrbX(300, 1100, 0), 700);
+    assert.ok(clashOrbX(300, 1100, 1) > 700, "red ahead pushes right");
+    assert.ok(clashOrbX(300, 1100, -1) < 700, "containment pushes left");
+    assert.equal(clashOrbX(300, 1100, 1), 300 + 800 * 0.88);
+    assert.equal(clashOrbX(300, 1100, -1), 300 + 800 * 0.12);
+    assert.equal(clashOrbX(300, 1100, 99), clashOrbX(300, 1100, 1), "clamped");
   });
 
   it("recovers to full detail only when frames are fast again", () => {

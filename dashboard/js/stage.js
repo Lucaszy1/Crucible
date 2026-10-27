@@ -24,6 +24,9 @@ const DOLLY_ZOOM = 1.1;
 // Entity presence radius as a share of play height: each entity
 // spans roughly 30 to 35 percent of the stage height.
 const ENTITY_SHARE = 0.16;
+// Reserved rail under the HUD where the clash orb travels. Hosts
+// never enter it, so the orb can never cover a host.
+const ORB_RAIL = 30;
 
 function worldBounds(nodes) {
   const pts = Object.values(nodes || {});
@@ -102,6 +105,7 @@ export function stageLayout(viewport, geo, chrome) {
       intrusion: { x: intrusionCx, y: cy, r: entR },
       guardian: { x: guardianCx, y: cy, r: entR },
     };
+    areaTop = top + ORB_RAIL;
   } else {
     // One strip row, red left and blue right, so narrow stages keep
     // most of their height for the network.
@@ -454,6 +458,10 @@ export function initStage(canvas, opts) {
     intrusion: 0,
     guardian: 0.15,
     surge: { red: 0, blue: 0 },
+    tug: 0,
+    fx: [],
+    sparks: [],
+    lastRedHost: null,
     wash: "none",
     flash: null,
     label: "",
@@ -826,6 +834,17 @@ export function renderStageStatic(refs, events, cursor, opts, instant) {
     refs.exposed = exposed;
     refs.intrusion = intrusionLevel(list, slice);
     refs.guardian = guardianPulse(slice);
+    refs.tug = pressure;
+    refs.fx = [];
+    refs.sparks = [];
+    let lastRed = null;
+    for (const ev of slice) {
+      if (ev && ev.actor === "red" && ev.tool === "try_credential" &&
+          (ev.result || {}).authenticated === true) {
+        lastRed = eventHost(ev);
+      }
+    }
+    refs.lastRedHost = lastRed;
     refs.wash = stageWash(slice);
     refs.labels = nodeLabels(clean);
     refs.roles = {};
@@ -858,11 +877,24 @@ export function stageNotify(refs, ev, states, speed) {
     refs.lanes[side] = laneFeed(refs.events.slice(0, refs.cursor), side);
     refs.typed[side] = { at: refs.clock, chars: 0 };
   }
-  refs.intrusion = intrusionLevel(refs.events, refs.events.slice(0, refs.cursor));
-  refs.guardian = guardianPulse(refs.events.slice(0, refs.cursor));
-  refs.wash = stageWash(refs.events.slice(0, refs.cursor));
+  const at = refs.events.slice(0, refs.cursor);
+  refs.intrusion = intrusionLevel(refs.events, at);
+  refs.guardian = guardianPulse(at);
+  refs.wash = stageWash(at);
+  refs.tug = pressureValue(at, refs.layout && refs.layout.hosts ? refs.layout : null);
   if (ev.actor === "red") refs.surge.red = refs.clock + 900;
   if (ev.actor === "blue") refs.surge.blue = refs.clock + 900;
+  if (ev.actor === "red" && ev.tool === "try_credential" && (ev.result || {}).authenticated === true) {
+    refs.lastRedHost = eventHost(ev);
+  }
+  if (!refs.reduced && (ev.actor === "red" || ev.actor === "blue")) {
+    const orb = orbPoint(refs);
+    if (orb) {
+      refs.fx.push({ kind: "ring", x: orb.x, y: orb.y, t0: refs.clock, dur: 700,
+        color: ev.actor === "red" ? "255,90,80" : "127,212,255", r0: 8, r1: 64 });
+      spawnSparks(refs, orb.x, orb.y, ev.actor === "red" ? "red" : "blue", 10);
+    }
+  }
   const host = eventHost(ev);
   if (host && refs.nodes[host]) {
     refs.camTarget = dollyTarget(refs.stage, refs.nodes, host);
@@ -1066,6 +1098,13 @@ function updateStageDebug(refs, force) {
     (refs.lastError ? `\n! ${refs.lastError}` : "");
 }
 
+// Clash orb position on the rail: red pressure pushes it toward the
+// Guardian's side, containment pushes it back toward the Intrusion.
+export function clashOrbX(x0, x1, pressure) {
+  const p = Math.max(-1, Math.min(1, Number(pressure) || 0));
+  return x0 + (x1 - x0) * (0.5 + (p / 2) * 0.76);
+}
+
 // Rolling frame-time budget with hysteresis: slow machines drop to a
 // lower-detail pass (fewer particles, no grain) and recover cleanly.
 export function frameBudget(avg, low, dtMs) {
@@ -1129,6 +1168,14 @@ function startStageLoop(refs) {
       const typed = refs.typed[side];
       if (typed && typed.chars !== Infinity) typed.chars += dt / 1000 * 90;
     }
+    for (const spark of refs.sparks) {
+      spark.x += spark.vx * (dt / 1000);
+      spark.y += spark.vy * (dt / 1000);
+      spark.vy += 260 * (dt / 1000);
+      spark.life -= dt;
+    }
+    if (refs.sparks.length > 0) refs.sparks = refs.sparks.filter((s) => s.life > 0);
+    if (refs.fx.length > 0) refs.fx = refs.fx.filter((f) => refs.clock - f.t0 < f.dur + 200);
     drawStage(refs);
   };
   refs.raf = frames(tick);
@@ -1160,6 +1207,32 @@ function hostScreen(refs, id) {
   if (!node) return null;
   const at = applyCamera(refs.stage, refs.cam, node.x, node.y);
   return { x: at.x, y: at.y, r: node.r * refs.stage.view.scale * refs.cam.z, kind: node.kind || "standard" };
+}
+
+// Clash orb anchor on its rail, or null on narrow stages.
+function orbPoint(refs) {
+  const stage = refs.stage;
+  if (!stage || stage.mode !== "side") return null;
+  const top = stage.chrome.hudBottom + stage.gap;
+  return {
+    x: clashOrbX(stage.band.x0, stage.band.x1, refs.tug),
+    y: top + ORB_RAIL / 2,
+  };
+}
+
+function spawnSparks(refs, x, y, color, count) {
+  for (let i = 0; i < count; i += 1) {
+    const a = Math.random() * 6.283;
+    const speed = 60 + Math.random() * 220;
+    refs.sparks.push({
+      x, y,
+      vx: Math.cos(a) * speed,
+      vy: Math.sin(a) * speed - 40,
+      life: 420 + Math.random() * 380,
+      color,
+    });
+  }
+  if (refs.sparks.length > 220) refs.sparks.splice(0, refs.sparks.length - 220);
 }
 
 function drawStage(refs) {
@@ -1217,6 +1290,8 @@ function paintFrame(refs, ctx) {
   paintLinks(refs, ctx);
   paintHosts(refs, ctx);
   paintEntities(refs, ctx);
+  paintClash(refs, ctx);
+  paintFx(refs, ctx);
   paintLanes(refs, ctx);
   paintParticles(refs, ctx);
   ctx.translate(-sx, -sy);
@@ -1768,6 +1843,98 @@ export function paintGuardian(ctx, sprites, art, x, y, r, energy, t) {
     ctx.stroke();
     ctx.restore();
   }
+  ctx.restore();
+}
+
+// The clash orb rides its rail between the entities: red pressure
+// pushes it toward the Guardian, containment pushes it back. A beam
+// strand from each entity feeds it; sparks and rings fire on events.
+function paintClash(refs, ctx) {
+  const orb = orbPoint(refs);
+  if (!orb) return;
+  const slots = refs.stage.entities;
+  const t = refs.clock / 1000;
+  const tug = Math.max(-1, Math.min(1, refs.tug || 0));
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.lineCap = "round";
+  const strands = [
+    { from: { x: slots.intrusion.x + slots.intrusion.r * 0.9, y: slots.intrusion.y }, color: "255,70,60" },
+    { from: { x: slots.guardian.x - slots.guardian.r * 0.9, y: slots.guardian.y }, color: "90,170,255" },
+  ];
+  for (const [i, s] of strands.entries()) {
+    const wob = Math.sin(t * 6 + i * 2.4) * 10;
+    const mx = (s.from.x + orb.x) / 2;
+    const my = (s.from.y + orb.y) / 2 + wob - 30;
+    ctx.strokeStyle = `rgba(${s.color},0.5)`;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(s.from.x, s.from.y);
+    ctx.quadraticCurveTo(mx, my, orb.x, orb.y);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(${s.color},0.2)`;
+    ctx.lineWidth = 6;
+    ctx.stroke();
+  }
+  ctx.restore();
+  const hot = tug > 0.15 ? "red" : tug < -0.15 ? "blue" : null;
+  const sprites = refs.sprites || {};
+  drawGlow(ctx, sprites.white, orb.x, orb.y, 26, 0.7);
+  if (hot) drawGlow(ctx, hot === "red" ? sprites.red : sprites.blue, orb.x, orb.y, 20, 0.8);
+  ctx.save();
+  ctx.fillStyle = hot === "red" ? "#ffd9d4" : hot === "blue" ? "#d9e9ff" : "#f2f4fa";
+  ctx.beginPath();
+  ctx.arc(orb.x, orb.y, 8 + Math.sin(t * 9) * 1.5, 0, 6.283);
+  ctx.fill();
+  // Crackle arcs around the orb.
+  ctx.strokeStyle = hot === "blue" ? "rgba(127,212,255,0.8)" : "rgba(255,110,100,0.8)";
+  ctx.lineWidth = 1.5;
+  for (let i = 0; i < 3; i += 1) {
+    const a0 = t * (2 + i) + i * 2.1;
+    ctx.beginPath();
+    ctx.arc(orb.x, orb.y, 12 + ((i * 5 + t * 7) % 8), a0, a0 + 1.4);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Transient event effects: rings, sparks, beams, callouts. Entries
+// resolve host positions at paint time so the camera carries them.
+function paintFx(refs, ctx) {
+  for (const fx of refs.fx) {
+    const age = refs.clock - fx.t0;
+    if (age < 0 || age > fx.dur + 200) continue;
+    if (fx.kind === "ring") paintFxRing(ctx, fx, age);
+  }
+  if (refs.sparks.length > 0) {
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.lineCap = "round";
+    for (const s of refs.sparks) {
+      const a = Math.max(0, Math.min(1, s.life / 500));
+      ctx.strokeStyle = s.color === "red" ? `rgba(255,120,100,${a.toFixed(2)})`
+        : s.color === "blue" ? `rgba(140,200,255,${a.toFixed(2)})`
+          : `rgba(240,240,245,${a.toFixed(2)})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(s.x - s.vx * 0.03, s.y - s.vy * 0.03);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+function paintFxRing(ctx, fx, age) {
+  const p = Math.max(0, Math.min(1, age / fx.dur));
+  const r = (fx.r0 || 8) + ((fx.r1 || 64) - (fx.r0 || 8)) * (1 - (1 - p) * (1 - p));
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.strokeStyle = `rgba(${fx.color || "255,255,255"},${(0.85 * (1 - p)).toFixed(2)})`;
+  ctx.lineWidth = 3 * (1 - p) + 1;
+  ctx.beginPath();
+  ctx.arc(fx.x, fx.y, r, 0, 6.283);
+  ctx.stroke();
   ctx.restore();
 }
 
