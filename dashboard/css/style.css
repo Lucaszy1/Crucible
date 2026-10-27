@@ -138,16 +138,35 @@ select {
 }
 .empty { color: var(--muted); font-size: 12px; }
 
-/* Network map */
-#mapSvg { width: 100%; height: auto; display: block; }
-.node-ring { fill: #0a1018; stroke-width: 2; transition: stroke 0.2s, filter 0.2s; }
-.node-label { fill: var(--text); font-size: 13px; font-weight: 700; text-anchor: middle; font-family: var(--sans); }
-.node-sub { fill: var(--muted); font-size: 10px; text-anchor: middle; font-family: var(--mono); }
-.node-state { font-size: 10px; text-anchor: middle; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; font-family: var(--sans); }
-.edge { stroke: #24344a; stroke-width: 2; transition: stroke 0.2s; }
+/* Network map: owns the left column, so it always fills most of it. */
+.col-left .map-panel { flex: 1 0 auto; }
+#mapSvg { width: 100%; height: auto; display: block; min-height: 360px; }
+.node-group { --node-color: #34d399; }
+.node-ring { fill: #0a1018; stroke: var(--node-color); stroke-width: 2.5; transition: stroke 0.35s ease, filter 0.35s ease; }
+.node-group:not([data-state="clean"]) .node-ring { filter: drop-shadow(0 0 6px var(--node-color)); }
+.node-group[data-state="compromised"] .node-ring { filter: drop-shadow(0 0 16px var(--node-color)); }
+.halo { fill: none; stroke: var(--node-color); stroke-width: 2; opacity: 0; transition: opacity 0.35s ease; }
+.node-group[data-state="compromised"] .halo {
+  opacity: 0.55; transform-box: fill-box; transform-origin: center;
+  animation: halo-breathe 2.2s ease-in-out infinite;
+}
+@keyframes halo-breathe {
+  0%, 100% { opacity: 0.3; transform: scale(1); }
+  50% { opacity: 0.65; transform: scale(1.07); }
+}
+.iso-ring { fill: none; stroke: var(--node-color); stroke-width: 1.5; stroke-dasharray: 5 4; opacity: 0; transition: opacity 0.35s ease; }
+.node-group[data-state="isolated"] .iso-ring { opacity: 1; }
+.node-label { fill: var(--text); font-size: 13px; font-weight: 700; text-anchor: middle; font-family: var(--sans); paint-order: stroke; stroke: #0c131b; stroke-width: 4px; }
+.node-badge { fill: #101926; stroke: #1d2a3a; }
+.node-badge-text { fill: var(--muted); font-size: 10px; text-anchor: middle; font-family: var(--mono); }
+.node-state { font-size: 10px; text-anchor: middle; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; font-family: var(--sans); fill: var(--node-color); transition: fill 0.35s ease; paint-order: stroke; stroke: #0c131b; stroke-width: 3px; }
+.lock-body { fill: var(--amber); }
+.lock-shackle { fill: none; stroke: var(--amber); stroke-width: 2; }
+.edge { stroke: #24344a; stroke-width: 2; transition: stroke 0.35s ease; }
 .edge.lit-red { stroke: var(--red); filter: drop-shadow(0 0 4px var(--red)); }
 .edge.lit-blue { stroke: var(--cyan); filter: drop-shadow(0 0 4px var(--cyan)); }
-.pulse { fill: var(--red); filter: drop-shadow(0 0 6px var(--red)); }
+.pulse-red { fill: var(--red); filter: drop-shadow(0 0 6px var(--red)); }
+.pulse-blue { fill: var(--cyan); filter: drop-shadow(0 0 6px var(--cyan)); }
 .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; font-size: 11px; color: var(--muted); }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: baseline; }
 .sw[data-state="clean"] { background: var(--green); }
@@ -290,5 +309,6 @@ select {
 
 @media (prefers-reduced-motion: reduce) {
   .card { animation: none; }
+  .node-group[data-state="compromised"] .halo { animation: none; opacity: 0.5; }
   * { transition-duration: 0.01ms !important; }
 }
