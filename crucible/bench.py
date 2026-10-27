@@ -529,6 +529,7 @@ def main(argv=None) -> int:
     except RuntimeError as exc:
         print(f"bench: {exc}", file=sys.stderr)
         return 1
+    bench_start = run_exercise._spend_line_count()
 
     print("Booting sandbox...")
     try:
@@ -576,6 +577,10 @@ def main(argv=None) -> int:
             close()
 
     _report(bench)
+    baseten_line = run_exercise.format_baseten_line(
+        run_exercise.baseten_tokens_since(bench_start))
+    if baseten_line:
+        print(baseten_line)
     return 0
 
 

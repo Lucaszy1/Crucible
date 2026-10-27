@@ -17,7 +17,7 @@ import csv
 import sys
 from pathlib import Path
 
-from crucible import events, orchestrator, run_exercise, sandbox, tools
+from crucible import events, llm, orchestrator, run_exercise, sandbox, tools
 from crucible.agents import ModelBlue, ModelRed, ScriptedBlue, ScriptedRed
 
 CSV_FIELDS = (
@@ -92,6 +92,21 @@ def parse_args(argv=None):
         help="on shows blue new sensor alerts each turn, "
         "off leaves blue on logs alone",
     )
+    parser.add_argument(
+        "--blue-model",
+        default=None,
+        help="Model id for blue (default: the blue role model)",
+    )
+    parser.add_argument(
+        "--blue-base-url",
+        default=None,
+        help="Custom API base URL for blue",
+    )
+    parser.add_argument(
+        "--blue-api-key-env",
+        default=None,
+        help="Env var holding the API key for blue's custom host",
+    )
     return parser.parse_args(argv)
 
 
@@ -124,6 +139,12 @@ def main(argv=None) -> int:
     if count < 1:
         print("--count must be at least 1", file=sys.stderr)
         return 1
+    try:
+        blue_client = llm.custom_client(args.blue_base_url, args.blue_api_key_env)
+    except RuntimeError as exc:
+        print(f"batch: {exc}", file=sys.stderr)
+        return 1
+    batch_start = run_exercise._spend_line_count()
 
     print(f"Booting sandbox for a batch of {count} {args.agents} exercises...")
     try:
@@ -139,7 +160,8 @@ def main(argv=None) -> int:
             exercise_id = f"{args.prefix}-{index + 1}"
             if args.agents == "model":
                 red = ModelRed(exercise_id=exercise_id, use_cache=not args.no_cache)
-                blue = ModelBlue(exercise_id=exercise_id, use_cache=not args.no_cache)
+                blue = ModelBlue(exercise_id=exercise_id, use_cache=not args.no_cache,
+                                 client=blue_client, model=args.blue_model)
             else:
                 red = ScriptedRed()
                 blue = ScriptedBlue()
@@ -250,6 +272,10 @@ def main(argv=None) -> int:
             orchestrator.intrusion_conditional_summary(rows)):
         print(line)
     print(f"Total estimated cost: ${total_cost:.4f}")
+    baseten_line = run_exercise.format_baseten_line(
+        run_exercise.baseten_tokens_since(batch_start))
+    if baseten_line:
+        print(baseten_line)
     print(f"CSV: {path}")
     return 0
 

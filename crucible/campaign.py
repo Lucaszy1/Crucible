@@ -24,7 +24,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from crucible import events, orchestrator, run_exercise, sandbox, tools
+from crucible import events, llm, orchestrator, run_exercise, sandbox, tools
 from crucible.agents import ModelBlue, ModelRed, ScriptedBlue, ScriptedRed
 from crucible.agents import referee
 
@@ -70,6 +70,12 @@ def parse_args(argv=None):
                         "off leaves blue on logs alone")
     parser.add_argument("--max-turns", type=int, default=40,
                         help="Turns per episode, capped at 40")
+    parser.add_argument("--blue-model", default=None,
+                        help="Model id for blue (default: the blue role model)")
+    parser.add_argument("--blue-base-url", default=None,
+                        help="Custom API base URL for blue")
+    parser.add_argument("--blue-api-key-env", default=None,
+                        help="Env var holding the API key for blue's custom host")
     parser.add_argument("--no-cache", action="store_true",
                         help="Skip the model response cache for this campaign")
     parser.add_argument("--resume", action="store_true",
@@ -243,7 +249,8 @@ def _open_arm(name: str, memory: str, total: int, args) -> dict | None:
             "sensors": args.sensors}
 
 
-def _run_episode(arm: dict, number: int, args, seed: str | None) -> None:
+def _run_episode(arm: dict, number: int, args, seed: str | None,
+               blue_client=None) -> None:
     """Run one episode for one arm and persist its summaries."""
     exercise_id = f"{arm['name']}-{number}"
     rules = arm["playbook"].get("rules", []) or []
@@ -253,7 +260,7 @@ def _run_episode(arm: dict, number: int, args, seed: str | None) -> None:
         blue = ModelBlue(exercise_id=exercise_id,
                          use_cache=not args.no_cache,
                          playbook=rules if arm["memory"] == "on" else None,
-                         seed=seed)
+                         seed=seed, client=blue_client, model=args.blue_model)
     else:
         red = ScriptedRed()
         blue = ScriptedBlue()
@@ -367,6 +374,12 @@ def main(argv=None) -> int:
     if total < 1:
         print("--episodes must be at least 1", file=sys.stderr)
         return 1
+    try:
+        blue_client = llm.custom_client(args.blue_base_url, args.blue_api_key_env)
+    except RuntimeError as exc:
+        print(f"campaign: {exc}", file=sys.stderr)
+        return 1
+    campaign_start = run_exercise._spend_line_count()
 
     arms = []
     for name, memory in specs:
@@ -391,7 +404,7 @@ def main(argv=None) -> int:
                 if len(arm["rows"]) >= number:
                     continue
                 seed = f"pair-{number}" if len(arms) > 1 else None
-                _run_episode(arm, number, args, seed)
+                _run_episode(arm, number, args, seed, blue_client)
     finally:
         print("Stopping sandbox...")
         try:
@@ -402,6 +415,10 @@ def main(argv=None) -> int:
 
     for arm in arms:
         _report_arm(arm)
+    baseten_line = run_exercise.format_baseten_line(
+        run_exercise.baseten_tokens_since(campaign_start))
+    if baseten_line:
+        print(baseten_line)
     return 0
 
 

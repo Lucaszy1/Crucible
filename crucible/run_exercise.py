@@ -67,6 +67,21 @@ def parse_args(argv=None):
         help="on shows blue new sensor alerts each turn, "
         "off leaves blue on logs alone",
     )
+    parser.add_argument(
+        "--blue-model",
+        default=None,
+        help="Model id for blue (default: the blue role model)",
+    )
+    parser.add_argument(
+        "--blue-base-url",
+        default=None,
+        help="Custom API base URL for blue",
+    )
+    parser.add_argument(
+        "--blue-api-key-env",
+        default=None,
+        help="Env var holding the API key for blue's custom host",
+    )
     return parser.parse_args(argv)
 
 
@@ -171,6 +186,55 @@ def exercise_cost_since(start_lines: int) -> float:
     return total
 
 
+def baseten_tokens_since(start_lines: int) -> dict:
+    """Sum Baseten-hosted token counts logged after a snapshot.
+
+    Dollars stay 0 (Baseten price unknown); only tokens are tracked.
+    """
+    totals = {
+        "calls": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "reasoning_tokens": 0,
+        "total_tokens": 0,
+    }
+    try:
+        lines = llm.SPEND_FILE.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return totals
+    for line in [entry for entry in lines if entry.strip()][start_lines:]:
+        try:
+            entry = json.loads(line)
+        except (ValueError, TypeError, AttributeError):
+            continue
+        if entry.get("host") != "baseten":
+            continue
+        try:
+            prompt = int(entry.get("input_tokens", 0))
+            completion = int(entry.get("output_tokens", 0))
+            reasoning = int(entry.get("reasoning_tokens", 0))
+        except (TypeError, ValueError):
+            continue
+        totals["calls"] += 1
+        totals["prompt_tokens"] += prompt
+        totals["completion_tokens"] += completion
+        totals["reasoning_tokens"] += reasoning
+        totals["total_tokens"] += prompt + completion
+    return totals
+
+
+def format_baseten_line(totals: dict) -> str | None:
+    """One summary line for Baseten tokens, None when there were none."""
+    if not totals or not totals.get("calls"):
+        return None
+    return (
+        f"Baseten tokens: {totals['total_tokens']} total "
+        f"({totals['prompt_tokens']} in, {totals['completion_tokens']} out, "
+        f"{totals['reasoning_tokens']} reasoning, {totals['calls']} calls; "
+        f"billed separately, price unknown)"
+    )
+
+
 def exercise_cost_for_id(exercise_id: str | None) -> float:
     """Sum recorded cost for one exercise id (0.0 when unknown)."""
     if exercise_id is None:
@@ -199,8 +263,14 @@ def exercise_cost_for_id(exercise_id: str | None) -> float:
 def main(argv=None) -> int:
     args = parse_args(argv)
     if args.agents == "model":
+        try:
+            blue_client = llm.custom_client(args.blue_base_url, args.blue_api_key_env)
+        except RuntimeError as exc:
+            print(f"run_exercise: {exc}", file=sys.stderr)
+            return 1
         red = ModelRed(exercise_id=args.exercise_id, use_cache=not args.no_cache)
-        blue = ModelBlue(exercise_id=args.exercise_id, use_cache=not args.no_cache)
+        blue = ModelBlue(exercise_id=args.exercise_id, use_cache=not args.no_cache,
+                         client=blue_client, model=args.blue_model)
     else:
         red = ScriptedRed()
         blue = ScriptedBlue()
@@ -242,6 +312,9 @@ def main(argv=None) -> int:
     print(f"Model-driven turns: {model_driven}, fallback turns: {fallback}")
     cost = exercise_cost_since(spend_start)
     print(f"Estimated cost: ${cost:.4f}")
+    baseten_line = format_baseten_line(baseten_tokens_since(spend_start))
+    if baseten_line:
+        print(baseten_line)
     print(f"Log: {result['run_path']}")
     if _spend_cap_hit(result["events"]):
         _warn_spend_cap()

@@ -61,6 +61,16 @@ DEFAULT_DAILY_LIMIT_USD = 5.0
 DEFAULT_REASONING_EFFORT = "low"
 MAX_RETRIES = 4
 
+# The open-weights model id served on Baseten (and the "blue-open" role).
+OPEN_MODEL_ID = "meta-models/muse-spark-open-1026"
+
+# Floor for max_tokens on Baseten open-model calls. The model always
+# reasons first and the thinking counts against the same budget:
+# scripts/probe_baseten.py measured 8-1323 reasoning tokens per blue
+# turn, and max_tokens=1536 filled to 92% on one sample while 1024
+# cut 2 of 3 repeats. 3000 covers twice the worst sample seen.
+BASETEN_MIN_MAX_TOKENS = 3000
+
 # Per-role sampling temperature. Red varies most so episodes differ;
 # blue stays steadier. LLM_TEMPERATURE overrides every role.
 ROLE_TEMPERATURES = {
@@ -136,7 +146,12 @@ def temperature_for(role: str) -> float:
 
 
 def spent_today(today: str | None = None) -> float:
-    """Sum recorded spend for one day (default: current local day)."""
+    """Sum recorded Meta spend for one day (default: current local day).
+
+    Baseten-hosted entries are billed separately from the Meta credit,
+    so they never count toward the Meta daily spend guard. Entries
+    written before host tracking count as Meta (backward compatible).
+    """
     day = today or date.today().isoformat()
     if not SPEND_FILE.exists():
         return 0.0
@@ -149,12 +164,52 @@ def spent_today(today: str | None = None) -> float:
             entry = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if entry.get("day") == day:
+        if entry.get("day") == day and entry.get("host", "meta") != "baseten":
             try:
                 total += float(entry.get("cost_usd", 0.0))
             except (TypeError, ValueError):
                 continue
     return total
+
+
+def baseten_tokens_today(today: str | None = None) -> dict:
+    """Sum Baseten-hosted token counts for one day.
+
+    Baseten usage is billed separately from the Meta credit at an
+    unknown price, so dollars stay 0 and only tokens are tracked.
+    """
+    day = today or date.today().isoformat()
+    totals = {
+        "calls": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "reasoning_tokens": 0,
+        "total_tokens": 0,
+    }
+    if not SPEND_FILE.exists():
+        return totals
+    for line in SPEND_FILE.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if entry.get("day") != day or entry.get("host") != "baseten":
+            continue
+        try:
+            prompt = int(entry.get("input_tokens", 0))
+            completion = int(entry.get("output_tokens", 0))
+            reasoning = int(entry.get("reasoning_tokens", 0))
+        except (TypeError, ValueError):
+            continue
+        totals["calls"] += 1
+        totals["prompt_tokens"] += prompt
+        totals["completion_tokens"] += completion
+        totals["reasoning_tokens"] += reasoning
+        totals["total_tokens"] += prompt + completion
+    return totals
 
 
 def record_spend(
@@ -164,9 +219,20 @@ def record_spend(
     output_tokens: int,
     exercise_id: str | None = None,
     cached: bool = False,
+    host: str = "meta",
+    reasoning_tokens: int = 0,
 ) -> dict:
-    """Append one spend entry to the jsonl log and return it."""
-    cost = 0.0 if cached else estimate_cost(model, input_tokens, output_tokens)
+    """Append one spend entry to the jsonl log and return it.
+
+    WARNING: the Baseten price for the open model is UNKNOWN, so
+    Baseten-hosted entries always record cost_usd 0.0 and only the
+    token counts are meaningful. Check the Baseten invoice for real
+    dollars; never treat the 0 as free.
+    """
+    if cached or host == "baseten":
+        cost = 0.0
+    else:
+        cost = estimate_cost(model, input_tokens, output_tokens)
     entry = {
         "day": date.today().isoformat(),
         "ts": time.time(),
@@ -174,8 +240,10 @@ def record_spend(
         "exercise_id": exercise_id,
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
+        "reasoning_tokens": int(reasoning_tokens or 0),
         "cost_usd": round(cost, 6),
         "cached": cached,
+        "host": host,
     }
     SPEND_FILE.parent.mkdir(parents=True, exist_ok=True)
     with SPEND_FILE.open("a", encoding="utf-8") as handle:
@@ -307,7 +375,21 @@ def custom_client(base_url: str | None = None,
     return OpenAI(base_url=base_url or BASE_URL, api_key=api_key)
 
 
+def _is_baseten_client(client) -> bool:
+    """Check whether a client talks to a Baseten base URL.
+
+    Fake test clients without a base_url read as Meta, so hermetic
+    tests keep exercising the unchanged default path.
+    """
+    base_url = str(getattr(client, "base_url", "") or "")
+    return "baseten" in base_url.lower()
+
+
 def _message_to_dict(message) -> tuple[str, list]:
+    # Baseten returns content null (not "") on tool-call and
+    # length-cut replies; the `or ""` normalizes both. Arguments pass
+    # through untouched: usually a JSON string (Baseten sends one),
+    # sometimes already an object, sometimes None. Agents coerce.
     content = getattr(message, "content", None) or ""
     calls = []
     for call in getattr(message, "tool_calls", None) or []:
@@ -320,6 +402,20 @@ def _message_to_dict(message) -> tuple[str, list]:
             }
         )
     return content, calls
+
+
+def _reasoning_text(message) -> str:
+    """Read a reasoning model's thinking, "" when the host sends none."""
+    return getattr(message, "reasoning_content", None) or ""
+
+
+def _reasoning_tokens(usage_obj) -> int:
+    """Read reasoning token counts, 0 when the host sends none."""
+    details = getattr(usage_obj, "completion_tokens_details", None)
+    try:
+        return int(getattr(details, "reasoning_tokens", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def chat(
@@ -365,12 +461,23 @@ def chat(
                 output_tokens=int(usage.get("output_tokens", 0)),
                 exercise_id=exercise_id,
                 cached=True,
+                host=hit.get("host", "meta"),
+                reasoning_tokens=int(usage.get("reasoning_tokens", 0)),
             )
             return {**hit, "cached": True}
 
     check_spend_guard()
     owned = client is None
     client = client if client is not None else _default_client()
+    baseten = _is_baseten_client(client)
+
+    # Baseten open-model turns always reason first against the same
+    # token budget, so a blue default of 1536 risks length cuts (see
+    # BASETEN_MIN_MAX_TOKENS). The Meta path keeps caller values.
+    effective_max_tokens = max_tokens
+    if baseten and model == OPEN_MODEL_ID and max_tokens < BASETEN_MIN_MAX_TOKENS:
+        effective_max_tokens = BASETEN_MIN_MAX_TOKENS
+    extra["max_tokens"] = effective_max_tokens
 
     kwargs: dict = {"model": model, "messages": messages, **extra}
     if tools:
@@ -405,20 +512,29 @@ def chat(
     usage_obj = getattr(response, "usage", None)
     input_tokens = int(getattr(usage_obj, "prompt_tokens", 0) or 0)
     output_tokens = int(getattr(usage_obj, "completion_tokens", 0) or 0)
+    reasoning_count = _reasoning_tokens(usage_obj)
 
     record_spend(
         model=model,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         exercise_id=exercise_id,
+        host="baseten" if baseten else "meta",
+        reasoning_tokens=reasoning_count,
     )
     payload = {
         "content": content,
         "tool_calls": tool_calls,
         "finish_reason": finish_reason,
-        "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
+        "usage": {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "reasoning_tokens": reasoning_count,
+        },
         "model": model,
         "cached": False,
+        "host": "baseten" if baseten else "meta",
+        "reasoning": _reasoning_text(message),
     }
     if use_cache and _cacheable(
         finish_reason=finish_reason,
