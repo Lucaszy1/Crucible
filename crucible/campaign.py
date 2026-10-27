@@ -44,11 +44,15 @@ _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Run a learning campaign.")
-    parser.add_argument("--name", required=True, help="Campaign name")
+    parser.add_argument("--name", help="Campaign name (single-arm mode)")
     parser.add_argument("--episodes", type=int, required=True,
-                        help="Total episodes to run")
-    parser.add_argument("--memory", choices=("on", "off"), required=True,
+                        help="Total episodes to run per arm")
+    parser.add_argument("--memory", choices=("on", "off"),
                         help="on: blue reads the playbook; off: control")
+    parser.add_argument("--arms",
+                        help="Two arms as name,name (first memory on, second "
+                        "off) or name:on,name:off; interleaves episodes "
+                        "pair by pair with matched seeds")
     parser.add_argument("--agents", choices=("scripted", "model"),
                         default="scripted",
                         help="scripted is free, model uses Muse Spark")
@@ -116,6 +120,63 @@ def _load_state(path: Path) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def _parse_arms(spec: str) -> list:
+    """Parse --arms into [(name, memory)] with positional defaults.
+
+    Bare names default first arm to memory on, second to off; an
+    explicit :on or :off suffix wins. Exactly two arms are required.
+    """
+    parts = [piece.strip() for piece in (spec or "").split(",") if piece.strip()]
+    if len(parts) != 2:
+        raise ValueError("--arms needs exactly two arms, e.g. mem,ctrl")
+    arms = []
+    for order, piece in enumerate(parts):
+        if ":" in piece:
+            name, memory = piece.split(":", 1)
+            name, memory = name.strip(), memory.strip()
+            if memory not in ("on", "off"):
+                raise ValueError(f"arm {piece!r} memory must be :on or :off")
+        else:
+            name, memory = piece, ("on" if order == 0 else "off")
+        arms.append((_check_name(name), memory))
+    if arms[0][0] == arms[1][0]:
+        raise ValueError("--arms names must differ")
+    return arms
+
+
+def _episode_flags(events_list: list) -> tuple:
+    """Flag red probing /admin and red getting in for one episode."""
+    admin = False
+    got_in = False
+    for event in events_list or []:
+        if event.get("actor") != "red":
+            continue
+        if event.get("tool") == "http_request":
+            path = str((event.get("args", {}) or {}).get("path", "") or "")
+            if path.startswith("/admin"):
+                admin = True
+        if event.get("tool") == "try_credential":
+            if (event.get("result", {}) or {}).get("authenticated") is True:
+                got_in = True
+    return admin, got_in
+
+
+def _arm_stats(rows: list) -> dict:
+    """Summarize red behavior and blue wins over episode rows."""
+    total = len(rows)
+    admin = sum(1 for row in rows if row.get("red_admin"))
+    got_in = sum(1 for row in rows if row.get("red_in"))
+    wins = sum(1 for row in rows if row.get("outcome") == "blue_held")
+    return {
+        "episodes": total,
+        "admin_count": admin,
+        "admin_rate": round(admin / total, 3) if total else None,
+        "in_count": got_in,
+        "in_rate": round(got_in / total, 3) if total else None,
+        "wins": wins,
+    }
+
+
 def _archive_dir(campaign_dir: Path, name: str) -> Path:
     """Move an existing campaign dir aside under runs/archive/."""
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -125,10 +186,150 @@ def _archive_dir(campaign_dir: Path, name: str) -> Path:
     return target
 
 
+def _open_arm(name: str, memory: str, total: int, args) -> dict | None:
+    """Load or start one arm's state; None with an error printed on failure."""
+    campaign_dir = _campaign_dir(name)
+    summary_path = campaign_dir / "summary.json"
+    rows: list = []
+    playbook = referee.empty_playbook()
+    if args.resume:
+        state = _load_state(summary_path)
+        if state is None or state.get("name") != name:
+            print(f"campaign: no resumable campaign {name!r} "
+                  f"at {summary_path}", file=sys.stderr)
+            return None
+        if state.get("memory", memory) != memory:
+            print(f"campaign: resume memory flag differs from the saved "
+                  f"campaign {name!r} ({state.get('memory')}); aborting",
+                  file=sys.stderr)
+            return None
+        rows = list(state.get("episodes", []) or [])
+        if len(rows) >= total:
+            print(f"campaign: {name} already has {len(rows)} episodes",
+                  file=sys.stderr)
+            return None
+        playbook = referee.load_playbook(campaign_dir / "playbook.json")
+        print(f"Resuming campaign {name} at episode {len(rows) + 1} "
+              f"of {total}...")
+    else:
+        if campaign_dir.exists():
+            if not args.force:
+                print(f"campaign: {campaign_dir} already exists; pass "
+                      "--resume to continue it or --force to archive it "
+                      "and start over", file=sys.stderr)
+                return None
+            archived = _archive_dir(campaign_dir, name)
+            print(f"Archived previous campaign to {archived}")
+        print(f"Starting campaign {name}: {total} episodes, "
+              f"memory={memory}, agents={args.agents}...")
+    return {"name": name, "memory": memory, "dir": campaign_dir,
+            "summary_path": summary_path, "rows": rows, "playbook": playbook}
+
+
+def _run_episode(arm: dict, number: int, args, seed: str | None) -> None:
+    """Run one episode for one arm and persist its summaries."""
+    exercise_id = f"{arm['name']}-{number}"
+    rules = arm["playbook"].get("rules", []) or []
+    if args.agents == "model":
+        red = ModelRed(exercise_id=exercise_id,
+                       use_cache=not args.no_cache, seed=seed)
+        blue = ModelBlue(exercise_id=exercise_id,
+                         use_cache=not args.no_cache,
+                         playbook=rules if arm["memory"] == "on" else None,
+                         seed=seed)
+    else:
+        red = ScriptedRed()
+        blue = ScriptedBlue()
+    for host in ("web", "app", "db", "workstation"):
+        tools.restore_host(host)
+    spend_start = run_exercise._spend_line_count()
+    result = orchestrator.run_exercise(
+        red, blue, max_turns=args.max_turns,
+        run_path=arm["dir"] / f"{exercise_id}.jsonl",
+        exercise_id=exercise_id, audit=args.audit)
+    score = result.get("score", {}) or {}
+    referee_model = None
+    if arm["memory"] == "on":
+        review = referee.review_episode(
+            result.get("events", []), score, exercise_id, arm["playbook"],
+            use_cache=not args.no_cache)
+        arm["playbook"] = review["playbook"]
+        referee_model = review["model_used"]
+        referee.save_playbook(arm["playbook"])
+        referee.save_playbook(
+            arm["playbook"], arm["dir"] / "playbook.json",
+            arm["dir"] / "playbook.md")
+        referee.save_playbook(
+            arm["playbook"],
+            arm["dir"] / "playbooks" / f"{exercise_id}.json",
+            arm["dir"] / "playbooks" / f"{exercise_id}.md")
+    cost = run_exercise.exercise_cost_since(spend_start)
+    admin, got_in = _episode_flags(result.get("events", []))
+    arm["rows"].append({
+        "episode": exercise_id,
+        "episode_no": number,
+        "outcome": score.get("outcome", "unknown"),
+        "blue_score": score.get("blue_score", 0),
+        "downtime_pct": score.get("downtime_pct", 0.0),
+        "detection_delay": score.get("detection_delay"),
+        "time_to_contain": score.get("time_to_contain"),
+        "cost": round(cost, 6),
+        "playbook_rule_count": len(arm["playbook"].get("rules", []) or []),
+        "referee_model": referee_model,
+        "red_admin": admin,
+        "red_in": got_in,
+    })
+    latest = arm["rows"][-1]
+    print(f"{exercise_id}: outcome={latest['outcome']} "
+          f"blue_score={latest['blue_score']} "
+          f"rules={latest['playbook_rule_count']} "
+          f"cost=${cost:.4f}")
+    _write_csv(arm["dir"] / "summary.csv", arm["rows"])
+    _write_json(arm["summary_path"], {"name": arm["name"],
+                                     "memory": arm["memory"],
+                                     "agents": args.agents,
+                                     "episodes": arm["rows"]})
+
+
+def _report_arm(arm: dict) -> float:
+    """Print one arm's final table and return its total cost."""
+    rows = arm["rows"]
+    first, last = _thirds(rows)
+    first_mean = _mean([row["blue_score"] for row in first])
+    last_mean = _mean([row["blue_score"] for row in last])
+    stats = _arm_stats(rows)
+    total_cost = sum(float(row.get("cost", 0.0) or 0.0) for row in rows)
+    print(f"Campaign done: {len(rows)} episodes (name={arm['name']})")
+    print("episode | outcome | blue_score | cost")
+    for row in rows:
+        print(f"{row['episode']} | {row['outcome']} | {row['blue_score']} "
+              f"| ${float(row.get('cost', 0.0) or 0.0):.4f}")
+    if first_mean is not None and last_mean is not None:
+        print(f"Mean blue_score first third: {first_mean:.2f} "
+              f"vs last third: {last_mean:.2f}")
+    print(f"{arm['name']}: red /admin {stats['admin_count']}/"
+          f"{stats['episodes']} ({stats['admin_rate']}) | red in "
+          f"{stats['in_count']}/{stats['episodes']} ({stats['in_rate']}) | "
+          f"wins {stats['wins']}")
+    print(f"Total cost: ${total_cost:.4f}")
+    print(f"CSV: {arm['dir'] / 'summary.csv'}")
+    return total_cost
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
     try:
-        _check_name(args.name)
+        if args.arms:
+            if args.memory is not None:
+                raise ValueError("--memory conflicts with --arms; use "
+                                 "name:on,name:off suffixes instead")
+            specs = _parse_arms(args.arms)
+        else:
+            if not args.name:
+                raise ValueError("--name is required without --arms")
+            if args.memory is None:
+                raise ValueError("--memory is required without --arms")
+            specs = [(_check_name(args.name), args.memory)]
     except ValueError as exc:
         print(f"campaign: {exc}", file=sys.stderr)
         return 1
@@ -137,41 +338,14 @@ def main(argv=None) -> int:
         print("--episodes must be at least 1", file=sys.stderr)
         return 1
 
-    campaign_dir = _campaign_dir(args.name)
-    summary_path = campaign_dir / "summary.json"
-    rows: list = []
-    playbook = referee.empty_playbook()
-    if args.resume:
-        state = _load_state(summary_path)
-        if state is None or state.get("name") != args.name:
-            print(f"campaign: no resumable campaign {args.name!r} "
-                  f"at {summary_path}", file=sys.stderr)
+    arms = []
+    for name, memory in specs:
+        arm = _open_arm(name, memory, total, args)
+        if arm is None:
             return 1
-        if state.get("memory", args.memory) != args.memory:
-            print("campaign: resume memory flag differs from the saved "
-                  f"campaign ({state.get('memory')}); aborting",
-                  file=sys.stderr)
-            return 1
-        rows = list(state.get("episodes", []) or [])
-        if len(rows) >= total:
-            print(f"campaign: {args.name} already has {len(rows)} episodes",
-                  file=sys.stderr)
-            return 1
-        playbook = referee.load_playbook(campaign_dir / "playbook.json")
-        print(f"Resuming campaign {args.name} at episode {len(rows) + 1} "
-              f"of {total}...")
-    else:
-        if campaign_dir.exists():
-            if not args.force:
-                print(f"campaign: {campaign_dir} already exists; pass "
-                      "--resume to continue it or --force to archive it "
-                      "and start over", file=sys.stderr)
-                return 1
-            archived = _archive_dir(campaign_dir, args.name)
-            print(f"Archived previous campaign to {archived}")
+        arms.append(arm)
+    if not args.resume:
         referee.save_playbook(referee.empty_playbook())
-        print(f"Starting campaign {args.name}: {total} episodes, "
-              f"memory={args.memory}, agents={args.agents}...")
 
     print("Booting sandbox...")
     try:
@@ -182,64 +356,12 @@ def main(argv=None) -> int:
         return 1
 
     try:
-        for number in range(len(rows) + 1, total + 1):
-            exercise_id = f"{args.name}-{number}"
-            rules = playbook.get("rules", []) or []
-            if args.agents == "model":
-                red = ModelRed(exercise_id=exercise_id,
-                               use_cache=not args.no_cache)
-                blue = ModelBlue(exercise_id=exercise_id,
-                                 use_cache=not args.no_cache,
-                                 playbook=rules if args.memory == "on" else None)
-            else:
-                red = ScriptedRed()
-                blue = ScriptedBlue()
-            for host in ("web", "app", "db", "workstation"):
-                tools.restore_host(host)
-            spend_start = run_exercise._spend_line_count()
-            result = orchestrator.run_exercise(
-                red, blue, max_turns=args.max_turns,
-                run_path=campaign_dir / f"{exercise_id}.jsonl",
-                exercise_id=exercise_id, audit=args.audit)
-            score = result.get("score", {}) or {}
-            referee_model = None
-            if args.memory == "on":
-                review = referee.review_episode(
-                    result.get("events", []), score, exercise_id, playbook,
-                    use_cache=not args.no_cache)
-                playbook = review["playbook"]
-                referee_model = review["model_used"]
-                referee.save_playbook(playbook)
-                referee.save_playbook(
-                    playbook, campaign_dir / "playbook.json",
-                    campaign_dir / "playbook.md")
-                referee.save_playbook(
-                    playbook,
-                    campaign_dir / "playbooks" / f"{exercise_id}.json",
-                    campaign_dir / "playbooks" / f"{exercise_id}.md")
-            cost = run_exercise.exercise_cost_since(spend_start)
-            rows.append({
-                "episode": exercise_id,
-                "episode_no": number,
-                "outcome": score.get("outcome", "unknown"),
-                "blue_score": score.get("blue_score", 0),
-                "downtime_pct": score.get("downtime_pct", 0.0),
-                "detection_delay": score.get("detection_delay"),
-                "time_to_contain": score.get("time_to_contain"),
-                "cost": round(cost, 6),
-                "playbook_rule_count": len(playbook.get("rules", []) or []),
-                "referee_model": referee_model,
-            })
-            latest = rows[-1]
-            print(f"{exercise_id}: outcome={latest['outcome']} "
-                  f"blue_score={latest['blue_score']} "
-                  f"rules={latest['playbook_rule_count']} "
-                  f"cost=${cost:.4f}")
-            _write_csv(campaign_dir / "summary.csv", rows)
-            _write_json(summary_path, {"name": args.name,
-                                       "memory": args.memory,
-                                       "agents": args.agents,
-                                       "episodes": rows})
+        for number in range(1, total + 1):
+            for arm in arms:
+                if len(arm["rows"]) >= number:
+                    continue
+                seed = f"pair-{number}" if len(arms) > 1 else None
+                _run_episode(arm, number, args, seed)
     finally:
         print("Stopping sandbox...")
         try:
@@ -248,20 +370,8 @@ def main(argv=None) -> int:
             print(f"Sandbox stop noted: {exc}", file=sys.stderr)
         tools.reset_state()
 
-    first, last = _thirds(rows)
-    first_mean = _mean([row["blue_score"] for row in first])
-    last_mean = _mean([row["blue_score"] for row in last])
-    total_cost = sum(float(row.get("cost", 0.0) or 0.0) for row in rows)
-    print(f"Campaign done: {len(rows)} episodes (name={args.name})")
-    print("episode | outcome | blue_score | cost")
-    for row in rows:
-        print(f"{row['episode']} | {row['outcome']} | {row['blue_score']} "
-              f"| ${float(row.get('cost', 0.0) or 0.0):.4f}")
-    if first_mean is not None and last_mean is not None:
-        print(f"Mean blue_score first third: {first_mean:.2f} "
-              f"vs last third: {last_mean:.2f}")
-    print(f"Total cost: ${total_cost:.4f}")
-    print(f"CSV: {campaign_dir / 'summary.csv'}")
+    for arm in arms:
+        _report_arm(arm)
     return 0
 
 
