@@ -454,6 +454,19 @@ def restore_host(host: str) -> dict:
             "patch_cleared": cleaned, "sign_in_reset": gate_reset}
 
 
+def _line_names_account(line: str, names: set) -> bool:
+    """Check whether a log line signs in as a credential account.
+
+    Matches the user= token exactly, not a bare substring: account
+    names like "metrics" also appear in benign request paths
+    (/metrics), which must never fail the check.
+    """
+    for token in str(line or "").split():
+        if token.startswith("user=") and token[5:] in names:
+            return True
+    return False
+
+
 def _credential_account_names() -> set:
     """Collect credential account names that must not appear pre-move-1."""
     shipped = (_scenario().get("shipped_defaults", {}) or {})
@@ -563,7 +576,7 @@ def clean_start_check() -> dict:
             failures[f"logs:{host}"] = f"unreadable: {exc}"
             continue
         for line in lines:
-            if any(name in line for name in names):
+            if _line_names_account(line, names):
                 failures[f"scope:{host}"] = "account name in this-episode logs"
                 break
             if "file read path=/secret/" in line:
