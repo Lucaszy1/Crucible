@@ -121,9 +121,9 @@ def empty_playbook() -> dict:
     return {"episode": None, "rules": [], "model_used": None}
 
 
-def load_playbook(path: str | Path = PLAYBOOK_JSON) -> dict:
+def load_playbook(path: str | Path | None = None) -> dict:
     """Load a playbook file, returning an empty one when missing."""
-    target = Path(path)
+    target = Path(path) if path else PLAYBOOK_JSON
     try:
         data = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -151,13 +151,14 @@ def render_markdown(playbook: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def save_playbook(playbook: dict, json_path: str | Path = PLAYBOOK_JSON,
-                  md_path: str | Path = PLAYBOOK_MD) -> dict:
+def save_playbook(playbook: dict, json_path: str | Path | None = None,
+                  md_path: str | Path | None = None) -> dict:
     """Write a playbook as json plus a readable markdown page."""
     payload = {"episode": playbook.get("episode"),
                "rules": list(playbook.get("rules", []) or [])[:MAX_RULES],
                "model_used": playbook.get("model_used")}
-    json_target, md_target = Path(json_path), Path(md_path)
+    json_target = Path(json_path) if json_path else PLAYBOOK_JSON
+    md_target = Path(md_path) if md_path else PLAYBOOK_MD
     json_target.parent.mkdir(parents=True, exist_ok=True)
     md_target.parent.mkdir(parents=True, exist_ok=True)
     json_target.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
