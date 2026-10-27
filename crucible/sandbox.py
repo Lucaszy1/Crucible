@@ -50,6 +50,46 @@ def load_scenario() -> dict:
     return json.loads((SANDBOX_DIR / "scenario.json").read_text(encoding="utf-8"))
 
 
+def blue_inventory() -> dict:
+    """Return the blue-visible asset inventory for prompts and sensors.
+
+    Each host maps to its role, business weight, and connected hosts,
+    plus the host holding the protected data. Roles and links come from
+    the scenario's blue_inventory section; weights come from
+    business_weights so the two never drift apart. The result never
+    carries accounts, passwords, file names, or weaknesses. Falls back
+    to generic roles and full-mesh links when the section is missing.
+    """
+    try:
+        scenario = load_scenario()
+    except Exception:
+        scenario = {}
+    hosts = list(scenario.get("hosts", []) or list(ALLOWED_HOSTS))
+    weights = scenario.get("business_weights", {}) or {}
+    section = scenario.get("blue_inventory", {}) or {}
+    entries = section.get("hosts", {}) or {}
+    out: dict = {"hosts": {}, "crown_jewel_host": None}
+    for host in hosts:
+        entry = entries.get(host, {}) or {}
+        role = str(entry.get("role", "") or "").strip() or f"{host} host"
+        links = entry.get("connected_to", []) or []
+        links = [peer for peer in links if peer in hosts and peer != host]
+        if not links:
+            links = [peer for peer in hosts if peer != host]
+        try:
+            weight = int(weights.get(host, 1))
+        except (TypeError, ValueError):
+            weight = 1
+        out["hosts"][host] = {
+            "role": role,
+            "weight": weight,
+            "connected_to": sorted(links),
+        }
+    jewel = section.get("crown_jewel_host") or (scenario.get("secret", {}) or {}).get("host")
+    out["crown_jewel_host"] = jewel if jewel in hosts else None
+    return out
+
+
 def _compose(*args: str, timeout: int) -> str:
     cmd = ["docker", "compose", "-f", str(COMPOSE_FILE), "-p", PROJECT, *args]
     try:

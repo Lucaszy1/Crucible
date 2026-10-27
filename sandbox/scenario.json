@@ -32,5 +32,14 @@
   "app_config": {"host": "app", "path": "/srv/app/config.ini"},
   "readable_roots": ["/secret/", "/srv/app/", "/srv/data/", "/srv/state/"],
   "admin_endpoint": {"host": "web", "path": "/admin"},
-  "business_weights": {"web": 3, "app": 3, "db": 5, "workstation": 1}
+  "business_weights": {"web": 3, "app": 3, "db": 5, "workstation": 1},
+  "blue_inventory": {
+    "hosts": {
+      "web": {"role": "public web front end", "connected_to": ["app", "db", "workstation"]},
+      "app": {"role": "internal reporting service", "connected_to": ["web", "db", "workstation"]},
+      "db": {"role": "internal data store", "connected_to": ["web", "app", "workstation"]},
+      "workstation": {"role": "analyst workstation", "connected_to": ["web", "app", "db"]}
+    },
+    "crown_jewel_host": "db"
+  }
 }

@@ -5,8 +5,29 @@ recent-moves prompt section. Both prompts now render only the owning
 team's own moves, results, and reasoning.
 """
 
+from crucible import sandbox
 from crucible.agents.blue import _build_messages as blue_build_messages
+from crucible.agents.blue import _inventory_text as blue_inventory_text
 from crucible.agents.red import _build_messages as red_build_messages
+
+FORBIDDEN_INVENTORY_STRINGS = (
+    "svc-report",
+    "dbops",
+    "dbops-fake-19",
+    "password",
+    "changeme",
+    "toor",
+    "config.ini",
+    "exercise_secret.txt",
+    "/srv/app",
+    "/secret",
+    "/admin",
+    "weak",
+    "default sign-in",
+    "exposed",
+    "unpatched",
+    "hint",
+)
 
 
 def _event(index, actor, tool, args, result, reasoning):
@@ -101,3 +122,34 @@ def test_blue_down_hosts_ignore_other_actors():
     ]
     text = _user_text(blue_build_messages(2, history))
     assert "Isolated hosts: none." in text
+
+
+def test_blue_inventory_renders_roles_weights_links_and_jewel():
+    text = blue_inventory_text()
+    for host in ("web", "app", "db", "workstation"):
+        assert host in text
+    assert "weight 5" in text
+    assert "connected to" in text
+    assert "Protected data lives on: db." in text
+    assert "Asset inventory:" in _user_text(blue_build_messages(2, []))
+
+
+def test_blue_inventory_contains_no_forbidden_strings():
+    import json
+
+    raw = json.dumps(sandbox.blue_inventory(), sort_keys=True).lower()
+    for forbidden in FORBIDDEN_INVENTORY_STRINGS:
+        assert forbidden not in raw, forbidden
+    rendered = blue_inventory_text().lower()
+    for forbidden in FORBIDDEN_INVENTORY_STRINGS:
+        assert forbidden not in rendered, forbidden
+
+
+def test_red_prompt_never_sees_inventory():
+    text = _user_text(red_build_messages(6, _contaminated_history()))
+    system = red_build_messages(6, _contaminated_history())[0]["content"]
+    for marker in ("Asset inventory:", "Protected data lives on:",
+                   "internal reporting service", "internal data store",
+                   "public web front end", "analyst workstation"):
+        assert marker not in text, marker
+        assert marker not in system, marker

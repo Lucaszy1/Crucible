@@ -181,6 +181,37 @@ def _isolated_hosts_line(history: list) -> str:
     return "Isolated hosts: " + ", ".join(parts) + "."
 
 
+def _inventory_text() -> str:
+    """Render the blue-visible asset inventory for the turn prompt.
+
+    Names each host's role, business weight, and connected hosts, plus
+    the host holding the protected data. Carries no accounts, passwords,
+    file names, or weaknesses. Red never sees this section.
+    """
+    try:
+        from crucible import sandbox
+
+        inventory = sandbox.blue_inventory()
+    except Exception:
+        return ""
+    hosts = inventory.get("hosts", {}) or {}
+    if not hosts:
+        return ""
+    lines = ["Asset inventory:"]
+    for host in sorted(hosts):
+        entry = hosts[host] or {}
+        links = ", ".join(entry.get("connected_to", []) or [])
+        lines.append(
+            f"- {host}: {entry.get('role', host)} "
+            f"(weight {entry.get('weight', 1)}; "
+            f"connected to {links or 'none'})"
+        )
+    jewel = inventory.get("crown_jewel_host")
+    if jewel:
+        lines.append(f"Protected data lives on: {jewel}.")
+    return "\n".join(lines) + "\n"
+
+
 def _lessons_text(playbook: list | None) -> str:
     """Render playbook rules under the lessons heading, or nothing."""
     rules = [entry for entry in (playbook or []) if isinstance(entry, dict)]
@@ -204,6 +235,7 @@ def _build_messages(turn: int, history: list,
     last_result = _common.format_last_result(history, ACTOR)
     isolated = _isolated_hosts_line(history)
     lessons = _lessons_text(playbook)
+    inventory = _inventory_text()
     remaining = max(0, int(max_turns) - int(turn) + 1)
     moves_so_far = max(0, int(turn) - 1)
     user_text = (
@@ -212,6 +244,7 @@ def _build_messages(turn: int, history: list,
         f"Call exactly one blue team tool for this turn. "
         f"Log lines cover only this exercise. "
         f"Moves so far this exercise: {moves_so_far}. "
+        f"{inventory}"
         f"{lessons}"
         f"Your most recent tool result:\n{last_result}\n"
         f"Your previous moves:\n{own}\n"
