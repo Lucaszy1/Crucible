@@ -37,11 +37,12 @@ def _score(**overrides):
 def _stub_exercise(monkeypatch, seen, score=None, events_list=None):
     def fake_exercise(red, blue, max_turns=40, run_path=None,
                       exercise_id=None, audit="off", sensors="on", seed=None,
-                      blue_reasoning_effort=None):
+                      blue_reasoning_effort=None, scenario=None):
         seen.setdefault("ids", []).append(exercise_id)
         seen.setdefault("reds", []).append(type(red).__name__)
         seen.setdefault("sensors", []).append(sensors)
         seen.setdefault("seeds", []).append(seed)
+        seen.setdefault("audit", []).append(audit)
         seen.setdefault("effort", []).append(blue_reasoning_effort)
         return {"events": list(events_list or []),
                 "score": dict(score or _score()),
@@ -209,7 +210,8 @@ def test_bench_interleaves_cells_with_fixed_seeds(tmp_path, monkeypatch):
                            for cell in (cell_a, cell_b, cell_c, cell_d)]
     assert seen["reds"] == (["ChainRed"] * 2 + ["NoisyRed"] * 2) * 2
     assert seen["sensors"] == (["on", "off"] * 2) * 2
-    assert seen["seeds"][0] == f"il:{cell_a}:1"
+    # Seeds pair arms: same rep, every cell, one shared seed.
+    assert seen["seeds"] == ["il:1"] * 4 + ["il:2"] * 4
     assert seen["stopped"] is True
 
 
@@ -234,7 +236,7 @@ def test_bench_writes_csv_and_plain_table(tmp_path, monkeypatch, capsys):
     assert [row["episode"] for row in rows] == [
         "chain-sensors-on-memory-off-1", "chain-sensors-on-memory-off-2"]
     assert rows[0]["red_profile"] == "chain"
-    assert rows[0]["seed"] == "rep:chain-sensors-on-memory-off:1"
+    assert rows[0]["seed"] == "rep:1"
     assert rows[0]["intrusion"] == "True"
     assert rows[0]["relevant_detection_delay"] == "3"
     assert list(rows[0].keys()) == list(bench.CSV_FIELDS)
@@ -355,3 +357,97 @@ def test_bench_blue_flags_flow_to_agents(tmp_path, monkeypatch):
     assert seen["blue_clients"] == ["fake-client"]
     assert seen["client_args"] == ("https://example.test/v1",
                                    "BASETEN_API_KEY")
+
+
+def test_bench_audit_cells_limits_auditing(tmp_path, monkeypatch):
+    seen = _stub_common(monkeypatch, tmp_path)
+    _stub_exercise(monkeypatch, seen)
+    _stub_referee(monkeypatch, seen)
+    audited = "chain-sensors-on-memory-off"
+    assert bench.main(["--name", "au", "--red", "chain",
+                       "--sensors", "on,off", "--memory", "off",
+                       "--episodes-per-cell", "1", "--audit", "end",
+                       "--audit-cells", audited]) == 0
+    assert seen["audit"] == ["end", "off"]
+    state = json.loads((tmp_path / "runs" / "bench-au" /
+                        "summary.json").read_text(encoding="utf-8"))
+    assert state["audit_cells"] == [audited]
+
+
+def test_bench_audit_cells_rejects_unknown(tmp_path, monkeypatch, capsys):
+    _stub_common(monkeypatch, tmp_path)
+    assert bench.main(["--name", "au", "--red", "chain",
+                       "--episodes-per-cell", "1", "--audit", "end",
+                       "--audit-cells", "no-such-cell"]) == 1
+    assert "not a cell" in capsys.readouterr().err
+
+
+def test_bench_audit_cells_resume_mismatch(tmp_path, monkeypatch, capsys):
+    _stub_common(monkeypatch, tmp_path)
+    seen = {}
+    _stub_exercise(monkeypatch, seen)
+    _stub_referee(monkeypatch, seen)
+    audited = "chain-sensors-on-memory-off"
+    assert bench.main(["--name", "aur", "--red", "chain", "--sensors", "on",
+                       "--memory", "off", "--episodes-per-cell", "1",
+                       "--audit", "end", "--audit-cells", audited]) == 0
+    assert bench.main(["--name", "aur", "--red", "chain", "--sensors", "on",
+                       "--memory", "off", "--episodes-per-cell", "1",
+                       "--audit", "end", "--resume"]) == 1
+    assert "audit cell set differs" in capsys.readouterr().err
+
+
+def test_bench_playbook_from_seeds_frozen_cells(tmp_path, monkeypatch):
+    seen = _stub_common(monkeypatch, tmp_path)
+    _stub_exercise(monkeypatch, seen)
+    seed = {"episode": "train-9", "model_used": "muse-wonder-1.0",
+            "rules": [{"rule": "Contain the host the evidence points at.",
+                       "episode": "train-3"},
+                      {"rule": "Report probing before containing.",
+                       "episode": "train-9"}]}
+    seed_path = tmp_path / "frozen.json"
+    seed_path.write_text(json.dumps(seed), encoding="utf-8")
+
+    def no_review(*args, **kwargs):
+        raise AssertionError("referee must not run when frozen")
+
+    monkeypatch.setattr(referee, "review_episode", no_review)
+    assert bench.main(["--name", "pf", "--red", "chain", "--sensors", "on",
+                       "--memory", "on,off", "--episodes-per-cell", "1",
+                       "--freeze-playbook", "--playbook-from",
+                       str(seed_path)]) == 0
+    saved = json.loads((tmp_path / "runs" / "bench-pf" / "playbooks" /
+                        "chain-sensors-on-memory-on.json").read_text(
+                            encoding="utf-8"))
+    assert saved["rules"] == seed["rules"]
+    assert not (tmp_path / "runs" / "bench-pf" / "playbooks" /
+                "chain-sensors-on-memory-off.json").exists()
+
+
+def test_bench_playbook_from_missing_file(tmp_path, monkeypatch, capsys):
+    _stub_common(monkeypatch, tmp_path)
+    assert bench.main(["--name", "pf", "--red", "chain",
+                       "--episodes-per-cell", "1", "--memory", "on",
+                       "--playbook-from", str(tmp_path / "gone.json")]) == 1
+    assert "not found" in capsys.readouterr().err
+
+
+def test_bench_grouped_seeds_pair_cells(tmp_path, monkeypatch):
+    from crucible.scenarios import stack as stack_mod
+
+    seen = _stub_common(monkeypatch, tmp_path)
+    monkeypatch.setattr(sandbox, "start_warm", lambda: None)
+
+    def fake_activate(key):
+        if key == "classic":
+            return None
+        return {"scenario_id": "scn-7", "seed": 7, "difficulty": "easy"}
+
+    monkeypatch.setattr(stack_mod, "activate", fake_activate)
+    _stub_exercise(monkeypatch, seen)
+    _stub_referee(monkeypatch, seen)
+    assert bench.main(["--name", "gz", "--red", "chain",
+                       "--sensors", "on,off", "--memory", "off",
+                       "--episodes-per-cell", "1",
+                       "--scenarios", "classic,gen:7:easy"]) == 0
+    assert seen["seeds"] == ["gz:classic:1"] * 2 + ["gz:gen-7-easy:1"] * 2

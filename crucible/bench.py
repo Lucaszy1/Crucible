@@ -293,6 +293,9 @@ def parse_args(argv=None):
                         "reasoning_effort field at all)")
     parser.add_argument("--audit", choices=("off", "end"), default="off",
                         help="off skips judging, end audits after each episode")
+    parser.add_argument("--audit-cells", default=None,
+                        help="Comma-separated cell keys to audit when "
+                        "--audit end (default: audit every cell)")
     parser.add_argument("--max-turns", type=int, default=40,
                         help="Turns per episode, capped at 40")
     parser.add_argument("--no-cache", action="store_true",
@@ -317,6 +320,9 @@ def parse_args(argv=None):
     parser.add_argument("--freeze-playbook", action="store_true",
                         help="Blue still reads cell playbooks but the referee "
                         "never updates them (for held-out evaluation)")
+    parser.add_argument("--playbook-from", default=None,
+                        help="Seed memory-on cells from this playbook JSON "
+                        "on a fresh start (ignored with --resume)")
     return parser.parse_args(argv)
 
 
@@ -344,6 +350,20 @@ def _cells(args) -> list:
                 cells.append({"key": key, "red": red,
                               "sensors": sensor_mode, "memory": memory})
     return cells
+
+
+def _audit_cells(args, cells: list) -> list | None:
+    """Parse --audit-cells into cell keys, None for every cell."""
+    raw = (args.audit_cells or "").strip()
+    if not raw:
+        return None
+    want = [piece.strip() for piece in raw.split(",") if piece.strip()]
+    known = {cell["key"] for cell in cells}
+    for key in want:
+        if key not in known:
+            raise ValueError(f"--audit-cells value {key!r} is not a cell "
+                             f"in this benchmark")
+    return want
 
 
 def _bench_dir(name: str) -> Path:
@@ -395,7 +415,7 @@ def _archive_dir(bench_dir: Path, name: str) -> Path:
 
 
 def _open_bench(name: str, cells: list, per_cell: int, args,
-                labels: list) -> dict | None:
+                labels: list, audit_cells: list | None) -> dict | None:
     """Load or start the benchmark state; None with an error on failure."""
     bench_dir = _bench_dir(name)
     summary_path = bench_dir / "summary.json"
@@ -423,6 +443,10 @@ def _open_bench(name: str, cells: list, per_cell: int, args,
             print(f"bench: resume freeze flag differs from the saved "
                   f"benchmark {name!r}; aborting", file=sys.stderr)
             return None
+        if state.get("audit_cells") != audit_cells:
+            print(f"bench: resume audit cell set differs from the saved "
+                  f"benchmark {name!r}; aborting", file=sys.stderr)
+            return None
         rows = list(state.get("episodes", []) or [])
         for cell in cells:
             playbooks[cell["key"]] = referee.load_playbook(
@@ -437,8 +461,35 @@ def _open_bench(name: str, cells: list, per_cell: int, args,
                 return None
             archived = _archive_dir(bench_dir, name)
             print(f"Archived previous benchmark to {archived}")
+        seed_book = None
+        if args.playbook_from:
+            seed_path = Path(args.playbook_from)
+            if not seed_path.exists():
+                print(f"bench: --playbook-from file not found: "
+                      f"{args.playbook_from}", file=sys.stderr)
+                return None
+            seed_book = referee.load_playbook(seed_path)
+            if not seed_book.get("rules"):
+                print(f"bench: warning: --playbook-from file has no "
+                      f"rules: {args.playbook_from}", file=sys.stderr)
         for cell in cells:
-            playbooks[cell["key"]] = referee.empty_playbook()
+            if cell["memory"] == "on" and seed_book is not None:
+                playbooks[cell["key"]] = {
+                    "episode": seed_book.get("episode"),
+                    "rules": [dict(entry)
+                              for entry in seed_book.get("rules", [])],
+                    "model_used": seed_book.get("model_used")}
+            else:
+                playbooks[cell["key"]] = referee.empty_playbook()
+        if seed_book is not None:
+            for cell in cells:
+                if cell["memory"] != "on":
+                    continue
+                referee.save_playbook(
+                    playbooks[cell["key"]],
+                    bench_dir / "playbooks" / f"{cell['key']}.json",
+                    bench_dir / "playbooks" / f"{cell['key']}.md")
+            print(f"Seeded memory-on playbooks from {args.playbook_from}")
         print(f"Starting benchmark {name}: {len(cells)} cells x "
               f"{per_cell} episodes...")
     frozen = bool(args.freeze_playbook)
@@ -447,7 +498,7 @@ def _open_bench(name: str, cells: list, per_cell: int, args,
               "never updates them.")
     return {"name": name, "dir": bench_dir, "summary_path": summary_path,
             "rows": rows, "playbooks": playbooks, "scenarios": labels,
-            "playbook_frozen": frozen}
+            "playbook_frozen": frozen, "audit_cells": audit_cells}
 
 
 def _run_episode(bench: dict, cell: dict, rep: int, args, client,
@@ -456,8 +507,12 @@ def _run_episode(bench: dict, cell: dict, rep: int, args, client,
     """Run one episode for one cell and persist the summaries."""
     exercise_id = f"{label}-{cell['key']}-{rep}" if grouped \
         else f"{cell['key']}-{rep}"
-    seed = f"{bench['name']}:{label}:{cell['key']}:{rep}" if grouped \
-        else f"{bench['name']}:{cell['key']}:{rep}"
+    # The seed pairs arms: same scenario and rep share it across cells,
+    # so scripted noisy reds replay identical decoys per pair. Model reds
+    # stay stochastic regardless; the exercise id (unique per cell) keeps
+    # cache entries separate.
+    seed = f"{bench['name']}:{label}:{rep}" if grouped \
+        else f"{bench['name']}:{rep}"
     rules = bench["playbooks"][cell["key"]].get("rules", []) or []
     if cell["red"] == "chain":
         red = ChainRed()
@@ -475,10 +530,15 @@ def _run_episode(bench: dict, cell: dict, rep: int, args, client,
         tools.restore_host(host)
     spend_start = run_exercise._spend_line_count()
     extra = {"scenario": scenario} if scenario else {}
+    audit_mode = args.audit
+    wanted = bench.get("audit_cells")
+    if audit_mode == "end" and wanted is not None \
+            and cell["key"] not in wanted:
+        audit_mode = "off"
     result = orchestrator.run_exercise(
         red, blue, max_turns=args.max_turns,
         run_path=bench["dir"] / f"{exercise_id}.jsonl",
-        exercise_id=exercise_id, audit=args.audit,
+        exercise_id=exercise_id, audit=audit_mode,
         sensors=cell["sensors"], seed=seed,
         blue_reasoning_effort=args.blue_reasoning_effort, **extra)
     score = result.get("score", {}) or {}
@@ -528,6 +588,7 @@ def _run_episode(bench: dict, cell: dict, rep: int, args, client,
         "episodes_per_cell": args.episodes_per_cell,
         "scenarios": bench.get("scenarios", ["classic"]),
         "playbook_frozen": bool(args.freeze_playbook),
+        "audit_cells": bench.get("audit_cells"),
         "episodes": bench["rows"],
     })
     return result
@@ -583,6 +644,7 @@ def main(argv=None) -> int:
     try:
         name = _check_name(args.name)
         cells = _cells(args)
+        audit_cells = _audit_cells(args, cells)
     except ValueError as exc:
         print(f"bench: {exc}", file=sys.stderr)
         return 1
@@ -605,7 +667,7 @@ def main(argv=None) -> int:
         print("--spend-cap-usd must be positive", file=sys.stderr)
         return 1
 
-    bench = _open_bench(name, cells, per_cell, args, labels)
+    bench = _open_bench(name, cells, per_cell, args, labels, audit_cells)
     if bench is None:
         return 1
     bench["blue_reasoning_effort"] = args.blue_reasoning_effort or "default"
