@@ -3,7 +3,7 @@
 # then logs one line to the container log:
 #   file read path=<path> bytes=<n> from=<source>
 # $1 is the path, $2 the source label from the exercise tools. Only
-# successful reads log. Keep in sync with sandbox/workstation/read-file.sh.
+# successful reads log. Keep in sync across sandbox hosts.
 toy_log() {
   if [ -n "$TOY_LOG_FILE" ]; then
     printf '%s\n' "$1" >>"$TOY_LOG_FILE" 2>/dev/null || true

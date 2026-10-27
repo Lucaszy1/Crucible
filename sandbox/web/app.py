@@ -46,7 +46,7 @@ class Handler(BaseHTTPRequestHandler):
                     {
                         "admin": True,
                         "note": "toy misconfiguration: admin page left open",
-                        "hint": "the data host 'db' still uses its vendor default sign-in",
+                        "hint": "the internal host 'app' runs reports as 'svc-report'",
                     },
                 )
                 self._log_request(200)

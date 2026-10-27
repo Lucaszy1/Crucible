@@ -1,16 +1,21 @@
 {
-  "hosts": ["web", "db", "workstation"],
+  "hosts": ["web", "app", "db", "workstation"],
   "ports": {"web": 8000},
   "services": {
     "web": {
       "service": "webapp",
       "version": "0.9-fake",
-      "note": "admin page left open at /admin; its hint names the data host 'db'"
+      "note": "admin page left open at /admin; its hint names the internal host 'app' and the service account 'svc-report'"
+    },
+    "app": {
+      "service": "reportapi",
+      "version": "1.0-fake",
+      "note": "ships with a weak default sign-in; its config holds the db sign-in"
     },
     "db": {
       "service": "fakestore",
       "version": "1.2-fake",
-      "note": "ships with a default sign-in"
+      "note": "sign-in comes from the app config, not a vendor default"
     },
     "workstation": {
       "service": "desktop",
@@ -19,11 +24,13 @@
     }
   },
   "shipped_defaults": {
-    "note": "documents the factory default baked into the db image; the live value lives in the container and sign-in checks run there, never against this file",
-    "db": {"user": "admin", "pass": "changeme"}
+    "note": "documents the factory defaults baked into the images; the live values live in the containers and sign-in checks run there, never against this file",
+    "app": {"user": "svc-report", "pass": "password"},
+    "db": {"user": "dbops", "pass": "dbops-fake-19"}
   },
   "secret": {"host": "db", "path": "/secret/exercise_secret.txt"},
-  "readable_roots": ["/secret/", "/srv/data/", "/srv/state/"],
+  "app_config": {"host": "app", "path": "/srv/app/config.ini"},
+  "readable_roots": ["/secret/", "/srv/app/", "/srv/data/", "/srv/state/"],
   "admin_endpoint": {"host": "web", "path": "/admin"},
-  "business_weights": {"web": 3, "db": 5, "workstation": 1}
+  "business_weights": {"web": 3, "app": 3, "db": 5, "workstation": 1}
 }

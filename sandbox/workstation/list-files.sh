@@ -3,7 +3,7 @@
 # then logs one line to the container log:
 #   dir list path=<dir> entries=<n> from=<source>
 # $1 is the directory, $2 the source label from the exercise tools. Only
-# successful listings log. Keep in sync with sandbox/db/list-files.sh.
+# successful listings log. Keep in sync across sandbox hosts.
 toy_log() {
   if [ -n "$TOY_LOG_FILE" ]; then
     printf '%s\n' "$1" >>"$TOY_LOG_FILE" 2>/dev/null || true

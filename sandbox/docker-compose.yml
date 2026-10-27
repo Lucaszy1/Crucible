@@ -1,10 +1,16 @@
-# Exercise sandbox. Three toy hosts on an internal-only network.
+# Exercise sandbox. Four toy hosts on an internal-only network.
 # The internal flag removes the route out, so containers cannot reach the
 # internet. No ports are published to the host machine.
 services:
   web:
     build: ./web
     hostname: web
+    networks:
+      - range
+
+  app:
+    build: ./app
+    hostname: app
     networks:
       - range
 

@@ -24,7 +24,7 @@ if [ ! -f "$pass_file" ]; then
   toy_log "signin reset none from=$src"
   exit 0
 fi
-printf 'admin' > "$user_file"
-printf 'changeme' > "$pass_file"
+printf 'dbops' > "$user_file"
+printf 'dbops-fake-19' > "$pass_file"
 echo RESET_OK
 toy_log "signin reset from=$src"
