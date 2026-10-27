@@ -347,6 +347,9 @@ def test_orchestrator_shows_only_new_alerts(tmp_path, monkeypatch):
         _logs(app=["signin fail user=a from=controller"] * 2),
         _logs(app=["signin fail user=a from=controller"] * 3
               + ["signin ok user=a from=controller"]),
+        _logs(app=["signin fail user=a from=controller"] * 3
+              + ["signin ok user=a from=controller"],
+              db=["signin ok user=b from=controller"]),
     ]
     monkeypatch.setattr(sensors, "collect_episode_logs",
                         lambda hosts=None: states.pop(0) if states else {})
@@ -371,16 +374,21 @@ def test_orchestrator_shows_only_new_alerts(tmp_path, monkeypatch):
 
     blue = _AlertBlue()
     result = orchestrator.run_exercise(
-        _QuietRed(), blue, max_turns=4,
+        _QuietRed(), blue, max_turns=6,
         run_path=tmp_path / "diff.jsonl", sensors="on")
     assert blue.seen[0] == []
     assert [alert["rule"] for alert in blue.seen[1]] == [
         "failed_burst", "success_after_failures"]
     assert [alert["id"] for alert in blue.seen[1]] == ["alert-1", "alert-2"]
+    assert [alert["rule"] for alert in blue.seen[2]] == [
+        "success_first_try", "lateral_step"]
+    assert [alert["id"] for alert in blue.seen[2]] == ["alert-3", "alert-4"]
     blues = [event for event in result["events"] if event["actor"] == "blue"]
     assert "sensor_alerts" not in blues[0]
     assert [alert["id"] for alert in blues[1]["sensor_alerts"]] == [
         "alert-1", "alert-2"]
+    assert [alert["id"] for alert in blues[2]["sensor_alerts"]] == [
+        "alert-3", "alert-4"]
 
 
 def test_score_sensors_defaults_off_without_first_event():

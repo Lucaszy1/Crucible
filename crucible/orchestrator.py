@@ -96,12 +96,15 @@ def _sensor_context() -> tuple:
     return links, inventory.get("crown_jewel_host")
 
 
-def _new_sensor_alerts(shown_keys: set) -> list:
+def _new_sensor_alerts(shown: dict) -> list:
     """Collect episode logs and return alerts not shown before.
 
     Runs the deterministic rules over the same episode-scoped logs blue
-    could read, then filters to alerts whose key is new. Updates the
-    shown set. Never raises: unreadable logs mean no alerts.
+    could read, then stamps each new alert with a stable episode id
+    (alert-N in first-show order) and records its key. Restamping
+    matters because a fresh rule run renumbers from alert-1, which
+    would reuse ids across turns. Updates the shown map. Never raises:
+    unreadable logs mean no alerts.
     """
     try:
         logs = sensor_rules.collect_episode_logs()
@@ -113,10 +116,15 @@ def _new_sensor_alerts(shown_keys: set) -> list:
                                             crown_jewel_host=jewel)
     except Exception:
         return []
-    fresh = [alert for alert in current
-             if sensor_rules.alert_key(alert) not in shown_keys]
-    for alert in fresh:
-        shown_keys.add(sensor_rules.alert_key(alert))
+    fresh = []
+    for alert in current:
+        key = sensor_rules.alert_key(alert)
+        if key in shown:
+            continue
+        stamped = dict(alert)
+        stamped["id"] = f"alert-{len(shown) + 1}"
+        shown[key] = stamped["id"]
+        fresh.append(stamped)
     return fresh
 
 
@@ -713,7 +721,7 @@ def run_exercise(
         evidence_refs=[],
     )
     audit_weights = _business_weights()
-    shown_alert_keys: set = set()
+    shown_alerts: dict = {}
     blue_takes_alerts = sensors == "on" and _agent_accepts_alerts(blue)
 
     turns_used = 0
@@ -725,7 +733,7 @@ def run_exercise(
                    if event.get("actor") not in ("auditor", "system")]
         fresh_alerts = None
         if agent is blue and blue_takes_alerts:
-            fresh_alerts = _new_sensor_alerts(shown_alert_keys)
+            fresh_alerts = _new_sensor_alerts(shown_alerts)
         try:
             action = _next_action(agent, slot + 1, visible, capped_turns,
                                   alerts=fresh_alerts)
