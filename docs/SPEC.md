@@ -20,7 +20,7 @@ The hackathon bans projects involving "war." Every README line, UI label, commit
 
 - Everything runs in isolated Docker containers on an internal-only network with no internet access.
 - Red-team tools can only target hosts inside the sandbox allowlist. Enforce this in code, not just in prompts.
-- The planted weaknesses are toy misconfigurations (exposed admin endpoint whose hint names the data host db, weak default credential, unpatched fake service version). No real exploit code, no malware, no real ransomware. Any "encryption" scenario is simulated by flipping state flags on dummy files.
+- The planted weaknesses are toy misconfigurations (exposed admin endpoint whose hint names the internal host app and the service account svc-report, weak default sign-in on app, app config at /srv/app/config.ini holding the db sign-in for dbops, unpatched fake service versions). No real exploit code, no malware, no real ransomware. Any "encryption" scenario is simulated by flipping state flags on dummy files.
 - No real credentials, keys, or data anywhere. MODEL_API_KEY lives in .env only, which is gitignored.
 
 ## 4. Hackathon constraints
@@ -78,7 +78,7 @@ Every tool call emits an event: id, timestamp, actor, tool, args, result, reason
 ## 8. Features
 
 ### Must have (done by end of Day 6)
-1. Sandbox with 3 to 5 containers (web, db, workstation, plus file server and backup if time allows) and a deliberately weak scenario.
+1. Sandbox with 4 containers (web, app, db, workstation) and a deliberately weak scenario.
 2. Red team and blue team agents with tool calling, turn-based loop, deterministic seed.
 3. Live Operations Center dashboard: animated network graph (host states: clean, probed, compromised, isolated, restored), side-by-side agent reasoning streams, event timeline with MITRE ATT&CK tags, containment timer, scoreboard.
 4. Auditor agent: scores every blue action as justified or not, citing the exact log line. Shown live and in the final scorecard. This is the verifiable-agents story.
@@ -98,9 +98,9 @@ Every tool call emits an event: id, timestamp, actor, tool, args, result, reason
 
 ## 9. Scoring
 
-Per exercise: time to detect, time to contain, hosts compromised, secret exfiltrated yes or no, blue actions justified percentage (from auditor), tokens spent. Learning curve chart across exercises is the hero visual. Exercises run at most 30 events, which is 15 moves per team.
+Per exercise: time to detect, time to contain, hosts compromised, secret exfiltrated yes or no, blue actions justified percentage (from auditor), tokens spent. Learning curve chart across exercises is the hero visual. Exercises run at most 40 events, which is 20 moves per team. Exercises end as soon as the secret is read.
 
-Availability cost: each host carries a business weight from sandbox/scenario.json (web 3, db 5, workstation 1). Every turn a host stays isolated or under patch adds its weight to downtime_cost. The down set starts empty. A successful isolate_host or patch_service marks that host down. A successful restore_host clears it. Each event adds the weights of the hosts down after that event, so the isolating or patching turn itself counts. Failed actions change nothing, and a host down for both reasons counts once per turn.
+Availability cost: each host carries a business weight from sandbox/scenario.json (web 3, app 3, db 5, workstation 1). Every turn a host stays isolated or under patch adds its weight to downtime_cost. The down set starts empty. A successful isolate_host or patch_service marks that host down. A successful restore_host clears it. Each event adds the weights of the hosts down after that event, so the isolating or patching turn itself counts. Downtime counts only up to the secret read when it occurs, else the exercise end. Failed actions change nothing, and a host down for both reasons counts once per turn.
 
 Blue score: SECRET_PROTECTED_POINTS is 40. When the secret was read, blue_score is 0. Otherwise blue_score is max(0, 40 minus downtime_cost). High isolation or long patch windows therefore lower the score even when the secret stays protected.
 
