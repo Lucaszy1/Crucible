@@ -447,8 +447,12 @@ def chat(
     extra = {
         "temperature": temperature if temperature is not None else temperature_for(role),
         "max_tokens": max_tokens,
-        "reasoning_effort": effort,
     }
+    # "omit" leaves the field out of the request entirely (used by the
+    # --blue-reasoning-effort omit ablation). Every other value,
+    # including the low default, is sent exactly as before.
+    if effort != "omit":
+        extra["reasoning_effort"] = effort
     key = _cache_key(model, messages, tools, extra, exercise_id, seed)
 
     if use_cache:

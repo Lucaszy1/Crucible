@@ -36,11 +36,13 @@ def _score(**overrides):
 
 def _stub_exercise(monkeypatch, seen, score=None, events_list=None):
     def fake_exercise(red, blue, max_turns=40, run_path=None,
-                      exercise_id=None, audit="off", sensors="on", seed=None):
+                      exercise_id=None, audit="off", sensors="on", seed=None,
+                      blue_reasoning_effort=None):
         seen.setdefault("ids", []).append(exercise_id)
         seen.setdefault("reds", []).append(type(red).__name__)
         seen.setdefault("sensors", []).append(sensors)
         seen.setdefault("seeds", []).append(seed)
+        seen.setdefault("effort", []).append(blue_reasoning_effort)
         return {"events": list(events_list or []),
                 "score": dict(score or _score()),
                 "run_path": str(run_path),
@@ -219,7 +221,7 @@ def test_bench_writes_csv_and_plain_table(tmp_path, monkeypatch, capsys):
     assert bench.main(["--name", "rep", "--red", "chain", "--sensors", "on",
                        "--memory", "off", "--episodes-per-cell", "2"]) == 0
     out = capsys.readouterr().out
-    assert "Benchmark done: 2 episodes (name=rep)" in out
+    assert "Benchmark done: 2 episodes (name=rep, blue_reasoning_effort=default)" in out
     assert "cell | n | intr | secret%" in out
     assert "chain-sensors-on-memory-off | 2 | 2 | 0.0% | 100.0%" in out
     assert "--- chain-sensors-on-memory-off ---" in out

@@ -14,7 +14,8 @@ def _stubbed_run(monkeypatch, tmp_path):
                         lambda host: {"ok": True, "host": host})
     monkeypatch.setattr(run_exercise.tools, "reset_state", lambda: None)
 
-    def fake_exercise(red, blue, max_turns=12, run_path=None, exercise_id=None, audit="off", sensors="on"):
+    def fake_exercise(red, blue, max_turns=12, run_path=None, exercise_id=None, audit="off", sensors="on",
+                      blue_reasoning_effort=None):
         seen["red"] = type(red).__name__
         seen["blue"] = type(blue).__name__
         seen["max_turns"] = max_turns
@@ -66,7 +67,8 @@ def _evt(reasoning):
 def _stubbed_run_with_events(monkeypatch, tmp_path, events_list):
     seen = _stubbed_run(monkeypatch, tmp_path)
 
-    def fake_exercise(red, blue, max_turns=12, run_path=None, exercise_id=None, audit="off", sensors="on"):
+    def fake_exercise(red, blue, max_turns=12, run_path=None, exercise_id=None, audit="off", sensors="on",
+                      blue_reasoning_effort=None):
         path = str(tmp_path / "fake.jsonl")
         return {
             "events": events_list,
@@ -164,7 +166,8 @@ def test_runner_summary_prints_downtime_blue_and_cost(tmp_path, monkeypatch, cap
     seen = _stubbed_run(monkeypatch, tmp_path)
     monkeypatch.setattr(llm, "SPEND_FILE", tmp_path / "spend.jsonl")
 
-    def fake_exercise(red, blue, max_turns=12, run_path=None, exercise_id=None, audit="off", sensors="on"):
+    def fake_exercise(red, blue, max_turns=12, run_path=None, exercise_id=None, audit="off", sensors="on",
+                      blue_reasoning_effort=None):
         path = str(tmp_path / "fake.jsonl")
         return {
             "events": [],

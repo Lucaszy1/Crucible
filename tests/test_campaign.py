@@ -33,7 +33,8 @@ def _score(outcome="blue_held", blue=80.0, delay=2):
 
 def _stub_exercise(monkeypatch, seen, scores):
     def fake_exercise(red, blue, max_turns=40, run_path=None,
-                      exercise_id=None, audit="off", sensors="on", seed=None):
+                      exercise_id=None, audit="off", sensors="on", seed=None,
+                      blue_reasoning_effort=None):
         seen.setdefault("ids", []).append(exercise_id)
         seen.setdefault("audits", []).append(audit)
         seen.setdefault("sensors", []).append(sensors)
@@ -305,7 +306,8 @@ def test_force_archives_old_dir_and_starts_over(tmp_path, monkeypatch, capsys):
 
 def _stub_seeded_exercise(monkeypatch, seen, events_by_id=None):
     def fake_exercise(red, blue, max_turns=40, run_path=None,
-                      exercise_id=None, audit="off", sensors="on", seed=None):
+                      exercise_id=None, audit="off", sensors="on", seed=None,
+                      blue_reasoning_effort=None):
         seen.setdefault("ids", []).append(exercise_id)
         seen.setdefault("seeds_logged", []).append(seed)
         seen.setdefault("seeds", []).append((getattr(red, "_seed", None),

@@ -22,10 +22,17 @@ treat the 0 as free; check the Baseten invoice for real dollars.
   string, `id` values are present (`chatcmpl-tool-<uuid>`), several
   calls can come back at once (2 observed for a two-host isolate ask).
 - `tool_choice` with a function object is accepted and forces the call.
-- `reasoning_effort` (`low`, `medium`) is ACCEPTED, not rejected, and it
-  collapses thinking: omitted spent 325 reasoning tokens on the blue
-  turn while `low` spent 10 and `medium` spent 9 (single samples).
-  The client keeps sending it; the default (`low`) is the cheap path.
+- `reasoning_effort` (`low`, `medium`, `high`) is ACCEPTED, not
+  rejected. The client keeps sending it; `omit` (field not sent) is
+  supported too. Measured thinking tokens on the blue turn
+  (`scripts/probe_effort.py`, temp 0.5, max 3000):
+  omitted 175, low 8, medium 418 then 28, high 39 then 141
+  (earlier probe: omitted 325, low 10, medium 9).
+  `low` is consistently tiny (8-10); omitted is consistently large
+  (175-325); `medium`/`high` swing wildly (9-418) with no visible
+  ordering, so treat them as unpredictable. All six calls chose
+  `read_logs` first; none isolated. `minimal` is accepted by the
+  flag but untested against the host.
 - `temperature` 0.5 and 0.0 are accepted (HTTP 200 throughout).
 - Blue-style turn with the real `SYSTEM_PROMPT` + `TOOL_SCHEMAS` and a
   made-up successful-sign-in alert returns a sensible tool call
@@ -64,8 +71,10 @@ treat the 0 as free; check the Baseten invoice for real dollars.
 
 ## Unsure / single-sample items
 
-- `medium` behaving exactly like `low` (9 vs 10 tokens) is one sample
-  each; the effort scale past `low` is unmapped.
+- The effort scale past `low` looks uncontrolled rather than
+  monotonic: medium measured 9, 418, 28 and high 39, 141 across
+  runs. Two samples each is still thin; do not assume higher means
+  more thinking.
 - Forced `tool_choice` skipping reasoning (0 tokens) is one sample.
 - `max_tokens=256` beating `1024` (2/3 vs 1/3) is sampling noise from
   3 repeats, not a real ranking; reasoning length varies wildly.

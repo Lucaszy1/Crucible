@@ -295,7 +295,8 @@ def test_sensors_off_leaves_old_behavior_unchanged(tmp_path, monkeypatch):
     off = orchestrator.run_exercise(
         ScriptedRed(), ScriptedBlue(), max_turns=4,
         run_path=tmp_path / "off.jsonl", sensors="off")
-    assert off["events"][0]["args"] == {"sensors": "off"}
+    assert off["events"][0]["args"] == {"sensors": "off",
+                                            "blue_reasoning_effort": "default"}
     assert all("sensor_alerts" not in event for event in off["events"])
     assert off["score"]["sensors"] == "off"
 
@@ -334,7 +335,8 @@ def test_sensors_off_leaves_old_behavior_unchanged(tmp_path, monkeypatch):
     fresh = orchestrator.run_exercise(
         _QuietRed(), _AlertBlue(), max_turns=4,
         run_path=tmp_path / "on.jsonl", sensors="on")
-    assert fresh["events"][0]["args"] == {"sensors": "on"}
+    assert fresh["events"][0]["args"] == {"sensors": "on",
+                                              "blue_reasoning_effort": "default"}
     assert fresh["score"]["sensors"] == "on"
 
 

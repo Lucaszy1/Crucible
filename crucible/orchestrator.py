@@ -671,6 +671,7 @@ def run_exercise(
     auditor_use_cache: bool = True,
     sensors: str = "on",
     seed: str | None = None,
+    blue_reasoning_effort: str | None = None,
 ) -> dict:
     """Run one full exercise with alternating red and blue moves.
 
@@ -683,8 +684,9 @@ def run_exercise(
     turn. Before move 1 the range is restored, log scope starts, and a
     clean-start check is recorded as the first (system) event; agents
     never see system events and scoring skips them like auditor events.
-    That first event records the sensors mode (and seed when given) in
-    its args so ablations stay reproducible from the log.
+    That first event records the sensors mode, the blue reasoning
+    effort ("default" when the flag is unset), and the seed when given
+    in its args so ablations stay reproducible from the log.
 
     Audit modes: off skips judging, end audits every blue action after
     the loop, live audits each blue action right after it is logged.
@@ -706,7 +708,10 @@ def run_exercise(
     tools.reset_state()
     check = tools.begin_episode()
     writer = events.EventWriter(run_path if run_path else events.new_run_path(exercise_id))
-    first_args: dict = {"sensors": sensors}
+    first_args: dict = {
+        "sensors": sensors,
+        "blue_reasoning_effort": blue_reasoning_effort or "default",
+    }
     if seed is not None:
         first_args["seed"] = str(seed)
     writer.log(

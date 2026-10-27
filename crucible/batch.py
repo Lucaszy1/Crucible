@@ -107,6 +107,13 @@ def parse_args(argv=None):
         default=None,
         help="Env var holding the API key for blue's custom host",
     )
+    parser.add_argument(
+        "--blue-reasoning-effort",
+        choices=("omit", "minimal", "low", "medium", "high"),
+        default=None,
+        help="Reasoning effort for blue's calls only (default: today's "
+        "behavior; omit sends no reasoning_effort field at all)",
+    )
     return parser.parse_args(argv)
 
 
@@ -161,7 +168,8 @@ def main(argv=None) -> int:
             if args.agents == "model":
                 red = ModelRed(exercise_id=exercise_id, use_cache=not args.no_cache)
                 blue = ModelBlue(exercise_id=exercise_id, use_cache=not args.no_cache,
-                                 client=blue_client, model=args.blue_model)
+                                 client=blue_client, model=args.blue_model,
+                                 reasoning_effort=args.blue_reasoning_effort)
             else:
                 red = ScriptedRed()
                 blue = ScriptedBlue()
@@ -177,6 +185,7 @@ def main(argv=None) -> int:
                 exercise_id=exercise_id,
                 audit=args.audit,
                 sensors=args.sensors,
+                blue_reasoning_effort=args.blue_reasoning_effort,
             )
             if run_exercise._spend_cap_hit(result.get("events", [])):
                 run_exercise._warn_spend_cap()

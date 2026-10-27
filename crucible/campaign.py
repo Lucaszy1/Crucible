@@ -76,6 +76,11 @@ def parse_args(argv=None):
                         help="Custom API base URL for blue")
     parser.add_argument("--blue-api-key-env", default=None,
                         help="Env var holding the API key for blue's custom host")
+    parser.add_argument("--blue-reasoning-effort", default=None,
+                        choices=("omit", "minimal", "low", "medium", "high"),
+                        help="Reasoning effort for blue's calls only "
+                        "(default: today's behavior; omit sends no "
+                        "reasoning_effort field at all)")
     parser.add_argument("--no-cache", action="store_true",
                         help="Skip the model response cache for this campaign")
     parser.add_argument("--resume", action="store_true",
@@ -260,7 +265,8 @@ def _run_episode(arm: dict, number: int, args, seed: str | None,
         blue = ModelBlue(exercise_id=exercise_id,
                          use_cache=not args.no_cache,
                          playbook=rules if arm["memory"] == "on" else None,
-                         seed=seed, client=blue_client, model=args.blue_model)
+                         seed=seed, client=blue_client, model=args.blue_model,
+                         reasoning_effort=args.blue_reasoning_effort)
     else:
         red = ScriptedRed()
         blue = ScriptedBlue()
@@ -271,7 +277,8 @@ def _run_episode(arm: dict, number: int, args, seed: str | None,
         red, blue, max_turns=args.max_turns,
         run_path=arm["dir"] / f"{exercise_id}.jsonl",
         exercise_id=exercise_id, audit=args.audit,
-        sensors=args.sensors, seed=seed)
+        sensors=args.sensors, seed=seed,
+        blue_reasoning_effort=args.blue_reasoning_effort)
     score = result.get("score", {}) or {}
     referee_model = None
     if arm["memory"] == "on":

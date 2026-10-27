@@ -58,6 +58,7 @@ CSV_FIELDS = (
     "downtime_pct",
     "blue_score",
     "cost",
+    "blue_reasoning_effort",
 )
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -260,6 +261,11 @@ def parse_args(argv=None):
                         help="Custom API base URL for blue")
     parser.add_argument("--blue-api-key-env", default=None,
                         help="Env var holding the API key for blue's custom host")
+    parser.add_argument("--blue-reasoning-effort", default=None,
+                        choices=("omit", "minimal", "low", "medium", "high"),
+                        help="Reasoning effort for blue's calls only "
+                        "(default: today's behavior; omit sends no "
+                        "reasoning_effort field at all)")
     parser.add_argument("--audit", choices=("off", "end"), default="off",
                         help="off skips judging, end audits after each episode")
     parser.add_argument("--max-turns", type=int, default=40,
@@ -406,7 +412,8 @@ def _run_episode(bench: dict, cell: dict, rep: int, args, client) -> dict:
     blue = ModelBlue(exercise_id=exercise_id,
                      use_cache=not args.no_cache,
                      playbook=rules if cell["memory"] == "on" else None,
-                     seed=seed, client=client, model=args.blue_model)
+                     seed=seed, client=client, model=args.blue_model,
+                     reasoning_effort=args.blue_reasoning_effort)
     for host in ("web", "app", "db", "workstation"):
         tools.restore_host(host)
     spend_start = run_exercise._spend_line_count()
@@ -414,7 +421,8 @@ def _run_episode(bench: dict, cell: dict, rep: int, args, client) -> dict:
         red, blue, max_turns=args.max_turns,
         run_path=bench["dir"] / f"{exercise_id}.jsonl",
         exercise_id=exercise_id, audit=args.audit,
-        sensors=cell["sensors"], seed=seed)
+        sensors=cell["sensors"], seed=seed,
+        blue_reasoning_effort=args.blue_reasoning_effort)
     score = result.get("score", {}) or {}
     if cell["memory"] == "on":
         review = referee.review_episode(
@@ -445,6 +453,7 @@ def _run_episode(bench: dict, cell: dict, rep: int, args, client) -> dict:
         "downtime_pct": score.get("downtime_pct", 0.0),
         "blue_score": score.get("blue_score", 0),
         "cost": round(cost, 6),
+        "blue_reasoning_effort": args.blue_reasoning_effort or "default",
     })
     latest = bench["rows"][-1]
     print(f"{exercise_id}: outcome={latest['outcome']} "
@@ -463,7 +472,9 @@ def _run_episode(bench: dict, cell: dict, rep: int, args, client) -> dict:
 def _report(bench: dict) -> float:
     """Print the per-cell plain table and return the total cost."""
     rows = bench["rows"]
-    print(f"Benchmark done: {len(rows)} episodes (name={bench['name']})")
+    effort = bench.get("blue_reasoning_effort", "default")
+    print(f"Benchmark done: {len(rows)} episodes (name={bench['name']}, "
+          f"blue_reasoning_effort={effort})")
     print("cell | n | intr | secret% | contain% | med-rel-delay | "
           "med-contain | mean-downtime")
     cells = []
@@ -524,6 +535,7 @@ def main(argv=None) -> int:
     bench = _open_bench(name, cells, per_cell, args)
     if bench is None:
         return 1
+    bench["blue_reasoning_effort"] = args.blue_reasoning_effort or "default"
     try:
         client = llm.custom_client(args.blue_base_url, args.blue_api_key_env)
     except RuntimeError as exc:
