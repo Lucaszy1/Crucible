@@ -308,7 +308,8 @@ class ModelBlue:
                  reasoning_effort: str | None = None,
                  max_turns: int = _common.DEFAULT_MAX_TURNS,
                  use_cache: bool = True,
-                 playbook: list | None = None, seed: str | None = None):
+                 playbook: list | None = None, seed: str | None = None,
+                 model: str | None = None):
         self._client = client
         self._exercise_id = exercise_id
         self._max_tokens = max_tokens
@@ -318,6 +319,7 @@ class ModelBlue:
         self._use_cache = use_cache
         self._playbook = playbook
         self._seed = seed
+        self._model = model
         self._fallback = ScriptedBlue()
 
     def _fallback_action(self, turn: int, history: list, note: str) -> dict | None:
@@ -333,16 +335,20 @@ class ModelBlue:
                     alerts: list | None = None) -> dict | None:
         """Ask the model for one tool call, else use the baseline move."""
         total = max_turns if max_turns is not None else self._max_turns
+        if self._temperature is None:
+            temperature = llm.temperature_for(ROLE)
+        else:
+            temperature = self._temperature
         try:
             response = llm.chat(
-                ROLE,
+                self._model or ROLE,
                 _build_messages(turn, history, total, self._playbook, alerts),
                 tools=TOOL_SCHEMAS,
                 exercise_id=self._exercise_id,
                 client=self._client,
                 use_cache=self._use_cache,
                 max_tokens=self._max_tokens,
-                temperature=self._temperature,
+                temperature=temperature,
                 reasoning_effort=self._reasoning_effort,
                 seed=self._seed,
             )

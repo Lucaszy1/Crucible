@@ -277,6 +277,36 @@ def _default_client():
     return OpenAI(base_url=BASE_URL, api_key=api_key)
 
 
+def custom_client(base_url: str | None = None,
+                  api_key_env: str | None = None):
+    """Build an OpenAI-compatible client with hosting overrides.
+
+    Returns None when neither override is set, so callers keep the
+    default client. api_key_env names the env var holding the key and
+    raises RuntimeError when it is missing or empty, so a typo fails
+    fast instead of sending a default key to a custom host.
+    """
+    _load_env_file(ROOT / ".env")
+    if not base_url and not api_key_env:
+        return None
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        raise RuntimeError(
+            "the openai package is missing; run pip install -r requirements.txt"
+        ) from exc
+    if api_key_env:
+        api_key = os.environ.get(api_key_env, "")
+        if not api_key:
+            raise RuntimeError(f"{api_key_env} is not set; cannot build "
+                               f"the custom client")
+    else:
+        api_key = os.environ.get("MODEL_API_KEY")
+        if not api_key:
+            raise RuntimeError("MODEL_API_KEY is not set; copy .env.example to .env")
+    return OpenAI(base_url=base_url or BASE_URL, api_key=api_key)
+
+
 def _message_to_dict(message) -> tuple[str, list]:
     content = getattr(message, "content", None) or ""
     calls = []

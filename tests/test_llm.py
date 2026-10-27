@@ -279,3 +279,24 @@ def test_chat_cache_unchanged_without_seed(isolated_storage):
     llm.chat("red", messages, client=client, exercise_id="ex-s")
     llm.chat("red", messages, client=client, exercise_id="ex-s")
     assert len(client.calls) == 1
+
+
+def test_custom_client_none_without_overrides():
+    assert llm.custom_client() is None
+    assert llm.custom_client(None, None) is None
+
+
+def test_custom_client_missing_key_env_raises(monkeypatch):
+    monkeypatch.delenv("BENCH_MISSING_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="BENCH_MISSING_KEY"):
+        llm.custom_client("https://example.test/v1", "BENCH_MISSING_KEY")
+
+
+def test_custom_client_builds_with_overrides(monkeypatch):
+    monkeypatch.setenv("BENCH_TEST_KEY", "key-1")
+    client = llm.custom_client("https://example.test/v1", "BENCH_TEST_KEY")
+    assert "example.test" in str(client.base_url)
+    assert client.api_key == "key-1"
+    close = getattr(client, "close", None)
+    if callable(close):
+        close()

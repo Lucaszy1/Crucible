@@ -799,6 +799,18 @@ def test_agents_explicit_temperature_wins(tmp_path, monkeypatch):
     assert client.calls[0]["temperature"] == 0.0
 
 
+def test_blue_model_override_keeps_blue_temperature(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    monkeypatch.delenv("LLM_TEMPERATURE", raising=False)
+    client = _FakeClient(_response("Reading.", [("read_logs", {"host": "web"})]))
+    agent = ModelBlue(client=client, exercise_id="ex-model",
+                      model="meta-models/muse-spark-open-1026")
+    action = agent.next_action(2, [])
+    assert action["tool"] == "read_logs"
+    assert client.calls[0]["model"] == "meta-models/muse-spark-open-1026"
+    assert client.calls[0]["temperature"] == 0.5
+
+
 def test_agent_seed_splits_cache(tmp_path, monkeypatch):
     _isolated_llm(tmp_path, monkeypatch)
     resp = _response("Scanning.", [("scan_host", {"host": "web"})])
