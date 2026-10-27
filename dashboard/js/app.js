@@ -21,6 +21,7 @@ import {
 import { playOpening } from "./opening.js";
 import { initThoughtHeads, renderThoughts, setThoughtsCollapsed } from "./thoughts.js";
 import { endCardVisible, hideEndCard, initEndCard, setEndNext, showEndCard } from "./endcard.js";
+import { thumbnailState } from "./thumbnail.js";
 import {
   arenaNotify, cancelArena, firstAccessStinger, flashArenaHost, glitchStinger,
   initArena, renderArenaStatic, setArenaActive, setArenaLayout, toggleArenaSound,
@@ -749,6 +750,7 @@ async function classifyRun(run, armByEpisode) {
       ),
       arm: armLabel(armByEpisode.get(run.id)),
       blocks: reduceHostStates(events, hosts),
+      tstate: thumbnailState(events, layout),
       flags: runFlags(run.id, events),
       layout,
       scenario: scenarioText(scenarioMeta(full)),

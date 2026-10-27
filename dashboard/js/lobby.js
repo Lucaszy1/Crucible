@@ -3,8 +3,9 @@
 // plus the small pure rules behind it (scenario draw, story lines,
 // durations, featured partition); ranking and outcomes live in
 // state.js. Runs whose ids start with fake- never appear anywhere.
-import { classicLayout, columnsOf } from "./layout.js";
-import { eventHost, rankFeatured } from "./state.js";
+import { classicLayout } from "./layout.js";
+import { eventHost, motionReduced, rankFeatured } from "./state.js";
+import { mountThumbnail, thumbnailState } from "./thumbnail.js";
 
 const FLAG_LABEL = { test: "test", fallback: "fallback", scripted: "scripted" };
 
@@ -110,28 +111,24 @@ export function partitionLobby(cards, featuredIds) {
   return { featured, archive: rankFeatured(real.filter((card) => !picked.has(card.id))) };
 }
 
-function dot(host, blocks, jewel) {
-  const wrap = document.createElement("span");
-  wrap.className = "lobby-dot";
-  wrap.dataset.state = (blocks && blocks[host]) || "clean";
-  if (host === jewel) wrap.dataset.jewel = "1";
-  wrap.title = `${host}: ${wrap.dataset.state}`;
-  return wrap;
-}
-
-// Mini range thumbnail: one column per segment, one dot per host.
-export function thumbnail(layout, blocks) {
+// Mini range thumbnail: an arena miniature on canvas, painted
+// lazily and cached per card. opts: { w, h, key, label }.
+export function thumbnail(layout, tstate, opts) {
+  const options = opts || {};
   const clean = layout && layout.hosts ? layout : classicLayout();
-  const thumb = document.createElement("span");
+  const state = tstate && tstate.hosts ? tstate : thumbnailState([], clean);
+  const thumb = document.createElement("canvas");
   thumb.className = "lobby-thumb";
-  thumb.title = `Range: ${clean.hosts.map((host) => host.id).join(", ")}`;
-  for (const column of columnsOf(clean)) {
-    if (column.length === 0) continue;
-    const col = document.createElement("span");
-    col.className = "lobby-col";
-    for (const host of column) col.append(dot(host, blocks, clean.jewel_host));
-    thumb.append(col);
-  }
+  thumb.setAttribute("role", "img");
+  thumb.setAttribute("aria-label",
+    options.label || `Range map: ${clean.hosts.map((host) => host.id).join(", ")}`);
+  thumb.title = clean.hosts.map((host) => host.id).join(", ");
+  mountThumbnail(thumb, clean, state, {
+    w: options.w || 120,
+    h: options.h || 68,
+    key: options.key || "",
+    reduced: motionReduced(),
+  });
   return thumb;
 }
 
@@ -168,9 +165,11 @@ function featureCard(model, callbacks) {
   const el = document.createElement("article");
   el.className = "feature-card";
   el.dataset.tone = model.outcome.tone;
-  const thumb = thumbnail(model.layout, model.blocks);
+  const thumb = thumbnail(model.layout, model.tstate, {
+    w: 176, h: 100, key: `${model.id}@176x100`,
+    label: `Range map for ${model.id}: ${model.outcome.label}`,
+  });
   thumb.classList.add("feature-thumb");
-  thumb.setAttribute("role", "img");
   const body = document.createElement("div");
   body.className = "feature-body";
   const head = document.createElement("div");
@@ -225,7 +224,10 @@ function archiveCard(model, callbacks) {
   }
   const foot = document.createElement("div");
   foot.className = "lobby-foot";
-  const states = thumbnail(model.layout, model.blocks);
+  const states = thumbnail(model.layout, model.tstate, {
+    w: 120, h: 68, key: `${model.id}@120x68`,
+    label: `Range map for ${model.id}: ${model.outcome.label}`,
+  });
   states.classList.add("lobby-states");
   foot.append(states, playButton(model.id, "Play", callbacks));
   el.append(head, meta);
@@ -309,9 +311,11 @@ export function renderDeal(slot, deal, callbacks) {
   meta.className = "deal-meta";
   meta.textContent =
     `${deal.difficulty || "medium"} · ${deal.hostCount || 0} hosts · held-out seed ${deal.seed || "?"}`;
-  const thumb = thumbnail(deal.layout, null);
+  const thumb = thumbnail(deal.layout, null, {
+    w: 176, h: 100, key: `deal@${deal.scenarioId || "new"}`,
+    label: `Range map for ${deal.scenarioId || "the dealt network"}`,
+  });
   thumb.classList.add("deal-thumb");
-  thumb.setAttribute("role", "img");
   const btns = document.createElement("div");
   btns.className = "deal-btns";
   const start = document.createElement("button");
