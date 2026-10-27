@@ -1,7 +1,7 @@
 // Topology tests for the network map: only real links, routed pulses.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { MAP_EDGES, NODE_R, blueLinkFor, pathBetween } from "../dashboard/js/network.js";
+import { MAP_EDGES, NODE_R, blueLinkFor, pathBetween, stateLabel } from "../dashboard/js/network.js";
 
 const link = ([a, b]) => [a, b].sort().join("|");
 
@@ -28,5 +28,12 @@ describe("map topology", () => {
     assert.deepEqual(blueLinkFor("db"), ["app", "db"]);
     assert.deepEqual(blueLinkFor("app"), ["web", "app"]);
     assert.deepEqual(blueLinkFor("unknown"), null);
+  });
+
+  it("labels states in plain words", () => {
+    assert.equal(stateLabel("clean"), "Clean");
+    assert.equal(stateLabel("signed-in"), "Signed in");
+    assert.equal(stateLabel("compromised"), "Compromised");
+    assert.equal(stateLabel(null), "Clean");
   });
 });

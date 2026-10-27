@@ -9,77 +9,71 @@
 <body>
 <header class="topbar">
   <div class="brand">
-    <span class="brand-dot" aria-hidden="true"></span>
+    <span class="brand-mark" aria-hidden="true"></span>
     <div>
       <h1>Crucible <span class="brand-ops">Operations Center</span></h1>
-      <p class="subtitle">Autonomous security validation range</p>
+      <p id="statusLine" class="status-line">No exercise loaded.</p>
     </div>
   </div>
-  <div class="top-meta">
-    <span id="modeBadge" class="mode-badge" data-mode="idle">Idle</span>
-    <span id="exerciseTitle" class="exercise-title">No exercise loaded</span>
+  <div class="top-actions">
+    <span id="modeBadge" class="mode-word" data-mode="idle">Idle</span>
+    <span id="exerciseTitle" class="event-count">No exercise loaded</span>
     <span id="eventCount" class="event-count">0 events</span>
-  </div>
-</header>
-
-<section class="command" aria-label="Exercise controls and timeline">
-  <div class="control-bar">
-    <div class="control-group">
-      <label for="agentsSelect">Agents</label>
-      <select id="agentsSelect">
-        <option value="scripted" selected>Scripted (no cost)</option>
-        <option value="model">Model (metered)</option>
-      </select>
-      <button id="runBtn" class="btn primary">Run exercise</button>
-    </div>
-    <div class="control-group">
-      <label for="replaySelect">Replay</label>
-      <select id="replaySelect">
-        <option value="">Loading past runs…</option>
-      </select>
-      <button id="replayBtn" class="btn">Load</button>
-    </div>
-    <div class="control-group">
-      <span class="group-label" id="speedLabel">Speed</span>
-      <div class="seg" role="group" aria-labelledby="speedLabel" id="speedSeg">
-        <button data-speed="0.5" aria-pressed="false">0.5x</button>
-        <button data-speed="1" aria-pressed="true" class="active">1x</button>
-        <button data-speed="2" aria-pressed="false">2x</button>
-        <button data-speed="4" aria-pressed="false">4x</button>
+    <button id="themeBtn" class="btn ghost small" title="Toggle dark theme">Theme</button>
+    <button id="presentBtn" class="btn ghost small" title="Presentation mode (P)">Present</button>
+    <div class="pop-wrap">
+      <button id="settingsBtn" class="btn small" aria-expanded="false" aria-controls="settingsPop">Settings</button>
+      <div id="settingsPop" class="popover" hidden>
+        <div class="control-group">
+          <label for="agentsSelect">Agents</label>
+          <select id="agentsSelect">
+            <option value="scripted" selected>Scripted (no cost)</option>
+            <option value="model">Model (metered)</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label for="replaySelect">Replay a past run</label>
+          <div class="pop-row">
+            <select id="replaySelect">
+              <option value="">Loading past runs…</option>
+            </select>
+            <button id="replayBtn" class="btn">Load</button>
+          </div>
+        </div>
+        <div class="control-group">
+          <span class="group-label" id="speedLabel">Replay speed</span>
+          <div class="seg" role="group" aria-labelledby="speedLabel" id="speedSeg">
+            <button data-speed="0.5" aria-pressed="false">0.5x</button>
+            <button data-speed="1" aria-pressed="true" class="active">1x</button>
+            <button data-speed="2" aria-pressed="false">2x</button>
+            <button data-speed="4" aria-pressed="false">4x</button>
+          </div>
+        </div>
+        <div class="control-group">
+          <div class="server-line">
+            <span id="serverLight" class="light" data-state="unknown" aria-hidden="true"></span>
+            <span id="serverLabel">Connecting…</span>
+          </div>
+        </div>
       </div>
     </div>
-    <div class="control-group server">
-      <span id="serverLight" class="light" data-state="unknown" aria-hidden="true"></span>
-      <span id="serverLabel">Connecting…</span>
-    </div>
+    <button id="runBtn" class="btn primary">Start exercise</button>
   </div>
-
-  <div class="timeline-bar">
-    <div class="transport">
-      <button id="playBtn" class="btn small" title="Play (Space)" disabled>Play</button>
-      <button id="pauseBtn" class="btn small" title="Pause (Space)" disabled>Pause</button>
-      <span class="keys-hint" title="Left and right arrows step one event">Space plays or pauses, arrows step</span>
-    </div>
-    <input id="scrubber" type="range" min="0" max="0" value="0" step="1" aria-label="Event scrubber" disabled>
-    <span id="positionLabel" class="position">0 / 0</span>
-  </div>
-  <div id="tickStrip" class="tick-strip" role="listbox" aria-label="Event timeline">
-    <span class="strip-hint">Timeline ticks appear here once an exercise loads.</span>
-  </div>
-</section>
+</header>
 
 <div id="notice" class="notice" hidden></div>
 
 <nav class="tabs-main" aria-label="Views">
-  <button id="tabOps" class="active" aria-selected="true">Operations</button>
+  <button id="tabStory" class="active" aria-selected="true">Story</button>
+  <button id="tabDetails" aria-selected="false">Details</button>
   <button id="tabLearn" aria-selected="false">Learning</button>
 </nav>
 
-<div id="opsView">
-<main class="grid">
-  <div class="col col-left">
+<div id="storyView">
+<main class="story-grid">
+  <div class="story-main">
     <section class="panel map-panel" aria-label="Network map">
-      <h2>Network map</h2>
+      <h2>Network</h2>
       <svg id="mapSvg" viewBox="0 0 360 500" role="img" aria-label="Range network state"></svg>
       <div class="legend">
         <span><i class="sw" data-state="clean"></i>Clean</span>
@@ -89,79 +83,80 @@
         <span><i class="sw" data-state="isolated"></i>Isolated</span>
         <span><i class="sw" data-state="restored"></i>Restored</span>
       </div>
+      <ul id="presentLatest" aria-label="Latest activity"></ul>
     </section>
-  </div>
-
-  <div class="col col-center">
-    <section class="panel streams" aria-label="Reasoning streams">
-      <div class="stream-col red-col">
-        <h2>Red team <span id="redCount" class="count">0</span></h2>
-        <div id="redStream" class="stream">
-          <p class="empty">Red reasoning appears here during an exercise.</p>
+    <section class="panel scrub-panel" aria-label="Replay controls">
+      <div class="scrub-bar">
+        <div class="transport">
+          <button id="playBtn" class="btn small" title="Play (Space)" disabled>Play</button>
+          <button id="pauseBtn" class="btn small" title="Pause (Space)" disabled>Pause</button>
+          <span class="keys-hint" title="Left and right arrows step one event">Space plays or pauses, arrows step</span>
         </div>
-      </div>
-      <div class="stream-col blue-col">
-        <h2>Blue team <span id="blueCount" class="count">0</span></h2>
-        <div id="blueStream" class="stream">
-          <p class="empty">Blue reasoning appears here during an exercise.</p>
-        </div>
-      </div>
-    </section>
-    <section class="panel" aria-label="Auditor">
-      <h2>Auditor <span id="auditCount" class="count">0</span></h2>
-      <div id="auditChips" class="chips"><span class="empty">Verdict totals appear here.</span></div>
-      <p id="auditSummary" class="cost-sub">No verdicts yet.</p>
-      <p id="auditCost" class="cost-sub">Audit cost: —</p>
-      <div id="auditList" class="audit-list">
-        <p class="empty">Verdicts appear here once blue acts.</p>
+        <input id="scrubber" type="range" min="0" max="0" value="0" step="1" aria-label="Event scrubber" disabled>
+        <span id="positionLabel" class="position">0 / 0</span>
       </div>
     </section>
   </div>
 
-  <div class="col col-right">
-    <section class="panel" aria-label="Scoreboard">
-      <h2>Scoreboard</h2>
-      <div id="finalBanner" class="banner" hidden></div>
-      <dl class="score-grid">
-        <div><dt>Outcome</dt><dd id="sbOutcome">—</dd></div>
-        <div><dt>Detection delay</dt><dd id="sbDetect">—</dd></div>
-        <div><dt>Containment</dt><dd id="sbContain">—</dd></div>
-        <div><dt>Downtime</dt><dd id="sbDowntime">—</dd></div>
-        <div><dt>Blue score</dt><dd id="sbBlue">—</dd></div>
-      </dl>
-      <div class="cost">
-        <div class="cost-head"><span>Cost today</span><span id="costLabel">$0.00</span></div>
-        <div class="meter"><div id="costBar" class="meter-fill" style="width:0%"></div></div>
-        <p id="exerciseCost" class="cost-sub">Exercise cost: —</p>
+  <div class="story-side">
+    <div class="score-strip" aria-label="Score summary">
+      <dl class="score-big"><dt>Outcome</dt><dd id="sbOutcome">—</dd></dl>
+      <dl class="score-big"><dt>Blue score</dt><dd id="sbBlue">—</dd></dl>
+      <dl class="score-big"><dt>Downtime</dt><dd id="sbDowntime">—</dd></dl>
+    </div>
+    <section class="panel" aria-label="Activity">
+      <h2>What happened</h2>
+      <div id="feedList" class="feed">
+        <p class="empty">Moves appear here once the exercise starts.</p>
       </div>
-    </section>
-
-    <section class="panel" aria-label="Evidence">
-      <h2>Evidence</h2>
-      <div id="evidenceChips" class="chips"><span class="empty">Cited log lines appear here.</span></div>
-      <div id="logTabs" class="tabs" role="tablist"></div>
-      <div id="logViewer" class="logs" tabindex="0"><p class="empty">Host logs appear here.</p></div>
     </section>
   </div>
 </main>
+</div>
 
-<section class="panel coverage" aria-label="Technique coverage">
-  <h2>Technique coverage</h2>
-  <div class="coverage-grid">
-    <div>
-      <h3 class="mini-head">Kill chain</h3>
-      <ol id="stageStrip" class="stages"></ol>
+<div id="detailsView" hidden>
+<main class="details-grid">
+  <section class="panel" aria-label="Score details">
+    <h2>Score</h2>
+    <div id="finalBanner" class="banner" hidden></div>
+    <dl class="score-list">
+      <div><dt>Detection delay</dt><dd id="sbDetect">—</dd></div>
+      <div><dt>Containment</dt><dd id="sbContain">—</dd></div>
+    </dl>
+    <div class="cost">
+      <div class="cost-head"><span>Cost today</span><span id="costLabel">$0.00</span></div>
+      <div class="meter"><div id="costBar" class="meter-fill" style="width:0%"></div></div>
+      <p id="exerciseCost" class="cost-sub">Exercise cost: —</p>
     </div>
-    <div>
-      <h3 class="mini-head">Red techniques</h3>
-      <ul id="redTechList" class="tech-list"><li class="empty">No red activity yet.</li></ul>
+  </section>
+
+  <section class="panel" aria-label="Auditor">
+    <h2>Auditor</h2>
+    <div id="auditChips" class="chips"><span class="empty">Verdict totals appear here.</span></div>
+    <p id="auditSummary" class="cost-sub">No verdicts yet.</p>
+    <p id="auditCost" class="cost-sub">Audit cost: —</p>
+    <div id="auditList" class="audit-list">
+      <p class="empty">Verdicts appear here once blue acts.</p>
     </div>
-    <div>
-      <h3 class="mini-head">Blue responses</h3>
-      <ul id="blueLabelList" class="tech-list"><li class="empty">No blue activity yet.</li></ul>
-    </div>
-  </div>
-</section>
+  </section>
+
+  <section class="panel" aria-label="Technique coverage">
+    <h2>Technique coverage</h2>
+    <h3 class="mini-head">Progress</h3>
+    <ol id="stageStrip" class="stages"></ol>
+    <h3 class="mini-head">Red techniques</h3>
+    <ul id="redTechList" class="tech-list"><li class="empty">No red activity yet.</li></ul>
+    <h3 class="mini-head">Blue responses</h3>
+    <ul id="blueLabelList" class="tech-list"><li class="empty">No blue activity yet.</li></ul>
+  </section>
+
+  <section class="panel" aria-label="Evidence">
+    <h2>Evidence</h2>
+    <div id="evidenceChips" class="chips"><span class="empty">Cited log lines appear here.</span></div>
+    <div id="logTabs" class="tabs" role="tablist"></div>
+    <div id="logViewer" class="logs" tabindex="0"><p class="empty">Host logs appear here.</p></div>
+  </section>
+</main>
 </div>
 
 <div id="learnView" hidden>

@@ -1,13 +1,14 @@
-// Operations Center bootstrap: live and replay modes, render loop.
+// Operations Center bootstrap: Story view, render loop, tabs, themes.
 import { fetchAttackMap, fetchCampaign, fetchCampaigns, fetchConfig, fetchRun, fetchRuns, fetchStatus, openLive, startExercise } from "./api.js";
 import { fillCampaignSelects, renderLearn } from "./learn.js";
 import { reduceHostStates } from "./state.js";
+import { describeEvent, statusSentence } from "./story.js";
 import { initMap, updateMap } from "./network.js";
-import { renderStreams } from "./streams.js";
-import { renderTicks, renderTransport } from "./timeline.js";
+import { renderFeed } from "./feed.js";
+import { renderTransport } from "./timeline.js";
 import { renderAttack } from "./attack.js";
 import { reduceAudits, renderAuditor } from "./audit.js";
-import { renderScoreboard } from "./scoreboard.js";
+import { renderScoreboard, renderScoreDetails } from "./scoreboard.js";
 import { focusEvidenceRef, renderEvidence } from "./evidence.js";
 import { fillRuns, initControls, serverStatus, setServer, showConfirm } from "./controls.js";
 
@@ -17,20 +18,18 @@ const els = {
   mode: document.getElementById("modeBadge"),
   title: document.getElementById("exerciseTitle"),
   eventCount: document.getElementById("eventCount"),
+  status: document.getElementById("statusLine"),
   notice: document.getElementById("notice"),
   map: document.getElementById("mapSvg"),
   stages: document.getElementById("stageStrip"),
   redTech: document.getElementById("redTechList"),
   blueTech: document.getElementById("blueLabelList"),
-  red: document.getElementById("redStream"),
-  redCount: document.getElementById("redCount"),
-  blue: document.getElementById("blueStream"),
-  blueCount: document.getElementById("blueCount"),
+  feed: document.getElementById("feedList"),
+  presentLatest: document.getElementById("presentLatest"),
   play: document.getElementById("playBtn"),
   pause: document.getElementById("pauseBtn"),
   scrubber: document.getElementById("scrubber"),
   position: document.getElementById("positionLabel"),
-  ticks: document.getElementById("tickStrip"),
   banner: document.getElementById("finalBanner"),
   outcome: document.getElementById("sbOutcome"),
   detect: document.getElementById("sbDetect"),
@@ -46,11 +45,12 @@ const els = {
   auditList: document.getElementById("auditList"),
   auditChips: document.getElementById("auditChips"),
   auditCost: document.getElementById("auditCost"),
-  auditCount: document.getElementById("auditCount"),
   auditSummary: document.getElementById("auditSummary"),
-  tabOps: document.getElementById("tabOps"),
+  tabStory: document.getElementById("tabStory"),
+  tabDetails: document.getElementById("tabDetails"),
   tabLearn: document.getElementById("tabLearn"),
-  opsView: document.getElementById("opsView"),
+  storyView: document.getElementById("storyView"),
+  detailsView: document.getElementById("detailsView"),
   learnView: document.getElementById("learnView"),
   memSelect: document.getElementById("memSelect"),
   ctlSelect: document.getElementById("ctlSelect"),
@@ -59,6 +59,10 @@ const els = {
   legendCtl: document.getElementById("legendCtl"),
   playBody: document.getElementById("playBody"),
   playEmpty: document.getElementById("playEmpty"),
+  themeBtn: document.getElementById("themeBtn"),
+  presentBtn: document.getElementById("presentBtn"),
+  settingsBtn: document.getElementById("settingsBtn"),
+  settingsPop: document.getElementById("settingsPop"),
 };
 
 const controls = {
@@ -113,14 +117,40 @@ function notice(text, isError) {
 function setMode(mode, label) {
   store.mode = mode;
   els.mode.dataset.mode = mode === "live" ? "live" : mode === "replay" ? "replay" : mode === "booting" ? "booting" : "idle";
-  els.mode.textContent = mode === "live" ? "Live" : mode === "replay" ? "Replay" : mode === "booting" ? "Booting" : "Idle";
+  els.mode.textContent = mode === "live" ? "Live" : mode === "replay" ? "Replay" : mode === "booting" ? "Starting" : "Idle";
   if (label) store.label = label;
   els.title.textContent = store.label;
+}
+
+function latestLaneEvent(slice) {
+  for (let i = slice.length - 1; i >= 0; i -= 1) {
+    if (slice[i].actor === "red" || slice[i].actor === "blue") return slice[i];
+  }
+  return null;
 }
 
 function onEvidenceRef(ref) {
   focusEvidenceRef(ref);
   renderEvidence({ chips: els.chips, tabs: els.tabs, viewer: els.viewer }, store.events, store.cursor);
+  switchTab("details");
+}
+
+function scoreEls() {
+  return {
+    outcome: els.outcome, detect: els.detect, contain: els.contain, downtime: els.downtime,
+    blue: els.blueScore, banner: els.banner, costLabel: els.costLabel,
+    costBar: els.costBar, exerciseCost: els.exerciseCost,
+  };
+}
+
+function renderPresent(slice) {
+  els.presentLatest.innerHTML = "";
+  const lane = slice.filter((ev) => ev.actor === "red" || ev.actor === "blue").slice(-2);
+  for (const ev of lane) {
+    const item = document.createElement("li");
+    item.textContent = describeEvent(ev);
+    els.presentLatest.append(item);
+  }
 }
 
 function render(animate) {
@@ -128,16 +158,19 @@ function render(animate) {
   const states = reduceHostStates(slice);
   updateMap(mapRefs, states, slice, animate);
   const audits = reduceAudits(store.events, store.cursor);
-  renderStreams(
-    { red: els.red, redCount: els.redCount, blue: els.blue, blueCount: els.blueCount },
-    store.events, store.cursor, store.attackMap, onEvidenceRef, audits.byTarget,
-  );
+  renderFeed(els.feed, store.events, store.cursor, store.attackMap, onEvidenceRef, audits.byTarget);
+  renderPresent(slice);
+  els.status.textContent = statusSentence({
+    latest: latestLaneEvent(slice),
+    ended: Boolean(store.finalScore),
+    outcome: store.finalScore?.outcome,
+    mode: store.mode,
+  });
   renderAuditor(
-    { list: els.auditList, chips: els.auditChips, cost: els.auditCost, count: els.auditCount, summary: els.auditSummary },
+    { list: els.auditList, chips: els.auditChips, cost: els.auditCost, count: null, summary: els.auditSummary },
     store.events, store.cursor, audits, onEvidenceRef,
   );
   const canScrub = store.mode === "replay";
-  renderTicks(els.ticks, store.events, store.cursor, canScrub, (index) => jump(index));
   renderTransport(
     { scrubber: els.scrubber, position: els.position, play: els.play, pause: els.pause },
     store.cursor, store.events.length, store.playing, canScrub,
@@ -146,14 +179,8 @@ function render(animate) {
     { stages: els.stages, redTech: els.redTech, blueTech: els.blueTech },
     store.attackMap, store.events, store.cursor,
   );
-  renderScoreboard(
-    {
-      outcome: els.outcome, detect: els.detect, contain: els.contain, downtime: els.downtime,
-      blue: els.blueScore, banner: els.banner, costLabel: els.costLabel,
-      costBar: els.costBar, exerciseCost: els.exerciseCost,
-    },
-    store.events, store.cursor, store.weights, store.spend, store.finalScore,
-  );
+  renderScoreboard(scoreEls(), store.events, store.cursor, store.weights, store.spend, store.finalScore);
+  renderScoreDetails(scoreEls(), store.events, store.cursor, store.weights, store.spend, store.finalScore);
   renderEvidence({ chips: els.chips, tabs: els.tabs, viewer: els.viewer }, store.events, store.cursor);
   els.eventCount.textContent = `${store.events.length} event${store.events.length === 1 ? "" : "s"}`;
 }
@@ -337,27 +364,28 @@ async function pollStatus() {
     if (!spend.running && spend.last_warning && store.mode === "idle") {
       notice(spend.last_warning, false);
     }
-    renderScoreboard(
-      {
-        outcome: els.outcome, detect: els.detect, contain: els.contain, downtime: els.downtime,
-        blue: els.blueScore, banner: els.banner, costLabel: els.costLabel,
-        costBar: els.costBar, exerciseCost: els.exerciseCost,
-      },
-      store.events, store.cursor, store.weights, store.spend, store.finalScore,
-    );
+    renderScoreboard(scoreEls(), store.events, store.cursor, store.weights, store.spend, store.finalScore);
+    renderScoreDetails(scoreEls(), store.events, store.cursor, store.weights, store.spend, store.finalScore);
   } catch (err) {
     setServer(controls, "down", "Server unreachable");
   }
 }
 
-function switchTab(learn) {
-  els.tabOps.classList.toggle("active", !learn);
-  els.tabLearn.classList.toggle("active", learn);
-  els.tabOps.setAttribute("aria-selected", String(!learn));
-  els.tabLearn.setAttribute("aria-selected", String(learn));
-  els.opsView.hidden = learn;
-  els.learnView.hidden = !learn;
-  if (learn && !store.learnLoaded) {
+const TABS = {
+  story: ["tabStory", "storyView"],
+  details: ["tabDetails", "detailsView"],
+  learn: ["tabLearn", "learnView"],
+};
+
+function switchTab(name) {
+  const active = TABS[name] ? name : "story";
+  for (const [key, [tabId, viewId]] of Object.entries(TABS)) {
+    const on = key === active;
+    els[tabId].classList.toggle("active", on);
+    els[tabId].setAttribute("aria-selected", String(on));
+    els[viewId].hidden = !on;
+  }
+  if (active === "learn" && !store.learnLoaded) {
     store.learnLoaded = true;
     loadLearning();
   }
@@ -389,12 +417,50 @@ async function loadLearning() {
   }
 }
 
-// Replay shortcuts: space toggles play and pause, arrows step one event.
+function setTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  try {
+    window.localStorage.setItem("crucible-theme", theme);
+  } catch (err) {
+    // Private browsing: theme just won't persist.
+  }
+  els.themeBtn.textContent = theme === "dark" ? "Light" : "Dark";
+}
+
+function toggleTheme() {
+  setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+}
+
+function setPresent(on) {
+  document.body.classList.toggle("present", on);
+  els.presentBtn.textContent = on ? "Exit present" : "Present";
+}
+
+function togglePresent() {
+  setPresent(!document.body.classList.contains("present"));
+}
+
+function setSettings(open) {
+  els.settingsPop.hidden = !open;
+  els.settingsBtn.setAttribute("aria-expanded", String(open));
+}
+
+// Shortcuts: P toggles presentation, arrows and space drive replay.
 function onShortcut(ev) {
   if (ev.defaultPrevented) return;
   const tag = (ev.target && ev.target.tagName) || "";
   if (["INPUT", "SELECT", "TEXTAREA", "BUTTON"].includes(tag)) return;
   if (!confirm.overlay.hidden) return;
+  if (ev.key === "Escape") {
+    if (document.body.classList.contains("present")) setPresent(false);
+    setSettings(false);
+    return;
+  }
+  if (ev.key === "p" || ev.key === "P") {
+    ev.preventDefault();
+    togglePresent();
+    return;
+  }
   if (store.mode !== "replay" || store.events.length === 0) return;
   if (ev.code === "Space") {
     ev.preventDefault();
@@ -412,6 +478,13 @@ function onShortcut(ev) {
 }
 
 async function boot() {
+  let theme = "light";
+  try {
+    theme = window.localStorage.getItem("crucible-theme") || "light";
+  } catch (err) {
+    // Private browsing: fall back to the light theme.
+  }
+  setTheme(theme === "dark" ? "dark" : "light");
   try {
     const config = await fetchConfig();
     if (config.business_weights) store.weights = config.business_weights;
@@ -432,10 +505,19 @@ async function boot() {
       if (store.playing) playReplay();
     },
   });
-  els.tabOps.addEventListener("click", () => switchTab(false));
-  els.tabLearn.addEventListener("click", () => switchTab(true));
+  els.tabStory.addEventListener("click", () => switchTab("story"));
+  els.tabDetails.addEventListener("click", () => switchTab("details"));
+  els.tabLearn.addEventListener("click", () => switchTab("learn"));
   els.memSelect.addEventListener("change", drawLearning);
   els.ctlSelect.addEventListener("change", drawLearning);
+  els.themeBtn.addEventListener("click", toggleTheme);
+  els.presentBtn.addEventListener("click", togglePresent);
+  els.settingsBtn.addEventListener("click", (click) => {
+    click.stopPropagation();
+    setSettings(els.settingsPop.hidden);
+  });
+  els.settingsPop.addEventListener("click", (click) => click.stopPropagation());
+  document.addEventListener("click", () => setSettings(false));
   els.play.addEventListener("click", playReplay);
   els.pause.addEventListener("click", pauseReplay);
   els.scrubber.addEventListener("input", () => jump(Number(els.scrubber.value)));

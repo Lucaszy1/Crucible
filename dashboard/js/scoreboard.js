@@ -1,4 +1,5 @@
-// Scoreboard: live figures, cost meter, final outcome banner.
+// Scoreboard: three big numbers on the Story view, everything else
+// (banner, detection, containment, cost meter) in the Details tab.
 import { scoreEvents } from "./state.js";
 
 const OUTCOME_LABEL = {
@@ -15,11 +16,10 @@ function fmtContain(value) {
   return value === null || value === undefined ? "--" : `event ${value}`;
 }
 
-export function renderScoreboard(els, events, cursor, weights, spend, finalScore) {
+function figures(events, cursor, weights, finalScore) {
   const live = scoreEvents(events.slice(0, cursor), weights);
   const ended = Boolean(finalScore);
   const shown = ended ? finalScore : live;
-
   let outcome;
   if (ended) {
     outcome = OUTCOME_LABEL[shown.outcome] || shown.outcome;
@@ -30,11 +30,21 @@ export function renderScoreboard(els, events, cursor, weights, spend, finalScore
   } else {
     outcome = "Under way";
   }
+  return { live, ended, shown, outcome };
+}
+
+export function renderScoreboard(els, events, cursor, weights, spend, finalScore) {
+  const { shown, outcome, ended } = figures(events, cursor, weights, finalScore);
+  void spend;
   els.outcome.textContent = outcome;
-  els.detect.textContent = fmtDelay(shown.detection_delay);
-  els.contain.textContent = fmtContain(shown.time_to_contain);
   els.downtime.textContent = `${Number(shown.downtime_pct || 0).toFixed(2)}%`;
   els.blue.textContent = ended ? String(shown.blue_score ?? "--") : "--";
+}
+
+export function renderScoreDetails(els, events, cursor, weights, spend, finalScore) {
+  const { shown, ended } = figures(events, cursor, weights, finalScore);
+  els.detect.textContent = fmtDelay(shown.detection_delay);
+  els.contain.textContent = fmtContain(shown.time_to_contain);
 
   if (ended) {
     els.banner.hidden = false;

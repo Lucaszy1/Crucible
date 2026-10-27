@@ -28,14 +28,22 @@ for (const [a, b] of MAP_EDGES) {
   ADJACENCY.get(b).push(a);
 }
 
+// Muted pulse colors only. Node state colors live in CSS per theme,
+// driven by the data-state attribute updateMap sets below.
 const STATE_COLORS = {
-  clean: "#34d399",
-  probed: "#fbbf24",
-  "signed-in": "#fb923c",
-  compromised: "#f87171",
-  isolated: "#22d3ee",
-  restored: "#2dd4bf",
+  clean: "#2f7d4e",
+  probed: "#8a5a00",
+  "signed-in": "#b25a1e",
+  compromised: "#b3402e",
+  isolated: "#2f6db3",
+  restored: "#4d7c6d",
 };
+
+// Plain state label for the map: "Signed in", not "signed-in".
+export function stateLabel(state) {
+  const words = String(state || "clean").split("-").join(" ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
 
 function el(name, attrs) {
   const node = document.createElementNS(SVG_NS, name);
@@ -197,7 +205,7 @@ export function initMap(svg, weights) {
     badgeTitle.textContent = `Business weight ${weights[host] ?? "?"}`;
     badge.append(badgeTitle);
     const badgeText = el("text", { x: pos.x, y: badgeCy + 4, class: "node-badge-text" });
-    badgeText.textContent = `w${weights[host] ?? "?"}`;
+    badgeText.textContent = `${weights[host] ?? "?"}`;
     const state = el("text", { x: pos.x, y: pos.y + NODE_R + 62, class: "node-state" });
     group.append(label, badge, badgeText, state);
     nodeLayer.append(group);
@@ -253,10 +261,8 @@ export function updateMap(refs, states, slice, animate) {
     const parts = refs.nodeEls.get(host);
     if (!parts) continue;
     const state = states[host] || "clean";
-    const color = STATE_COLORS[state] || STATE_COLORS.clean;
-    parts.group.style.setProperty("--node-color", color);
     parts.group.dataset.state = state;
-    parts.state.textContent = state;
+    parts.state.textContent = stateLabel(state);
   }
 
   for (const line of refs.edgeEls.values()) line.setAttribute("class", "edge");

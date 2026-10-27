@@ -121,7 +121,7 @@ function auditRow(ev, targetIndex, onRef) {
 export function renderAuditor(els, eventList, cursor, reduced, onRef) {
   const { byTarget, audits, summary } = reduced;
   void byTarget;
-  els.count.textContent = String(summary.count);
+  if (els.count) els.count.textContent = String(summary.count);
 
   els.chips.innerHTML = "";
   const justified = document.createElement("span");
