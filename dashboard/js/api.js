@@ -26,6 +26,14 @@ export function fetchAttackMap() {
   return getJson("/attack_map.json");
 }
 
+export function fetchFeatured() {
+  return getJson("/featured.json");
+}
+
+export function fetchPreview(token) {
+  return getJson(`/api/scenario/preview?scenario=${encodeURIComponent(token)}`);
+}
+
 export function fetchCampaigns() {
   return getJson("/api/campaigns");
 }
@@ -34,11 +42,15 @@ export function fetchCampaign(name) {
   return getJson(`/api/campaigns/${encodeURIComponent(name)}`);
 }
 
-export async function startExercise(agents, exerciseId) {
+export async function startExercise(agents, exerciseId, scenario) {
   const res = await fetch("/api/exercise/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ agents, exercise_id: exerciseId || undefined }),
+    body: JSON.stringify({
+      agents,
+      exercise_id: exerciseId || undefined,
+      scenario: scenario || undefined,
+    }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {

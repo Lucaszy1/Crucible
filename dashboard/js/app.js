@@ -1,5 +1,5 @@
 // Operations Center bootstrap: lobby, arena show flow, tabs, themes.
-import { fetchAttackMap, fetchCampaign, fetchCampaigns, fetchConfig, fetchRun, fetchRuns, fetchStatus, openLive, startExercise } from "./api.js";
+import { fetchAttackMap, fetchCampaign, fetchCampaigns, fetchConfig, fetchFeatured, fetchPreview, fetchRun, fetchRuns, fetchStatus, openLive, startExercise } from "./api.js";
 import { fillCampaignSelects, renderLearn } from "./learn.js";
 import {
   autoplayQueue, displayOutcome, endCardStats, eventHost, motionReduced, outcomeLine,
@@ -14,7 +14,10 @@ import { reduceAudits, renderAuditor } from "./audit.js";
 import { renderScoreboard, renderScoreDetails } from "./scoreboard.js";
 import { focusEvidenceRef, renderEvidence } from "./evidence.js";
 import { initControls, serverStatus, setServer, showConfirm } from "./controls.js";
-import { renderLobby } from "./lobby.js";
+import {
+  HELDOUT_MAX, HELDOUT_MIN, drawLiveScenario, formatDuration, hideDeal, partitionLobby,
+  renderDeal, renderLobby, storyLine,
+} from "./lobby.js";
 import { playOpening } from "./opening.js";
 import { initThoughtHeads, renderThoughts, setThoughtsCollapsed } from "./thoughts.js";
 import { endCardVisible, hideEndCard, initEndCard, setEndNext, showEndCard } from "./endcard.js";
@@ -68,12 +71,15 @@ const els = {
   tabDetails: document.getElementById("tabDetails"),
   tabLearn: document.getElementById("tabLearn"),
   lobbyView: document.getElementById("lobbyView"),
-  lobbyGrid: document.getElementById("lobbyGrid"),
-  lobbySub: document.getElementById("lobbySub"),
-  surpriseBtn: document.getElementById("surpriseBtn"),
+  featuredGrid: document.getElementById("featuredGrid"),
+  archiveGrid: document.getElementById("archiveGrid"),
+  archiveCount: document.getElementById("archiveCount"),
   autoplayBox: document.getElementById("autoplayBox"),
-  showAllBox: document.getElementById("showAllBox"),
   liveBtn: document.getElementById("liveBtn"),
+  replayBtn: document.getElementById("replayBtn"),
+  seedInput: document.getElementById("seedInput"),
+  dealDifficulty: document.getElementById("dealDifficulty"),
+  dealSlot: document.getElementById("dealSlot"),
   arenaView: document.getElementById("arenaView"),
   arenaCanvas: document.getElementById("arenaCanvas"),
   arenaOutcome: document.getElementById("arenaOutcome"),
@@ -165,7 +171,7 @@ const store = {
   advance: null,
   presentLoop: false,
   thoughtState: null,
-  lobby: { runs: [], cards: [], showAll: false, autoplay: false, armByEpisode: new Map(), loading: true },
+  lobby: { runs: [], cards: [], featuredIds: [], autoplay: false, armByEpisode: new Map(), loading: true },
 };
 
 function thoughtPanels() {
@@ -476,17 +482,18 @@ async function openExercise(runId, opts) {
   );
 }
 
-async function beginRun(agents) {
+async function beginRun(agents, scenarioToken) {
   closeLive();
   stopTimer();
   destroyOpening();
   hideEndCard(endEls());
+  hideDeal(els.dealSlot);
   cancelAdvance();
   cancelArena(arenaRefs);
   notice("");
   controls.run.disabled = true;
   try {
-    const data = await startExercise(agents);
+    const data = await startExercise(agents, undefined, scenarioToken);
     store.liveExerciseId = data.exercise_id;
     setMode("booting", `Booting range for ${data.exercise_id}`);
     switchTab("arena");
@@ -600,20 +607,81 @@ function onRunRequest(agents) {
         const capped = spend.spent_today >= spend.daily_limit
           ? "Spend cap already reached: this exercise would run on the scripted baseline."
           : null;
-        showConfirm(confirm, spend, capped, () => beginRun("model"));
+        showConfirm(confirm, spend, capped, () => dealLive(agents));
       })
       .catch((err) => notice(`Could not check spend: ${err.message}`, true));
     return;
   }
-  beginRun("scripted");
+  dealLive(agents);
 }
 
-// Featured lobby order, minus hidden runs unless Show all is on.
+// One draw for the dealing moment: a fixed held-out seed and
+// difficulty when Advanced names them, else a fresh random draw.
+function dealDraw() {
+  const raw = ((els.seedInput && els.seedInput.value) || "").trim();
+  const drawn = drawLiveScenario();
+  let seed = drawn.seed;
+  if (raw !== "") {
+    seed = Number(raw);
+    if (!Number.isInteger(seed) || seed < HELDOUT_MIN || seed > HELDOUT_MAX) {
+      return { error: `Seed must hold ${HELDOUT_MIN} to ${HELDOUT_MAX}.` };
+    }
+  }
+  const picked = els.dealDifficulty ? els.dealDifficulty.value : "random";
+  const difficulty = picked === "random" ? drawn.difficulty : picked;
+  return { seed, difficulty, token: `gen:${seed}:${difficulty}` };
+}
+
+// Deal an unseen network and preview it before starting. Every
+// live click draws fresh; Advanced pins the draw for reproductions.
+async function dealLive(agents) {
+  const draw = dealDraw();
+  if (draw.error) {
+    notice(draw.error, true);
+    return;
+  }
+  switchTab("lobby");
+  renderDeal(els.dealSlot, { phase: "drawing" }, {
+    onStart: () => {},
+    onRedeal: () => dealLive(agents),
+  });
+  try {
+    const preview = await fetchPreview(draw.token);
+    renderDeal(els.dealSlot, {
+      phase: "ready",
+      seed: draw.seed,
+      scenarioId: preview.scenario_id,
+      difficulty: preview.difficulty,
+      hostCount: preview.host_count,
+      layout: preview.layout,
+    }, {
+      onStart: () => beginRun(agents, draw.token),
+      onRedeal: () => dealLive(agents),
+    });
+  } catch (err) {
+    renderDeal(els.dealSlot, {
+      phase: "error",
+      error: `Could not draw a network: ${err.message}`,
+    }, {
+      onStart: () => {},
+      onRedeal: () => dealLive(agents),
+    });
+  }
+}
+
+// Featured-first lobby order for autoplay and presentation: the
+// curated set in order, then the ranked archive.
 function visibleCards() {
-  const cards = store.lobby.showAll
-    ? store.lobby.cards
-    : store.lobby.cards.filter((card) => !card.flags || card.flags.length === 0);
-  return rankFeatured(cards);
+  const { featured, archive } = partitionLobby(store.lobby.cards, effectiveFeaturedIds());
+  return [...featured, ...archive];
+}
+
+function effectiveFeaturedIds() {
+  if (store.lobby.featuredIds.length > 0) return store.lobby.featuredIds;
+  const real = store.lobby.cards.filter(
+    (card) => !String(card.id || "").startsWith("fake-") && (!card.flags || card.flags.length === 0),
+  );
+  return rankFeatured(real).slice(0, 6).map((card) => card.id);
 }
 
 function nextFeaturedId() {
@@ -665,12 +733,20 @@ async function classifyRun(run, armByEpisode) {
     const out = displayOutcome(events);
     const score = data.score || scoreEvents(events, weights);
     const lane = events.filter((ev) => ev.actor === "red" || ev.actor === "blue");
+    const roles = {};
+    for (const host of layout.hosts) roles[host.id] = host.role;
     return {
       id: run.id,
       outcomeKey: out.key,
       outcome: { label: out.label, tone: out.tone },
       blueScore: typeof score.blue_score === "number" ? score.blue_score : null,
       moves: lane.length,
+      story: storyLine(events, roles, out.key),
+      duration: formatDuration(
+        full.length > 0 ? full[0].timestamp : null,
+        full.length > 0 ? full[full.length - 1].timestamp : null,
+        lane.length,
+      ),
       arm: armLabel(armByEpisode.get(run.id)),
       blocks: reduceHostStates(events, hosts),
       flags: runFlags(run.id, events),
@@ -694,10 +770,9 @@ async function classifyRun(run, armByEpisode) {
 }
 
 function paintLobby() {
-  const ranked = rankFeatured(store.lobby.cards);
-  renderLobby(els.lobbyGrid, els.lobbySub, {
-    cards: ranked,
-    showAll: store.lobby.showAll,
+  renderLobby(els.featuredGrid, els.archiveGrid, els.archiveCount, {
+    cards: store.lobby.cards,
+    featuredIds: effectiveFeaturedIds(),
     loading: store.lobby.loading,
   }, { onPlay: (id) => openExercise(id) });
 }
@@ -705,6 +780,12 @@ function paintLobby() {
 async function refreshRuns() {
   store.lobby.loading = true;
   store.lobby.cards = [];
+  try {
+    const feat = await fetchFeatured();
+    store.lobby.featuredIds = Array.isArray(feat.featured) ? feat.featured : [];
+  } catch {
+    store.lobby.featuredIds = [];
+  }
   paintLobby();
   let runs = [];
   try {
@@ -752,13 +833,14 @@ async function refreshRuns() {
   paintLobby();
 }
 
-function surprise() {
-  const cards = visibleCards();
-  if (cards.length === 0) {
+function watchReplay() {
+  const { featured } = partitionLobby(store.lobby.cards, effectiveFeaturedIds());
+  const pool = featured.length > 0 ? featured : visibleCards();
+  if (pool.length === 0) {
     notice("No exercises to open yet.", false);
     return;
   }
-  const pick = cards[Math.floor(Math.random() * cards.length)];
+  const pick = pool[Math.floor(Math.random() * pool.length)];
   openExercise(pick.id);
 }
 
@@ -972,9 +1054,7 @@ async function boot() {
     // Private browsing: fall back to the light theme.
   }
   setTheme(theme === "dark" ? "dark" : "light");
-  store.lobby.showAll = loadBool("crucible-show-all", false);
   store.lobby.autoplay = loadBool("crucible-autoplay", false);
-  els.showAllBox.checked = store.lobby.showAll;
   els.autoplayBox.checked = store.lobby.autoplay;
   try {
     const config = await fetchConfig();
@@ -1021,12 +1101,7 @@ async function boot() {
   els.themeBtn.addEventListener("click", toggleTheme);
   els.presentBtn.addEventListener("click", togglePresent);
   els.liveBtn.addEventListener("click", () => onRunRequest(controls.agents.value));
-  els.surpriseBtn.addEventListener("click", surprise);
-  els.showAllBox.addEventListener("change", () => {
-    store.lobby.showAll = els.showAllBox.checked;
-    saveBool("crucible-show-all", store.lobby.showAll);
-    paintLobby();
-  });
+  els.replayBtn.addEventListener("click", watchReplay);
   els.autoplayBox.addEventListener("change", () => {
     store.lobby.autoplay = els.autoplayBox.checked;
     saveBool("crucible-autoplay", store.lobby.autoplay);

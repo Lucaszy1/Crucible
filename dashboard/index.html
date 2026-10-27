@@ -64,19 +64,44 @@
 
 <div id="lobbyView">
 <main class="lobby-wrap">
-  <section class="panel lobby-head" aria-label="Lobby controls">
-    <div class="lobby-title">
-      <h2>Exercise lobby</h2>
-      <p id="lobbySub" class="empty">Loading past exercises…</p>
+  <section class="hero" aria-label="Start here">
+    <p class="hero-eyebrow">Crucible</p>
+    <h2 class="hero-title"><span class="r">Red</span> attacks. <span class="b">Blue</span> defends. The auditor keeps score.</h2>
+    <p class="hero-line">An AI red team attacks a simulated company network while an AI blue team defends and an independent auditor checks every decision.</p>
+    <div class="hero-actions">
+      <button id="liveBtn" class="btn primary hero-cta">Run a live exercise</button>
+      <button id="replayBtn" class="btn hero-secondary" title="Open a random featured replay">Watch a replay</button>
     </div>
-    <div class="lobby-actions">
-      <button id="surpriseBtn" class="btn" title="Open a random featured exercise">Surprise me</button>
-      <label class="check" title="Open the next featured exercise when one ends"><input type="checkbox" id="autoplayBox"> Autoplay next</label>
-      <label class="check" title="Include test, fallback and scripted runs"><input type="checkbox" id="showAllBox"> Show all runs</label>
-      <button id="liveBtn" class="btn primary">Start live exercise</button>
-    </div>
+    <details class="advanced">
+      <summary>Advanced</summary>
+      <div class="advanced-body">
+        <label class="seed-field">Seed
+          <input id="seedInput" inputmode="numeric" pattern="[0-9]*" placeholder="random" autocomplete="off">
+        </label>
+        <label class="seed-field">Difficulty
+          <select id="dealDifficulty">
+            <option value="random" selected>Random</option>
+            <option value="easy">Easy</option>
+            <option value="medium">Medium</option>
+            <option value="hard">Hard</option>
+          </select>
+        </label>
+        <p class="advanced-hint">Fix a held-out seed (9001 to 9020) to reproduce a network. Empty means a fresh random draw every click.</p>
+      </div>
+    </details>
+    <div id="dealSlot" hidden></div>
   </section>
-  <div id="lobbyGrid" class="lobby-grid" aria-label="Past exercises"></div>
+  <section class="featured" aria-label="Featured replays">
+    <div class="featured-head">
+      <h2>Featured replays</h2>
+      <label class="check" title="Open the next featured exercise when one ends"><input type="checkbox" id="autoplayBox"> Autoplay next</label>
+    </div>
+    <div id="featuredGrid" class="featured-grid"></div>
+  </section>
+  <details class="archive" id="archiveWrap">
+    <summary><span id="archiveCount">Archive</span></summary>
+    <div id="archiveGrid" class="lobby-grid" aria-label="Past exercises"></div>
+  </details>
 </main>
 </div>
 
