@@ -262,8 +262,13 @@ def test_container_logs_none_returns_everything(monkeypatch):
             seen["calls"] = seen.get("calls", 0) + 1
             return b"a\n\nb\n"
 
+    class FakeClient:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sandbox, "_docker_client", lambda: FakeClient())
     monkeypatch.setattr(sandbox, "_container",
-                        lambda host, client=None: FakeContainer())
+                        lambda host, client: FakeContainer())
     assert sandbox.container_logs("db", tail=None) == ["a", "b"]
     assert "tail" not in seen
     assert sandbox.container_logs("db", tail=1) == ["a", "b"]
