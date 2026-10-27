@@ -395,6 +395,11 @@ def test_bench_audit_cells_resume_mismatch(tmp_path, monkeypatch, capsys):
                        "--memory", "off", "--episodes-per-cell", "1",
                        "--audit", "end", "--resume"]) == 1
     assert "audit cell set differs" in capsys.readouterr().err
+    assert bench.main(["--name", "aur", "--red", "chain", "--sensors", "on",
+                       "--memory", "off", "--episodes-per-cell", "1",
+                       "--audit", "off", "--audit-cells", audited,
+                       "--resume"]) == 1
+    assert "audit mode differs" in capsys.readouterr().err
 
 
 def test_bench_playbook_from_seeds_frozen_cells(tmp_path, monkeypatch):

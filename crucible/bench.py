@@ -447,6 +447,11 @@ def _open_bench(name: str, cells: list, per_cell: int, args,
             print(f"bench: resume audit cell set differs from the saved "
                   f"benchmark {name!r}; aborting", file=sys.stderr)
             return None
+        saved_audit = state.get("audit")
+        if saved_audit is not None and saved_audit != args.audit:
+            print(f"bench: resume audit mode differs from the saved "
+                  f"benchmark {name!r}; aborting", file=sys.stderr)
+            return None
         rows = list(state.get("episodes", []) or [])
         for cell in cells:
             playbooks[cell["key"]] = referee.load_playbook(
@@ -588,6 +593,7 @@ def _run_episode(bench: dict, cell: dict, rep: int, args, client,
         "episodes_per_cell": args.episodes_per_cell,
         "scenarios": bench.get("scenarios", ["classic"]),
         "playbook_frozen": bool(args.freeze_playbook),
+        "audit": args.audit,
         "audit_cells": bench.get("audit_cells"),
         "episodes": bench["rows"],
     })
