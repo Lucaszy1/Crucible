@@ -140,7 +140,7 @@ Blue score: 0 to 100. When the secret was read, blue_score is 0. Otherwise blue_
 - [x] Event schema (events.py, lands with day two loop)
 - [x] Orchestrator loop
 - [x] Red and blue agents (scripted baseline plus model versions on Muse Spark)
-- [ ] Auditor agent
+- [x] Auditor agent
 - [x] Dashboard v1
 - [x] Replay
 - [ ] Voice commands
