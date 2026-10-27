@@ -38,8 +38,9 @@ def run_script(path, args, env_extra=None):
 
 
 @pytest.fixture(autouse=True)
-def clean_state():
+def clean_state(monkeypatch):
     tools.reset_state()
+    monkeypatch.setattr(sandbox, "is_isolated", lambda host: False)
     yield
     tools.reset_state()
 

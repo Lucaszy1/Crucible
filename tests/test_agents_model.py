@@ -8,7 +8,7 @@ off-range attempts stay fully local.
 import json
 from types import SimpleNamespace
 
-from crucible import llm, orchestrator
+from crucible import llm, orchestrator, tools
 from crucible.agents import ModelBlue, ModelRed
 from crucible.agents import _common
 from crucible.agents.blue import SYSTEM_PROMPT as BLUE_PROMPT
@@ -248,10 +248,14 @@ def test_length_cause_lands_in_event_log(tmp_path, monkeypatch):
     red = ModelRed(client=_FakeClient(resp))
     blue = ModelBlue(client=_FakeClient(resp))
     monkeypatch.setattr(orchestrator, "run_tool", lambda name, args: {"ok": True})
+    monkeypatch.setattr(tools, "begin_episode",
+                        lambda: {"ok": True, "attempts": 1, "checks": {}})
     run_path = tmp_path / "length.jsonl"
     result = orchestrator.run_exercise(red, blue, max_turns=2, run_path=run_path)
-    assert len(result["events"]) == 2
+    assert len(result["events"]) == 3
     for event in result["events"]:
+        if event["actor"] == "system":
+            continue
         assert "finish_reason=length" in event["reasoning_summary"]
 
 
@@ -260,10 +264,14 @@ def test_api_error_falls_back_and_never_hangs(tmp_path, monkeypatch):
     red = ModelRed(client=_FakeClient(error=RuntimeError("boom")))
     blue = ModelBlue(client=_FakeClient(error=RuntimeError("boom")))
     monkeypatch.setattr(orchestrator, "run_tool", lambda name, args: {"ok": True})
+    monkeypatch.setattr(tools, "begin_episode",
+                        lambda: {"ok": True, "attempts": 1, "checks": {}})
     run_path = tmp_path / "fallback.jsonl"
     result = orchestrator.run_exercise(red, blue, max_turns=4, run_path=run_path)
-    assert len(result["events"]) == 4
+    assert len(result["events"]) == 5
     for event in result["events"]:
+        if event["actor"] == "system":
+            continue
         assert "baseline" in event["reasoning_summary"].lower()
 
 
@@ -330,10 +338,12 @@ def test_off_range_attempt_blocked_and_logged(tmp_path, monkeypatch):
     assert result["ok"] is False
     assert "outside the sandbox" in result["error"]
     from crucible.agents import ScriptedBlue
+    monkeypatch.setattr(tools, "begin_episode",
+                        lambda: {"ok": True, "attempts": 1, "checks": {}})
     run_path = tmp_path / "offrange.jsonl"
     out = orchestrator.run_exercise(red, ScriptedBlue(), max_turns=1, run_path=run_path)
-    assert out["events"][0]["result"]["ok"] is False
-    assert "outside the sandbox" in out["events"][0]["result"]["error"]
+    assert out["events"][1]["result"]["ok"] is False
+    assert "outside the sandbox" in out["events"][1]["result"]["error"]
 
 
 def test_reasoning_summary_lands_in_event_log(tmp_path, monkeypatch):
@@ -344,10 +354,12 @@ def test_reasoning_summary_lands_in_event_log(tmp_path, monkeypatch):
     red = ModelRed(client=_FakeClient(red_resp))
     blue = ModelBlue(client=_FakeClient(blue_resp))
     monkeypatch.setattr(orchestrator, "run_tool", lambda name, args: {"ok": True})
+    monkeypatch.setattr(tools, "begin_episode",
+                        lambda: {"ok": True, "attempts": 1, "checks": {}})
     run_path = tmp_path / "reasoning.jsonl"
     result = orchestrator.run_exercise(red, blue, max_turns=2, run_path=run_path)
-    assert result["events"][0]["reasoning_summary"] == "Probing the web host first."
-    assert result["events"][1]["reasoning_summary"] == "Reading logs for traces."
+    assert result["events"][1]["reasoning_summary"] == "Probing the web host first."
+    assert result["events"][2]["reasoning_summary"] == "Reading logs for traces."
 
 
 def test_cache_applies_to_repeat_turn(tmp_path, monkeypatch):
@@ -385,7 +397,7 @@ def _mixed_history():
 
 def _own_section(user_text):
     after = user_text.split("Your previous moves:")[1]
-    return after.split("Recent exercise moves:")[0]
+    return after.split("Your recent moves:")[0]
 
 
 def test_red_prompt_states_objective_and_pacing():
@@ -525,6 +537,8 @@ def test_orchestrator_passes_turn_cap_to_agents(tmp_path, monkeypatch):
         actor = "blue"
 
     monkeypatch.setattr(orchestrator, "run_tool", lambda name, args: {"ok": True})
+    monkeypatch.setattr(tools, "begin_episode",
+                        lambda: {"ok": True, "attempts": 1, "checks": {}})
     orchestrator.run_exercise(_Recording(), _RecordingBlue(), max_turns=8,
                               run_path=tmp_path / "caps.jsonl")
     assert seen["caps"] == [8, 8]
@@ -544,10 +558,12 @@ def test_exercise_turn_cap(tmp_path, monkeypatch):
         actor = "blue"
 
     monkeypatch.setattr(orchestrator, "run_tool", lambda name, args: {"ok": True})
+    monkeypatch.setattr(tools, "begin_episode",
+                        lambda: {"ok": True, "attempts": 1, "checks": {}})
     run_path = tmp_path / "capped.jsonl"
     result = orchestrator.run_exercise(_Always(), _AlwaysBlue(), max_turns=50,
                                        run_path=run_path)
-    assert len(result["events"]) == 40
+    assert len(result["events"]) == 41
     assert result["score"]["turns_used"] == 40
 
 

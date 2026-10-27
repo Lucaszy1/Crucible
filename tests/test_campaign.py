@@ -92,6 +92,18 @@ def test_playbook_resets_then_grows(tmp_path, monkeypatch):
     assert len(json.loads(snap.read_text(encoding="utf-8"))["rules"]) == 1
 
 
+def test_fresh_mem_arm_feeds_blue_empty_playbook_first(tmp_path, monkeypatch):
+    seen = _stub_common(monkeypatch, tmp_path)
+    (tmp_path / "blue.json").write_text(
+        json.dumps({"episode": "old", "rules": [{"rule": "Stale.", "episode": "old"}],
+                    "model_used": "x"}), encoding="utf-8")
+    _stub_exercise(monkeypatch, seen, [_score(), _score()])
+    _stub_referee(monkeypatch, seen)
+    assert campaign.main(["--name", "memx", "--episodes", "1", "--memory",
+                          "on", "--agents", "model"]) == 0
+    assert seen["blue_playbook"] == []
+
+
 def test_memory_off_skips_referee(tmp_path, monkeypatch):
     seen = _stub_common(monkeypatch, tmp_path)
     _stub_exercise(monkeypatch, seen, [_score()])
@@ -258,7 +270,7 @@ def _stub_seeded_exercise(monkeypatch, seen, events_by_id=None):
     monkeypatch.setattr(campaign.orchestrator, "run_exercise", fake_exercise)
 
 
-def test_arms_interleave_with_matched_seeds(tmp_path, monkeypatch):
+def test_arms_interleave_with_pair_seeds(tmp_path, monkeypatch):
     seen = _stub_common(monkeypatch, tmp_path)
     starts = []
     monkeypatch.setattr(sandbox, "start",

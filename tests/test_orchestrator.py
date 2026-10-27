@@ -8,8 +8,13 @@ import json
 
 import pytest
 
-from crucible import events, orchestrator, sandbox
+from crucible import events, orchestrator, sandbox, tools
 from crucible.agents import ScriptedBlue, ScriptedRed
+
+
+def _stub_begin_episode(monkeypatch):
+    monkeypatch.setattr(tools, "begin_episode",
+                        lambda: {"ok": True, "attempts": 1, "checks": {}})
 
 
 def _event(actor, tool, result, index=1):
@@ -171,12 +176,13 @@ def test_turn_loop_alternates_and_writes_jsonl(tmp_path, monkeypatch):
         return {"ok": True}
 
     monkeypatch.setattr(orchestrator, "run_tool", fake_run_tool)
+    _stub_begin_episode(monkeypatch)
     run_path = tmp_path / "exercise.jsonl"
     result = orchestrator.run_exercise(ScriptedRed(), ScriptedBlue(),
                                        max_turns=20, run_path=run_path)
     actors = [entry["actor"] for entry in result["events"]]
-    assert actors == ["red", "blue"] * 5 + ["red", "red"]
-    assert len(result["events"]) == 12
+    assert actors == ["system"] + ["red", "blue"] * 5 + ["red", "red"]
+    assert len(result["events"]) == 13
     assert result["score"]["secret_exfiltrated"] is True
     assert result["score"]["time_to_detect"] is not None
     assert result["score"]["time_to_contain"] is not None
@@ -216,12 +222,42 @@ def test_run_stops_as_soon_as_secret_read(tmp_path, monkeypatch):
                     "reasoning": "inspect", "evidence_refs": []}
 
     monkeypatch.setattr(orchestrator, "run_tool", fake_run_tool)
+    _stub_begin_episode(monkeypatch)
     result = orchestrator.run_exercise(_QuickRed(), _QuickBlue(),
                                        max_turns=10,
                                        run_path=tmp_path / "quick.jsonl")
-    assert len(result["events"]) == 1
+    assert len(result["events"]) == 2
     assert result["score"]["secret_exfiltrated"] is True
     assert result["score"]["turns_used"] == 1
+
+
+def test_first_event_records_clean_start_check(tmp_path, monkeypatch):
+    check = {"ok": True, "attempts": 1, "checks": {"ok": True}}
+    monkeypatch.setattr(orchestrator, "run_tool",
+                        lambda name, args: {"ok": True})
+    monkeypatch.setattr(tools, "begin_episode", lambda: check)
+    result = orchestrator.run_exercise(ScriptedRed(), ScriptedBlue(),
+                                       max_turns=2,
+                                       run_path=tmp_path / "checked.jsonl")
+    first = result["events"][0]
+    assert (first["id"], first["actor"], first["tool"]) == (
+        "evt-0001", "system", "clean_start_check")
+    assert first["result"] == check
+    assert set(events.REQUIRED_FIELDS) <= set(first)
+
+
+def test_system_events_never_shift_scoring():
+    moves = [
+        _event("red", "scan_host", {"ok": True}, 2),
+        _event("blue", "report_finding", {"ok": True}, 3),
+    ]
+    plain = orchestrator.score_events(moves)
+    with_system = orchestrator.score_events(
+        [_event("system", "clean_start_check", {"ok": True}, 1)] + moves)
+    assert with_system["time_to_detect"] == plain["time_to_detect"] == 2
+    assert with_system["detection_delay"] == plain["detection_delay"] == 1
+    assert with_system["total_events"] == plain["total_events"] == 2
+    assert with_system["downtime_pct"] == plain["downtime_pct"] == 0.0
 
 
 def test_scripted_red_follows_longer_chain():

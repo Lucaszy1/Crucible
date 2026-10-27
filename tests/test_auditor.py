@@ -476,7 +476,10 @@ class _IdleRed:
 
 
 def _run_tools(monkeypatch):
-    from crucible import orchestrator
+    from crucible import orchestrator, tools
+
+    monkeypatch.setattr(tools, "begin_episode",
+                        lambda: {"ok": True, "attempts": 1, "checks": {}})
 
     def fake_run_tool(name, args):
         if name == "read_logs":
@@ -550,8 +553,8 @@ def test_live_mode_interleaves_and_hides_from_agents(tmp_path, monkeypatch):
         _IdleRed(), blue, max_turns=4, run_path=tmp_path / "live.jsonl",
         exercise_id="ex-live", audit="live", auditor_client=client)
     actors = [event["actor"] for event in result["events"]]
-    assert actors == ["blue", "auditor"]
-    assert result["events"][1]["result"]["verdict"] == "premature"
+    assert actors == ["system", "blue", "auditor"]
+    assert result["events"][2]["result"]["verdict"] == "premature"
     assert result["audit_summary"]["mode"] == "live"
     assert result["score"]["time_to_detect"] is None
 

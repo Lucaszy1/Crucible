@@ -164,16 +164,28 @@ def test_chat_leaves_borrowed_client_open(tmp_path, monkeypatch):
 
 
 def _fake_sandbox(monkeypatch):
+    defaults = {("app", "/secret/.toy_user"): "svc-report",
+                ("app", "/secret/.toy_pass"): "password",
+                ("db", "/secret/.toy_user"): "dbops",
+                ("db", "/secret/.toy_pass"): "dbops-fake-19"}
     monkeypatch.setattr(sandbox, "start", lambda: {"web": True})
     monkeypatch.setattr(sandbox, "stop", lambda: {"web": False})
     monkeypatch.setattr(sandbox, "is_running", lambda host: True)
     monkeypatch.setattr(sandbox, "is_isolated", lambda host: False)
-    monkeypatch.setattr(sandbox, "container_logs",
-                        lambda host, tail=100: ["webapp listening on 8000"])
-    monkeypatch.setattr(
-        sandbox, "exec",
-        lambda host, cmd, timeout=30: {"exit_code": 0, "output": "",
-                                       "stdout": "", "stderr": ""})
+    monkeypatch.setattr(sandbox, "_raw_logs",
+                        lambda host, tail=None: ["webapp listening on 8000"])
+
+    def fake_exec(host, cmd, timeout=30):
+        if cmd[0] == "cat":
+            text = defaults.get((host, cmd[1]))
+            if text is None:
+                return {"exit_code": 1, "output": "", "stdout": "",
+                        "stderr": "missing"}
+            return {"exit_code": 0, "output": text, "stdout": text,
+                    "stderr": ""}
+        return {"exit_code": 0, "output": "", "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(sandbox, "exec", fake_exec)
     monkeypatch.setattr(sandbox, "isolate",
                         lambda host: {"host": host, "isolated": True})
     monkeypatch.setattr(sandbox, "reattach",

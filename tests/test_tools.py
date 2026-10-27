@@ -38,8 +38,9 @@ OFF_RANGE = [
 
 
 @pytest.fixture(autouse=True)
-def clean_state():
+def clean_state(monkeypatch):
     tools.reset_state()
+    monkeypatch.setattr(sandbox, "is_isolated", lambda host: False)
     yield
     tools.reset_state()
 
@@ -384,3 +385,141 @@ def test_restore_resets_gate(monkeypatch):
     out = tools.restore_host("db")
     assert out["sign_in_reset"] is True
     assert out["patch_cleared"] is True
+
+
+def _isolated_fixture(monkeypatch):
+    seen = []
+    monkeypatch.setattr(sandbox, "is_running", lambda host: True)
+    monkeypatch.setattr(sandbox, "is_isolated", lambda host: True)
+
+    def fake_exec(host, cmd, timeout=30):
+        seen.append((host, cmd))
+        return {"exit_code": 0, "output": "", "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(sandbox, "exec", fake_exec)
+    return seen
+
+
+def _blocked_line(seen):
+    assert len(seen) == 1
+    host, cmd = seen[0]
+    assert cmd[0] == "sh"
+    return host, cmd[2]
+
+
+def test_isolated_host_refuses_signin_and_logs_block(monkeypatch):
+    seen = _isolated_fixture(monkeypatch)
+    out = tools.try_credential("app", "svc-report", "password")
+    assert out["ok"] is False
+    assert "unreachable" in out["error"] and "isolated" in out["error"]
+    host, script = _blocked_line(seen)
+    assert host == "app"
+    assert "blocked signin user=svc-report" in script
+    assert "password" not in script
+
+
+def test_isolated_host_refuses_listing_and_logs_block(monkeypatch):
+    seen = _isolated_fixture(monkeypatch)
+    out = tools.list_files("db", "/secret/")
+    assert out["ok"] is False
+    assert "unreachable" in out["error"]
+    host, script = _blocked_line(seen)
+    assert host == "db"
+    assert "blocked dir-list path=/secret" in script
+
+
+def test_isolated_host_refuses_read_and_logs_block(monkeypatch):
+    seen = _isolated_fixture(monkeypatch)
+    out = tools.read_file("app", "/srv/app/config.ini")
+    assert out["ok"] is False
+    assert "unreachable" in out["error"]
+    host, script = _blocked_line(seen)
+    assert host == "app"
+    assert "blocked file-read path=/srv/app/config.ini" in script
+
+
+def test_isolated_host_refuses_web_request_and_logs_block(monkeypatch):
+    seen = _isolated_fixture(monkeypatch)
+    out = tools.http_request("web", "/admin")
+    assert out["ok"] is False
+    assert "unreachable" in out["error"]
+    host, script = _blocked_line(seen)
+    assert host == "web"
+    assert "blocked http-request path=/admin" in script
+
+
+def _clean_docker(monkeypatch, isolated=False, stream=None, creds=True):
+    scenario = sandbox.load_scenario()
+    shipped = scenario.get("shipped_defaults", {})
+    lines = stream if stream is not None else []
+    monkeypatch.setattr(sandbox, "is_isolated", lambda host: isolated)
+    monkeypatch.setattr(sandbox, "_raw_logs",
+                        lambda host, tail=None: list(lines))
+
+    def fake_exec(host, cmd, timeout=30):
+        if cmd[:2] == ["test", "!"]:
+            return {"exit_code": 0, "output": "", "stdout": "", "stderr": ""}
+        if cmd[0] == "cat":
+            if host in ("app", "db") and creds:
+                name = "user" if cmd[1].endswith(".toy_user") else "pass"
+                text = shipped[host][name]
+                return {"exit_code": 0, "output": text, "stdout": text,
+                        "stderr": ""}
+            return {"exit_code": 1, "output": "", "stdout": "",
+                    "stderr": "missing"}
+        return {"exit_code": 0, "output": "", "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(sandbox, "exec", fake_exec)
+    sandbox.note_log_offsets()
+
+
+def test_clean_start_check_passes_on_fresh_range(monkeypatch):
+    _clean_docker(monkeypatch)
+    out = tools.clean_start_check()
+    assert out == {"ok": True, "failures": {},
+                   "hosts": ["web", "app", "db", "workstation"]}
+
+
+def test_clean_start_check_fails_on_isolation_and_stale_names(monkeypatch):
+    stream = []
+    _clean_docker(monkeypatch, isolated=True, stream=stream)
+    stream.append("signin ok user=svc-report from=controller")
+    out = tools.clean_start_check()
+    assert out["ok"] is False
+    assert "isolated:app" in out["failures"]
+    assert "scope:web" in out["failures"]
+
+
+def test_clean_start_check_fails_without_scope(monkeypatch):
+    _clean_docker(monkeypatch)
+    sandbox.clear_log_offsets()
+    out = tools.clean_start_check()
+    assert out["ok"] is False
+    assert out["failures"]["scope"] == "episode log scope not recorded"
+
+
+def test_begin_episode_retries_then_raises(monkeypatch):
+    restores = []
+    monkeypatch.setattr(tools, "restore_host",
+                        lambda host: restores.append(host) or {"ok": True})
+    monkeypatch.setattr(sandbox, "note_log_offsets", lambda hosts=None: {})
+    monkeypatch.setattr(tools, "clean_start_check",
+                        lambda: {"ok": False, "failures": {"x": "y"},
+                                 "hosts": []})
+    with pytest.raises(tools.SandboxError):
+        tools.begin_episode()
+    assert restores == ["web", "app", "db", "workstation"] * 2
+
+
+def test_begin_episode_returns_passing_check(monkeypatch):
+    monkeypatch.setattr(tools, "restore_host", lambda host: {"ok": True})
+    monkeypatch.setattr(sandbox, "note_log_offsets", lambda hosts=None: {})
+    calls = []
+    monkeypatch.setattr(
+        tools, "clean_start_check",
+        lambda: calls.append(1) or {"ok": True, "failures": {},
+                                    "hosts": []})
+    out = tools.begin_episode()
+    assert out == {"ok": True, "attempts": 1,
+                   "checks": {"ok": True, "failures": {}, "hosts": []}}
+    assert calls == [1]
