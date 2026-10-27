@@ -2052,7 +2052,7 @@ function paintFx(refs, ctx) {
     const p = Math.max(0, Math.min(1, age / fx.dur));
     switch (fx.kind) {
       case "ring":
-        paintFxRing(ctx, fx, age, fxPoint(refs, fx));
+        paintFxRing(refs, ctx, fx, age, fxPoint(refs, fx));
         break;
       case "fan":
         paintFxFan(refs, ctx, fx, p);
@@ -2150,12 +2150,24 @@ function beamStroke(ctx, x0, y0, x1, y1, color, width, alpha) {
   ctx.restore();
 }
 
-function paintFxRing(ctx, fx, age, pt) {
+function fxTex(refs, key) {
+  const tex = refs.art && refs.art[key];
+  return tex && tex.width ? tex : null;
+}
+
+function paintFxRing(refs, ctx, fx, age, pt) {
   if (!pt) return;
   const p = Math.max(0, Math.min(1, age / fx.dur));
   const r = (fx.r0 || 8) + ((fx.r1 || 64) - (fx.r0 || 8)) * (1 - (1 - p) * (1 - p));
+  const tex = refs ? fxTex(refs, "ring") : null;
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
+  if (tex) {
+    ctx.globalAlpha = 0.8 * (1 - p);
+    const s = r * 2.6;
+    ctx.drawImage(tex, pt.x - s / 2, pt.y - s / 2, s, s);
+    ctx.globalAlpha = 1;
+  }
   ctx.strokeStyle = `rgba(${fx.color || "255,255,255"},${(0.85 * (1 - p)).toFixed(2)})`;
   ctx.lineWidth = 3 * (1 - p) + 1;
   ctx.beginPath();
@@ -2186,7 +2198,7 @@ function paintFxFan(refs, ctx, fx, p) {
   }
   ctx.restore();
   if (p > 0.65) {
-    paintFxRing(ctx, { ...fx, r0: at.r + 4, r1: at.r + 34, color: "255,90,80" },
+    paintFxRing(refs, ctx, { ...fx, r0: at.r + 4, r1: at.r + 34, color: "255,90,80" },
       (p - 0.65) * fx.dur, at);
   }
 }
@@ -2222,6 +2234,7 @@ function paintFxKeys(refs, ctx, fx, p) {
   const at = fxPoint(refs, fx);
   if (!at) return;
   const from = entityCore(refs, "red");
+  const tex = fxTex(refs, "shard");
   const leg = p < 0.5 ? p * 2 : (1 - p) * 2;
   for (let i = 0; i < 3; i += 1) {
     const lag = i * 0.12;
@@ -2233,13 +2246,19 @@ function paintFxKeys(refs, ctx, fx, p) {
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(a);
-    ctx.fillStyle = `rgba(255,150,130,${(0.9 * (1 - p * 0.4)).toFixed(2)})`;
-    ctx.beginPath();
-    ctx.moveTo(0, -s);
-    ctx.lineTo(s * 0.7, s * 0.6);
-    ctx.lineTo(-s * 0.7, s * 0.6);
-    ctx.closePath();
-    ctx.fill();
+    if (tex) {
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = 0.9 * (1 - p * 0.4);
+      ctx.drawImage(tex, -s * 1.6, -s * 1.6, s * 3.2, s * 3.2);
+    } else {
+      ctx.fillStyle = `rgba(255,150,130,${(0.9 * (1 - p * 0.4)).toFixed(2)})`;
+      ctx.beginPath();
+      ctx.moveTo(0, -s);
+      ctx.lineTo(s * 0.7, s * 0.6);
+      ctx.lineTo(-s * 0.7, s * 0.6);
+      ctx.closePath();
+      ctx.fill();
+    }
     ctx.restore();
   }
   if (p > 0.35 && p < 0.8) {
@@ -2265,9 +2284,23 @@ function paintFxPierce(refs, ctx, fx, p, grab) {
   if (!at) return;
   const from = entityCore(refs, "red");
   const grow = Math.min(1, p * 3);
-  beamStroke(ctx, from.x, from.y,
-    from.x + (at.x - from.x) * grow, from.y + (at.y - from.y) * grow,
+  const tipX = from.x + (at.x - from.x) * grow;
+  const tipY = from.y + (at.y - from.y) * grow;
+  beamStroke(ctx, from.x, from.y, tipX, tipY,
     grab ? "255,220,200" : "255,90,80", grab ? 7 : 4, 0.9 * (1 - p * 0.6));
+  // White-hot streak core along the beam.
+  const streak = fxTex(refs, "streak");
+  if (streak && grow > 0.05) {
+    const len = Math.hypot(tipX - from.x, tipY - from.y);
+    const ang = Math.atan2(tipY - from.y, tipX - from.x);
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = (grab ? 0.75 : 0.5) * (1 - p * 0.6);
+    ctx.translate((from.x + tipX) / 2, (from.y + tipY) / 2);
+    ctx.rotate(ang);
+    ctx.drawImage(streak, -len / 2, grab ? -14 : -9, len, grab ? 28 : 18);
+    ctx.restore();
+  }
   if (p > 0.3) {
     const q = (p - 0.3) / 0.7;
     const sprites = refs.sprites || {};
@@ -2276,7 +2309,7 @@ function paintFxPierce(refs, ctx, fx, p, grab) {
     drawGlow(ctx, grab ? sprites.white : sprites.red, at.x, at.y,
       at.r * (grab ? 2.4 : 1.8) * (0.5 + q), grab ? 0.9 : 0.75 * (1 - q * 0.5));
     ctx.restore();
-    paintFxRing(ctx, { ...fx, r0: at.r, r1: at.r + (grab ? 90 : 50), color: "255,110,100" },
+    paintFxRing(refs, ctx, { ...fx, r0: at.r, r1: at.r + (grab ? 90 : 50), color: "255,110,100" },
       q * fx.dur, at);
   }
 }
@@ -2340,7 +2373,7 @@ function paintFxScanring(refs, ctx, fx, p) {
   if (!at) return;
   const from = entityCore(refs, "blue");
   beamStroke(ctx, from.x, from.y, at.x, at.y, "120,190,255", 2, 0.35 * (1 - p));
-  paintFxRing(ctx, { ...fx, r0: at.r + 4, r1: at.r + 70, color: "127,212,255" }, p * fx.dur, at);
+  paintFxRing(refs, ctx, { ...fx, r0: at.r + 4, r1: at.r + 70, color: "127,212,255" }, p * fx.dur, at);
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
   ctx.strokeStyle = `rgba(160,230,255,${(0.8 * (1 - p)).toFixed(2)})`;
@@ -2355,10 +2388,18 @@ function paintFxScanring(refs, ctx, fx, p) {
 function paintFxFlare(refs, ctx, fx, p) {
   const at = entityCore(refs, "blue");
   const sprites = refs.sprites || {};
+  const tex = fxTex(refs, "flare");
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
   drawGlow(ctx, sprites.cyan, at.x, at.y, at.r * 2.2 * (0.6 + p), 0.85 * (1 - p));
-  drawGlow(ctx, sprites.white, at.x, at.y, at.r * 0.9, 0.9 * (1 - p));
+  if (tex) {
+    ctx.globalAlpha = 0.9 * (1 - p);
+    const s = at.r * 2.6 * (0.7 + p * 0.8);
+    ctx.drawImage(tex, at.x - s / 2, at.y - s / 2, s, s);
+    ctx.globalAlpha = 1;
+  } else {
+    drawGlow(ctx, sprites.white, at.x, at.y, at.r * 0.9, 0.9 * (1 - p));
+  }
   ctx.restore();
 }
 
@@ -2381,6 +2422,15 @@ function paintFxSlam(refs, ctx, fx, p) {
     ctx.beginPath();
     ctx.arc(at.x, at.y, at.r + 8 + q * 30, 0, 6.283);
     ctx.stroke();
+  }
+  // Contact flash from the flare texture.
+  const flare = fxTex(refs, "flare");
+  if (flare && p > 0.55) {
+    const q = Math.min(1, (p - 0.55) / 0.45);
+    ctx.globalAlpha = 0.8 * (1 - q);
+    const s = at.r * 2.4;
+    ctx.drawImage(flare, at.x - s / 2, at.y - s / 2, s, s);
+    ctx.globalAlpha = 1;
   }
   ctx.restore();
 }
@@ -2411,9 +2461,9 @@ function paintFxSweep(refs, ctx, fx, p) {
 function paintFxReconnect(refs, ctx, fx, p) {
   const at = fxPoint(refs, fx);
   if (!at) return;
-  paintFxRing(ctx, { ...fx, r0: at.r, r1: at.r + 60, color: "127,212,255" }, p * fx.dur, at);
+  paintFxRing(refs, ctx, { ...fx, r0: at.r, r1: at.r + 60, color: "127,212,255" }, p * fx.dur, at);
   if (p > 0.35) {
-    paintFxRing(ctx, { ...fx, r0: at.r, r1: at.r + 44, color: "200,235,255" },
+    paintFxRing(refs, ctx, { ...fx, r0: at.r, r1: at.r + 44, color: "200,235,255" },
       (p - 0.35) * fx.dur, at);
   }
   const sprites = refs.sprites || {};
