@@ -221,6 +221,7 @@ def record_spend(
     cached: bool = False,
     host: str = "meta",
     reasoning_tokens: int = 0,
+    cost_usd: float | None = None,
 ) -> dict:
     """Append one spend entry to the jsonl log and return it.
 
@@ -228,9 +229,14 @@ def record_spend(
     Baseten-hosted entries always record cost_usd 0.0 and only the
     token counts are meaningful. Check the Baseten invoice for real
     dollars; never treat the 0 as free.
+
+    cost_usd overrides the table estimate for usage that is not
+    token-priced (audio seconds); existing callers are unaffected.
     """
     if cached or host == "baseten":
         cost = 0.0
+    elif cost_usd is not None:
+        cost = float(cost_usd)
     else:
         cost = estimate_cost(model, input_tokens, output_tokens)
     entry = {
