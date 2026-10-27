@@ -3,15 +3,17 @@ import { HOSTS, eventHost } from "./state.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-export const NODE_R = 34;
+export const NODE_R = 26;
 
-// Believable range layout: public web tier on top, app in the middle,
-// db holding the protected secret at the bottom, workstation aside.
+// Landscape layout flowing left to right: web, app, db across the
+// width, workstation below app. Fits MAP_VIEWBOX with room for the
+// name pill above each node and the state label below it.
+export const MAP_VIEWBOX = { w: 640, h: 360 };
 export const MAP_POSITIONS = {
-  web: { x: 190, y: 78 },
-  app: { x: 190, y: 232 },
-  workstation: { x: 56, y: 232 },
-  db: { x: 190, y: 386 },
+  web: { x: 110, y: 140 },
+  app: { x: 320, y: 140 },
+  db: { x: 530, y: 140 },
+  workstation: { x: 320, y: 285 },
 };
 
 // Only the links that exist in the range: the web/app/db service chain
@@ -31,12 +33,12 @@ for (const [a, b] of MAP_EDGES) {
 // Muted pulse colors only. Node state colors live in CSS per theme,
 // driven by the data-state attribute updateMap sets below.
 const STATE_COLORS = {
-  clean: "#2f7d4e",
-  probed: "#8a5a00",
-  "signed-in": "#b25a1e",
+  clean: "#758f7f",
+  probed: "#c79a3b",
+  "signed-in": "#c26a2c",
   compromised: "#b3402e",
   isolated: "#2f6db3",
-  restored: "#4d7c6d",
+  restored: "#4d8f83",
 };
 
 // Plain state label for the map: "Signed in", not "signed-in".
@@ -146,7 +148,7 @@ function hostIcon(host, pos) {
 function lockIcon(pos) {
   const group = el("g", {
     class: "node-lock",
-    transform: `translate(${pos.x + 25} ${pos.y - 31})`,
+    transform: `translate(${pos.x + 30} ${pos.y - 26})`,
   });
   const title = el("title", {});
   title.textContent = "Protected secret";
@@ -193,21 +195,23 @@ export function initMap(svg, weights) {
     const ring = el("circle", { cx: pos.x, cy: pos.y, r: NODE_R, class: "node-ring" });
     group.append(halo, isoRing, ring, hostIcon(host, pos));
     if (host === "db") group.append(lockIcon(pos));
-    // Name, weight badge, and state all sit beneath the circle so no
-    // text ever overlaps the ring.
-    const label = el("text", { x: pos.x, y: pos.y + NODE_R + 20, class: "node-label" });
+    // Name plus a small weight pill above the circle, one state label
+    // below it, so no text ever overlaps the ring.
+    const nameY = pos.y - NODE_R - 12;
+    const label = el("text", { x: pos.x, y: nameY, class: "node-label" });
     label.textContent = host;
-    const badgeCy = pos.y + NODE_R + 37;
-    const badge = el("rect", {
-      x: pos.x - 21, y: badgeCy - 8, width: 42, height: 16, rx: 8, class: "node-badge",
+    const nameHalf = (host.length * 6.7) / 2;
+    const pillCx = pos.x + nameHalf + 6 + 14;
+    const pill = el("rect", {
+      x: pillCx - 14, y: nameY - 13, width: 28, height: 17, rx: 8.5, class: "node-badge",
     });
-    const badgeTitle = el("title", {});
-    badgeTitle.textContent = `Business weight ${weights[host] ?? "?"}`;
-    badge.append(badgeTitle);
-    const badgeText = el("text", { x: pos.x, y: badgeCy + 4, class: "node-badge-text" });
-    badgeText.textContent = `${weights[host] ?? "?"}`;
-    const state = el("text", { x: pos.x, y: pos.y + NODE_R + 62, class: "node-state" });
-    group.append(label, badge, badgeText, state);
+    const pillTitle = el("title", {});
+    pillTitle.textContent = `Business weight ${weights[host] ?? "?"}`;
+    pill.append(pillTitle);
+    const pillText = el("text", { x: pillCx, y: nameY - 1, class: "node-badge-text" });
+    pillText.textContent = `${weights[host] ?? "?"}`;
+    const state = el("text", { x: pos.x, y: pos.y + NODE_R + 18, class: "node-state" });
+    group.append(label, pill, pillText, state);
     nodeLayer.append(group);
     nodeEls.set(host, { group, state });
   }

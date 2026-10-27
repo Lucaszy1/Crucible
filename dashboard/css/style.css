@@ -18,12 +18,12 @@
   --green: #2f7d4e;
   --green-soft: #e2efe6;
   --node-fill: #ffffff;
-  --node-clean: #2f7d4e;
-  --node-probed: #8a5a00;
-  --node-signed-in: #b25a1e;
+  --node-clean: #758f7f;
+  --node-probed: #c79a3b;
+  --node-signed-in: #c26a2c;
   --node-compromised: #b3402e;
   --node-isolated: #2f6db3;
-  --node-restored: #4d7c6d;
+  --node-restored: #4d8f83;
   --edge: #c9c2b2;
   --radius: 10px;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -46,7 +46,7 @@
   --green: #7cc79a;
   --green-soft: #1f3328;
   --node-fill: #20232a;
-  --node-clean: #7cc79a;
+  --node-clean: #8fae9b;
   --node-probed: #d9a94a;
   --node-signed-in: #e09a5f;
   --node-compromised: #e08a76;
@@ -178,7 +178,14 @@ select {
 .score-big dd { margin: 2px 0 0; font-size: 24px; font-weight: 650; }
 
 /* Network map */
-#mapSvg { width: 100%; height: auto; display: block; min-height: 380px; }
+/* Map panel owns the Story column; the SVG letterboxes inside it via
+   preserveAspectRatio="meet" and never exceeds the viewport budget:
+   header + tabs + panel chrome + scrubber (~380). */
+.map-panel { display: flex; flex-direction: column; }
+#mapSvg {
+  width: 100%; height: auto; display: block; flex: 0 1 auto;
+  min-height: 260px; max-height: calc(100vh - 380px);
+}
 .node-group { --node-color: var(--node-clean); }
 .node-group[data-state="clean"] { --node-color: var(--node-clean); }
 .node-group[data-state="probed"] { --node-color: var(--node-probed); }
@@ -186,12 +193,12 @@ select {
 .node-group[data-state="compromised"] { --node-color: var(--node-compromised); }
 .node-group[data-state="isolated"] { --node-color: var(--node-isolated); }
 .node-group[data-state="restored"] { --node-color: var(--node-restored); }
-.node-ring { fill: var(--node-fill); stroke: var(--node-color); stroke-width: 2.5; }
+.node-ring { fill: var(--node-fill); stroke: var(--node-color); stroke-width: 3; }
 .halo { fill: none; stroke: var(--node-color); stroke-width: 2; opacity: 0; }
 .node-group[data-state="compromised"] .halo { opacity: 0.5; }
 .iso-ring { fill: none; stroke: var(--node-color); stroke-width: 1.5; stroke-dasharray: 5 4; opacity: 0; }
 .node-group[data-state="isolated"] .iso-ring { opacity: 1; }
-.node-label { fill: var(--text); font-size: 14px; font-weight: 650; text-anchor: middle; font-family: var(--sans); }
+.node-label { fill: var(--text); font-size: 13px; font-weight: 650; text-anchor: middle; font-family: var(--sans); }
 .node-badge { fill: var(--panel-2); stroke: var(--border); }
 .node-badge-text { fill: var(--muted); font-size: 11px; text-anchor: middle; font-family: var(--sans); }
 .node-state { font-size: 11px; text-anchor: middle; font-weight: 600; font-family: var(--sans); fill: var(--node-color); }
