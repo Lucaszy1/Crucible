@@ -56,8 +56,9 @@
 
   <div class="timeline-bar">
     <div class="transport">
-      <button id="playBtn" class="btn small" disabled>Play</button>
-      <button id="pauseBtn" class="btn small" disabled>Pause</button>
+      <button id="playBtn" class="btn small" title="Play (Space)" disabled>Play</button>
+      <button id="pauseBtn" class="btn small" title="Pause (Space)" disabled>Pause</button>
+      <span class="keys-hint" title="Left and right arrows step one event">Space plays or pauses, arrows step</span>
     </div>
     <input id="scrubber" type="range" min="0" max="0" value="0" step="1" aria-label="Event scrubber" disabled>
     <span id="positionLabel" class="position">0 / 0</span>

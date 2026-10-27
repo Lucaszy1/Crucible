@@ -320,6 +320,28 @@ async function pollStatus() {
   }
 }
 
+// Replay shortcuts: space toggles play and pause, arrows step one event.
+function onShortcut(ev) {
+  if (ev.defaultPrevented) return;
+  const tag = (ev.target && ev.target.tagName) || "";
+  if (["INPUT", "SELECT", "TEXTAREA", "BUTTON"].includes(tag)) return;
+  if (!confirm.overlay.hidden) return;
+  if (store.mode !== "replay" || store.events.length === 0) return;
+  if (ev.code === "Space") {
+    ev.preventDefault();
+    if (store.playing) pauseReplay();
+    else playReplay();
+  } else if (ev.key === "ArrowRight") {
+    ev.preventDefault();
+    stopTimer();
+    jump(store.cursor + 1);
+  } else if (ev.key === "ArrowLeft") {
+    ev.preventDefault();
+    stopTimer();
+    jump(store.cursor - 1);
+  }
+}
+
 async function boot() {
   try {
     const config = await fetchConfig();
@@ -344,6 +366,7 @@ async function boot() {
   els.play.addEventListener("click", playReplay);
   els.pause.addEventListener("click", pauseReplay);
   els.scrubber.addEventListener("input", () => jump(Number(els.scrubber.value)));
+  document.addEventListener("keydown", onShortcut);
   render(false);
   await refreshRuns(true);
   await pollStatus();
