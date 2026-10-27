@@ -148,10 +148,10 @@ class ModelRed:
     actor = ACTOR
 
     def __init__(self, client=None, exercise_id: str | None = None,
-                 max_tokens: int = MAX_TOKENS, temperature: float = 0.0,
+                 max_tokens: int = MAX_TOKENS, temperature: float | None = None,
                  reasoning_effort: str | None = None,
                  max_turns: int = _common.DEFAULT_MAX_TURNS,
-                 use_cache: bool = True):
+                 use_cache: bool = True, seed: str | None = None):
         self._client = client
         self._exercise_id = exercise_id
         self._max_tokens = max_tokens
@@ -159,6 +159,7 @@ class ModelRed:
         self._reasoning_effort = reasoning_effort
         self._max_turns = max_turns
         self._use_cache = use_cache
+        self._seed = seed
         self._fallback = ScriptedRed()
 
     def _fallback_action(self, turn: int, history: list, note: str) -> dict | None:
@@ -184,6 +185,7 @@ class ModelRed:
                 max_tokens=self._max_tokens,
                 temperature=self._temperature,
                 reasoning_effort=self._reasoning_effort,
+                seed=self._seed,
             )
         except Exception as exc:
             return self._fallback_action(

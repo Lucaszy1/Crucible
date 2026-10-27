@@ -61,6 +61,14 @@ DEFAULT_DAILY_LIMIT_USD = 5.0
 DEFAULT_REASONING_EFFORT = "low"
 MAX_RETRIES = 4
 
+# Per-role sampling temperature. Red varies most so episodes differ;
+# blue stays steadier. LLM_TEMPERATURE overrides every role.
+ROLE_TEMPERATURES = {
+    "red": 0.8,
+    "blue": 0.5,
+}
+DEFAULT_TEMPERATURE = 0.7
+
 # Exception names that are worth another attempt after a short wait.
 _RETRYABLE_NAMES = {
     "RateLimitError",
@@ -109,6 +117,22 @@ def daily_limit_usd() -> float:
         return float(os.environ.get("LLM_DAILY_LIMIT_USD", DEFAULT_DAILY_LIMIT_USD))
     except ValueError:
         return DEFAULT_DAILY_LIMIT_USD
+
+
+def temperature_for(role: str) -> float:
+    """Resolve sampling temperature for one role.
+
+    LLM_TEMPERATURE wins when it parses as a float. Otherwise red and
+    blue use their defaults so episodes vary; every other role falls
+    back to the shared default.
+    """
+    override = (os.environ.get("LLM_TEMPERATURE", "") or "").strip()
+    if override:
+        try:
+            return float(override)
+        except ValueError:
+            pass
+    return ROLE_TEMPERATURES.get(role, DEFAULT_TEMPERATURE)
 
 
 def spent_today(today: str | None = None) -> float:
@@ -180,18 +204,18 @@ def _cache_key(
     tools: list | None,
     extra: dict,
     exercise_id: str | None = None,
+    seed: str | None = None,
 ) -> str:
-    blob = json.dumps(
-        {
-            "model": model,
-            "messages": messages,
-            "tools": tools,
-            "extra": extra,
-            "exercise_id": exercise_id,
-        },
-        sort_keys=True,
-        default=str,
-    )
+    entry = {
+        "model": model,
+        "messages": messages,
+        "tools": tools,
+        "extra": extra,
+        "exercise_id": exercise_id,
+    }
+    if seed is not None:
+        entry["seed"] = seed
+    blob = json.dumps(entry, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
@@ -277,25 +301,27 @@ def chat(
     client=None,
     use_cache: bool = True,
     max_retries: int = MAX_RETRIES,
-    temperature: float = 0.7,
+    temperature: float | None = None,
     max_tokens: int = 1536,
     reasoning_effort: str | None = None,
+    seed: str | None = None,
 ) -> dict:
     """Run one chat completion with guard, cache, and retries.
 
     Returns a plain dict with content, tool_calls, usage, model, and a
     cached flag. Tests may pass a fake client; production passes none and
     gets a real Meta Model API client. The cache key includes the
-    exercise id, so identical prompts repeat only within one exercise.
+    exercise id, plus the episode seed when one is given, so matched
+    arms never share entries. A None temperature resolves per role.
     """
     model = model_for(role)
     effort = (reasoning_effort or "").strip() or reasoning_effort_default()
     extra = {
-        "temperature": temperature,
+        "temperature": temperature if temperature is not None else temperature_for(role),
         "max_tokens": max_tokens,
         "reasoning_effort": effort,
     }
-    key = _cache_key(model, messages, tools, extra, exercise_id)
+    key = _cache_key(model, messages, tools, extra, exercise_id, seed)
 
     if use_cache:
         hit = _read_cache(key)
