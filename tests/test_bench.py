@@ -37,13 +37,15 @@ def _score(**overrides):
 def _stub_exercise(monkeypatch, seen, score=None, events_list=None):
     def fake_exercise(red, blue, max_turns=40, run_path=None,
                       exercise_id=None, audit="off", sensors="on", seed=None,
-                      blue_reasoning_effort=None, scenario=None):
+                      blue_reasoning_effort=None, scenario=None,
+                      auditor_use_cache=True):
         seen.setdefault("ids", []).append(exercise_id)
         seen.setdefault("reds", []).append(type(red).__name__)
         seen.setdefault("sensors", []).append(sensors)
         seen.setdefault("seeds", []).append(seed)
         seen.setdefault("audit", []).append(audit)
         seen.setdefault("effort", []).append(blue_reasoning_effort)
+        seen.setdefault("auditor_use_cache", []).append(auditor_use_cache)
         return {"events": list(events_list or []),
                 "score": dict(score or _score()),
                 "run_path": str(run_path),
@@ -456,3 +458,23 @@ def test_bench_grouped_seeds_pair_cells(tmp_path, monkeypatch):
                        "--episodes-per-cell", "1",
                        "--scenarios", "classic,gen:7:easy"]) == 0
     assert seen["seeds"] == ["gz:classic:1"] * 2 + ["gz:gen-7-easy:1"] * 2
+
+
+def test_no_cache_reaches_auditor(tmp_path, monkeypatch):
+    seen = _stub_common(monkeypatch, tmp_path)
+    _stub_exercise(monkeypatch, seen)
+    _stub_referee(monkeypatch, seen)
+    assert bench.main(["--name", "nc", "--red", "chain", "--sensors", "on",
+                       "--memory", "off", "--episodes-per-cell", "1",
+                       "--audit", "end", "--no-cache"]) == 0
+    assert seen["auditor_use_cache"] == [False]
+
+
+def test_cache_default_reaches_auditor(tmp_path, monkeypatch):
+    seen = _stub_common(monkeypatch, tmp_path)
+    _stub_exercise(monkeypatch, seen)
+    _stub_referee(monkeypatch, seen)
+    assert bench.main(["--name", "wc", "--red", "chain", "--sensors", "on",
+                       "--memory", "off", "--episodes-per-cell", "1",
+                       "--audit", "end"]) == 0
+    assert seen["auditor_use_cache"] == [True]

@@ -297,9 +297,9 @@ def test_bench_wires_solver_with_paired_seed(tmp_path, monkeypatch):
     def fake_exercise(red, blue, max_turns=40, run_path=None,
                       exercise_id=None, audit="off", sensors="on",
                       seed=None, blue_reasoning_effort=None,
-                      scenario=None):
+                      scenario=None, auditor_use_cache=True):
         del red, blue, max_turns, audit, sensors, \
-            blue_reasoning_effort, scenario
+            blue_reasoning_effort, scenario, auditor_use_cache
         seen.setdefault("ids", []).append(exercise_id)
         return {"events": [],
                 "score": {"outcome": "blue_held", "blue_score": 100.0,

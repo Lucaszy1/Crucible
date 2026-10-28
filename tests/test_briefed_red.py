@@ -242,9 +242,9 @@ def _stub_bench(monkeypatch, tmp_path, seen):
     def fake_exercise(red, blue, max_turns=40, run_path=None,
                       exercise_id=None, audit="off", sensors="on",
                       seed=None, blue_reasoning_effort=None,
-                      scenario=None):
+                      scenario=None, auditor_use_cache=True):
         del red, blue, max_turns, audit, sensors, seed, \
-            blue_reasoning_effort, scenario
+            blue_reasoning_effort, scenario, auditor_use_cache
         return {"events": [],
                 "score": {"outcome": "blue_held", "blue_score": 100.0,
                           "downtime_pct": 0.0, "intrusion": False,

@@ -570,6 +570,7 @@ def _run_episode(bench: dict, cell: dict, rep: int, args, client,
         red, blue, max_turns=args.max_turns,
         run_path=bench["dir"] / f"{exercise_id}.jsonl",
         exercise_id=exercise_id, audit=audit_mode,
+        auditor_use_cache=not args.no_cache,
         sensors=cell["sensors"], seed=seed,
         blue_reasoning_effort=args.blue_reasoning_effort, **extra)
     score = result.get("score", {}) or {}

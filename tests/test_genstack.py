@@ -408,7 +408,8 @@ def test_batch_groups_episodes_and_boots_once(tmp_path, monkeypatch):
 
     def fake_exercise(red, blue, max_turns=40, run_path=None,
                       exercise_id=None, audit="off", sensors="on",
-                      blue_reasoning_effort=None, scenario=None):
+                      blue_reasoning_effort=None, scenario=None,
+                      auditor_use_cache=True):
         seen.setdefault("ids", []).append(exercise_id)
         seen.setdefault("scenarios", []).append(
             (scenario or {}).get("scenario_id", "classic"))
@@ -450,7 +451,8 @@ def test_campaign_freeze_skips_referee_but_keeps_playbook(tmp_path,
 
     def fake_exercise(red, blue, max_turns=40, run_path=None,
                       exercise_id=None, audit="off", sensors="on", seed=None,
-                      blue_reasoning_effort=None, scenario=None):
+                      blue_reasoning_effort=None, scenario=None,
+                      auditor_use_cache=True):
         seen.setdefault("ids", []).append(exercise_id)
         seen["blue_playbook"] = getattr(blue, "_playbook", "scripted")
         return {"events": [], "score": {"outcome": "blue_held",
@@ -492,7 +494,8 @@ def test_bench_groups_freeze_and_records_scenarios(tmp_path, monkeypatch):
 
     def fake_exercise(red, blue, max_turns=40, run_path=None,
                       exercise_id=None, audit="off", sensors="on", seed=None,
-                      blue_reasoning_effort=None, scenario=None):
+                      blue_reasoning_effort=None, scenario=None,
+                      auditor_use_cache=True):
         seen.setdefault("ids", []).append(exercise_id)
         return {"events": [], "score": {"outcome": "blue_held",
                                        "blue_score": 70.0,
