@@ -1,0 +1,116 @@
+{
+  "debrief": {
+    "containment_event_id": "evt-0007",
+    "containment_move": "isolated willow",
+    "detection_delay_events": 13,
+    "detection_event_id": "evt-0015",
+    "layer": 1,
+    "markdown": "# Exercise debrief: scn-9001-contained\n\n## Outcome\nExercise over: the defender contained the intruder on willow. The protected file was never read.\n\nDetection delay: 13 moves.\nContainment move: isolated willow (evt-0007).\n\n## Timeline\n- **First probe** (evt-0004): The intruder asked upland for /admin/status (evt-0004).\n- **First alert** (evt-0005): 1 sensor alert was showing on the defender turn, highest high (evt-0005).\n- **First sign-in** (evt-0006): The intruder signed in to willow as runner (evt-0006).\n- **Containment** (evt-0007): The defender isolated willow (evt-0007). That came 1 move after the sign-in (evt-0006 to evt-0007).\n- **Read blocked** (evt-0010): The intruder could not reach the protected file after containment (evt-0010).\n- **Detection** (evt-0015): Detection came 13 moves after the first intruder move (evt-0002 to evt-0015).\n\n## What the defender did well\n- The defender contained the signed-in host within 1 move of the sign-in. (evt-0006, evt-0007)\n- The defender reported the intrusion 13 moves after the first intruder move. (evt-0002, evt-0015)\n- The defender checked host logs before acting. (evt-0003, evt-0007)\n- The defender acted on sensor alert evidence. (evt-0007, evt-0015)\n- The protected file stayed unread even after a sign-in. (evt-0006, evt-0007)\n\n## Weaknesses and recommendations\n- Detection took 13 moves after the first intruder move. (evt-0002, evt-0015)\n  Recommendation: Check entry host logs on every defender turn so probing is seen sooner.\n- A guessed password opened willow as runner. (evt-0006)\n  Recommendation: Rotate the willow password and slow repeated bad guesses.\n- The open admin page on upland stayed open through the exercise. (evt-0004, evt-0031)\n  Recommendation: Patch the exposed page as soon as probing shows.\n- willow stayed down at the end of the exercise. (evt-0007)\n  Recommendation: Restore each host after patching to limit downtime.\n\n_Layer 1 report, derived from the exercise log with no model. All event ids cite the exercise log._\n",
+    "model_used": "none",
+    "outcome": "contained",
+    "outcome_text": "Exercise over: the defender contained the intruder on willow. The protected file was never read.",
+    "run_id": "scn-9001-contained",
+    "strengths": [
+      {
+        "event_ids": [
+          "evt-0006",
+          "evt-0007"
+        ],
+        "text": "The defender contained the signed-in host within 1 move of the sign-in."
+      },
+      {
+        "event_ids": [
+          "evt-0002",
+          "evt-0015"
+        ],
+        "text": "The defender reported the intrusion 13 moves after the first intruder move."
+      },
+      {
+        "event_ids": [
+          "evt-0003",
+          "evt-0007"
+        ],
+        "text": "The defender checked host logs before acting."
+      },
+      {
+        "event_ids": [
+          "evt-0007",
+          "evt-0015"
+        ],
+        "text": "The defender acted on sensor alert evidence."
+      },
+      {
+        "event_ids": [
+          "evt-0006",
+          "evt-0007"
+        ],
+        "text": "The protected file stayed unread even after a sign-in."
+      }
+    ],
+    "timeline": [
+      {
+        "detail": "The intruder asked upland for /admin/status (evt-0004).",
+        "event_id": "evt-0004",
+        "title": "First probe"
+      },
+      {
+        "detail": "1 sensor alert was showing on the defender turn, highest high (evt-0005).",
+        "event_id": "evt-0005",
+        "title": "First alert"
+      },
+      {
+        "detail": "The intruder signed in to willow as runner (evt-0006).",
+        "event_id": "evt-0006",
+        "title": "First sign-in"
+      },
+      {
+        "detail": "The defender isolated willow (evt-0007). That came 1 move after the sign-in (evt-0006 to evt-0007).",
+        "event_id": "evt-0007",
+        "title": "Containment"
+      },
+      {
+        "detail": "The intruder could not reach the protected file after containment (evt-0010).",
+        "event_id": "evt-0010",
+        "title": "Read blocked"
+      },
+      {
+        "detail": "Detection came 13 moves after the first intruder move (evt-0002 to evt-0015).",
+        "event_id": "evt-0015",
+        "title": "Detection"
+      }
+    ],
+    "weaknesses": [
+      {
+        "event_ids": [
+          "evt-0002",
+          "evt-0015"
+        ],
+        "recommendation": "Check entry host logs on every defender turn so probing is seen sooner.",
+        "text": "Detection took 13 moves after the first intruder move."
+      },
+      {
+        "event_ids": [
+          "evt-0006"
+        ],
+        "recommendation": "Rotate the willow password and slow repeated bad guesses.",
+        "text": "A guessed password opened willow as runner."
+      },
+      {
+        "event_ids": [
+          "evt-0004",
+          "evt-0031"
+        ],
+        "recommendation": "Patch the exposed page as soon as probing shows.",
+        "text": "The open admin page on upland stayed open through the exercise."
+      },
+      {
+        "event_ids": [
+          "evt-0007"
+        ],
+        "recommendation": "Restore each host after patching to limit downtime.",
+        "text": "willow stayed down at the end of the exercise."
+      }
+    ]
+  },
+  "id": "scn-9001-contained"
+}

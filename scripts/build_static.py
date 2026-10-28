@@ -72,9 +72,10 @@ BASE_TIME = datetime(2026, 10, 28, 12, 0, 0, tzinfo=timezone.utc)
 # bench-stage3-heldout is valid; only that bench's sensors-on half
 # is void, and no pick comes from it.
 SOURCES = [
-    {"id": "scn-0007-contained",
-     "bench": "sample", "episode": "sample",
-     "local": "runs/sample.jsonl", "want": "contained"},
+    {"id": "scn-9001-contained",
+     "bench": "bench-stage3-heldout-sensors",
+     "episode": "gen-9001-easy-solver-sensors-on-memory-on-1",
+     "want": "contained"},
     {"id": "briefed-medium-contained",
      "bench": "bench-stage3-briefed-vs-open",
      "episode": "gen-9008-medium-model-briefed-sensors-on-memory-off-1",

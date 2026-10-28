@@ -1,15 +1,15 @@
 {
   "runs": [
     {
-      "blue_score": 94.89,
-      "events": 17,
-      "id": "scn-0007-contained",
-      "invalid_refs_count": 0,
-      "justified_pct": 20.0,
-      "mean_audit_score": 4.0,
+      "blue_score": 87.75,
+      "events": 51,
+      "id": "scn-9001-contained",
+      "invalid_refs_count": 1,
+      "justified_pct": 55.0,
+      "mean_audit_score": 5.0,
       "mtime": "2026-10-28T12:00:00+00:00",
       "outcome": "blue_held",
-      "unsupported_count": 4
+      "unsupported_count": 6
     },
     {
       "blue_score": 96.93,
