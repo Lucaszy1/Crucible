@@ -7,8 +7,9 @@ from the Operations Center on localhost only
 
 ## Start a human exercise
 
-`POST /api/exercise/start` accepts two new agent sets beside
-`scripted` and `model`:
+Every live blue takes defender orders. `scripted` and `model` blue
+run inside the override wrapper (which delegates untouched while
+nothing is queued); two agent sets go further:
 
 - `human`: every blue turn waits for a judge order (30 s turn clock),
   else blue holds. Red runs its scripted plan: free and predictable.
@@ -106,18 +107,41 @@ orders keep working when audio or the spend cap fails.
 ```
 
 `last.status` is `ok`, `clarify` (with `message`), `refused` (with
-`message`), or `handed-back`. Clarify and refused orders surface in
-the log as hold turns whose reason carries the question, so the log
-shows exactly what the judge heard back.
+`message`), `taken-over`, or `handed-back`. Clarify and refused
+orders surface in the log as hold turns whose reason carries the
+question, so the log shows exactly what the judge heard back.
+`state` also carries `mode` (the live agents set), `latched`
+(whether the defender seat is held), and `spend_usd` against
+`spend_cap_usd` ($1.00 per session for transcription plus
+ambiguous-order parsing; past the cap only offline orders work).
+
+## Preview an order
+
+`POST /api/command/parse` — dry-run one order without queueing it.
+The deterministic parser runs first and costs nothing. Only an
+ambiguous or refused order reaches the phrasing model, and only
+while the session cap holds. Take-over and hand-back words return
+`{"status": "control", "control": "take-over"|"hand-back"}`.
+
+## Take over or hand back
+
+`POST /api/takeover` with `{"take": true}` latches the defender
+seat at once (no order needed, no event logged); `{"take": false}`
+queues `hand back`. In `human` mode both are a noop: the seat is
+already held. Queued orders may carry a previewed
+`action: {tool, args}` from the parse endpoint; the runner still
+revalidates it against the live allowlist before acting.
 
 ## Order language
 
 Orders map onto the blue tool surface only: isolate, patch, restore,
-read logs, report finding, status, stand down. Host names and roles
-resolve against the live inventory (`the database` finds the database
-role); ambiguous matches ask a clarifying question and never guess.
-Anything outside the surface (including destructive verbs and ending
-the exercise) is refused with a plain explanation. Examples:
+read logs, report finding, status, scan, stand down. Host names and
+roles resolve against the live inventory (`the database` finds the
+database role); ambiguous matches ask a clarifying question and never
+guess. A rotate order runs a patch (sign-in rotation ships with the
+patch action) and says so. Anything outside the surface (including
+destructive verbs and ending the exercise) is refused with a plain
+explanation. Examples:
 
 - `isolate the database`
 - `patch the web portal`
@@ -125,14 +149,17 @@ the exercise) is refused with a plain explanation. Examples:
 - `read the last 100 lines on db`
 - `report repeated sign-in failures on app`
 - `status of the application`
+- `scan the app host`
 - `stand down`
 
 ## Event log shape
 
-Human turns log like AI turns, plus two fields: `source`
-(`voice` or `text`) and `transcript` (the order text). Scoring, the
-auditor, and replay treat them identically. Runs without the mode
-log byte-identically to before (proven by golden test).
+Human turns log under actor `human` (plus `source` and `transcript`
+fields). Scoring, the auditor, and replay treat them as blue-side
+moves; the score marks `assisted: true`, the end card labels the run
+human-assisted, and benchmark summaries drop assisted rows. Runs
+without the mode log byte-identically to before (proven by golden
+test).
 
 ## What the dashboard tab needs to do
 

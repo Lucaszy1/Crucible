@@ -188,6 +188,24 @@ def test_human_actor_is_human():
     assert blue.actor == "human"
 
 
+def test_previewed_action_revalidated_at_run_time():
+    cmd_queue = CommandQueue()
+    blue = _human(cmd_queue)
+    cmd_queue.push("do the previewed thing",
+                   resolved={"tool": "isolate_host",
+                             "args": {"host": "db"}})
+    action = blue.next_action(1, [])
+    assert action["tool"] == "isolate_host"
+    assert action["args"] == {"host": "db"}
+    assert action["_actor"] == "human"
+    cmd_queue.push("sneaky text",
+                   resolved={"tool": "isolate_host",
+                             "args": {"host": "moon"}})
+    held = blue.next_action(3, [])
+    assert held["tool"] == "wait"
+    assert "Which host" in held["args"]["reason"]
+
+
 def test_take_over_latches_without_action():
     cmd_queue = CommandQueue()
     inner = _Inner()

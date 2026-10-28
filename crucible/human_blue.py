@@ -71,17 +71,29 @@ class CommandQueue:
         self._last: dict | None = None
         self._counter = 0
 
-    def push(self, text: str, source: str = "text") -> dict:
-        """Queue one order; returns its receipt."""
+    def push(self, text: str, source: str = "text",
+             resolved: dict | None = None) -> dict:
+        """Queue one order; returns its receipt.
+
+        resolved carries a previewed {tool, args} from the parse
+        endpoint; the runner still revalidates it before acting.
+        """
         cleaned = str(text or "").strip()
         if not cleaned:
             raise ValueError("cannot queue an empty order")
         if source not in ("voice", "text"):
             raise ValueError(f"source must be 'voice' or 'text': {source!r}")
+        if resolved is not None:
+            if not isinstance(resolved, dict) \
+                    or not isinstance(resolved.get("args"), dict):
+                raise ValueError("resolved must be {tool, args}")
         with self._lock:
             self._counter += 1
             receipt = {"id": self._counter, "text": cleaned,
                        "source": source, "received_at": time.time()}
+            if resolved is not None:
+                receipt["resolved"] = {"tool": resolved.get("tool", ""),
+                                       "args": dict(resolved["args"])}
         self._queue.put(receipt)
         return dict(receipt)
 
@@ -165,7 +177,15 @@ class HumanBlue:
 
     def _run_order(self, receipt: dict) -> dict:
         inventory, services = self._context()
-        parsed = commands.parse(receipt["text"], inventory, services)
+        resolved = (receipt or {}).get("resolved")
+        if isinstance(resolved, dict):
+            parsed = commands.validate_action(
+                {"tool": resolved.get("tool", ""),
+                 "args": resolved.get("args", {}),
+                 "reasoning": "Judge order (previewed)."},
+                inventory, services)
+        else:
+            parsed = commands.parse(receipt["text"], inventory, services)
         if parsed["status"] != "ok" and self._model_fallback:
             parsed = commands.parse_with_model(
                 receipt["text"], inventory, services,

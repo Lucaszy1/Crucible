@@ -260,24 +260,27 @@ class _LiveWriter(events.EventWriter):
 def _build_agents(agents: str, exercise_id: str) -> tuple:
     """Build one exercise's red/blue pair.
 
-    Human modes pair scripted red (free, predictable) with the human
-    blue agent, and bind the shared command queue for the voice
-    routes; ai_with_override wraps model blue instead. Pure scripted
-    and model pairs are exactly as before.
+    Every live blue takes defender orders: scripted and model blue
+    run inside the override wrapper (which delegates untouched while
+    nothing is queued), human mode waits on orders entirely, and
+    ai_with_override pairs scripted red with model blue plus orders.
+    The shared command queue binds for the voice routes in all modes.
     """
+    cmd_queue = CommandQueue()
+    voice_api.attach_queue(cmd_queue, exercise_id, agents)
     if agents == "model":
         return (ModelRed(exercise_id=exercise_id),
-                ModelBlue(exercise_id=exercise_id))
-    if agents in ("human", "ai_with_override"):
-        cmd_queue = CommandQueue()
-        voice_api.attach_queue(cmd_queue, exercise_id)
-        if agents == "human":
-            return ScriptedRed(), HumanBlue(cmd_queue,
-                                            exercise_id=exercise_id)
+                AIWithOverride(ModelBlue(exercise_id=exercise_id),
+                               cmd_queue, exercise_id=exercise_id))
+    if agents == "human":
+        return ScriptedRed(), HumanBlue(cmd_queue,
+                                        exercise_id=exercise_id)
+    if agents == "ai_with_override":
         return (ScriptedRed(),
                 AIWithOverride(ModelBlue(exercise_id=exercise_id),
                                cmd_queue, exercise_id=exercise_id))
-    return ScriptedRed(), ScriptedBlue()
+    return ScriptedRed(), AIWithOverride(ScriptedBlue(), cmd_queue,
+                                         exercise_id=exercise_id)
 
 
 def _run_live_exercise(

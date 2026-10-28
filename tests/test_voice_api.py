@@ -37,7 +37,9 @@ def test_command_queued_and_state(client):
     assert cmd_queue.pending() == 1
     state = client.get("/api/command/state").json()
     assert state == {"attached": True, "exercise_id": "ex-1",
-                     "pending": 1, "last": None}
+                     "pending": 1, "last": None, "mode": None,
+                     "latched": False, "spend_usd": 0.0,
+                     "spend_cap_usd": voice_api.HUMAN_SESSION_CAP_USD}
 
 
 def test_command_voice_source(client):
@@ -143,11 +145,15 @@ def test_command_rate_limit(client):
 
 
 def test_build_agents_wires_human_modes():
-    red, blue = api._build_agents("scripted", "x")
-    assert isinstance(red, ScriptedRed) and isinstance(blue, ScriptedBlue)
-    red, blue = api._build_agents("model", "x")
-    assert isinstance(red, ModelRed) and isinstance(blue, ModelBlue)
     try:
+        red, blue = api._build_agents("scripted", "x")
+        assert isinstance(red, ScriptedRed)
+        assert isinstance(blue, AIWithOverride)
+        assert isinstance(blue._inner, ScriptedBlue)
+        red, blue = api._build_agents("model", "x")
+        assert isinstance(red, ModelRed)
+        assert isinstance(blue, AIWithOverride)
+        assert isinstance(blue._inner, ModelBlue)
         red, blue = api._build_agents("human", "x")
         assert isinstance(red, ScriptedRed)
         assert isinstance(blue, HumanBlue)
@@ -156,6 +162,18 @@ def test_build_agents_wires_human_modes():
         assert isinstance(blue, AIWithOverride)
     finally:
         voice_api.detach_queue()
+
+
+def test_build_agents_attaches_queue_every_mode():
+    for agents in ("scripted", "model", "human", "ai_with_override"):
+        try:
+            api._build_agents(agents, f"x-{agents}")
+            state = voice_api.command_state()
+            assert state["attached"] is True
+            assert state["exercise_id"] == f"x-{agents}"
+            assert state["mode"] == agents
+        finally:
+            voice_api.detach_queue()
 
 
 def test_start_accepts_human_agents(client, monkeypatch):
@@ -187,3 +205,147 @@ def test_serve_binds_localhost_only(monkeypatch):
     assert serve.main(["--port", "8123"]) == 0
     assert seen["host"] == "127.0.0.1"
     assert seen["port"] == 8123
+
+
+def _live_inventory(monkeypatch):
+    inventory = {"hosts": {
+        "willow": {"role": "app"},
+        "wren": {"role": "workstation"},
+    }, "crown_jewel_host": "willow"}
+    services = {"willow": "reportapi", "wren": "desktop"}
+    monkeypatch.setattr(voice_api, "default_inventory",
+                        lambda: inventory)
+    monkeypatch.setattr(voice_api, "default_services",
+                        lambda: services)
+
+
+def test_parse_previews_without_queueing(client, monkeypatch):
+    cmd_queue = _attach()
+    _live_inventory(monkeypatch)
+    res = client.post("/api/command/parse",
+                      json={"text": "isolate the willow host"})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "ok"
+    assert body["tool"] == "isolate_host"
+    assert body["args"] == {"host": "willow"}
+    assert body["ai_used"] is False
+    assert cmd_queue.pending() == 0
+
+
+def test_parse_control_words_stay_out_of_tools(client, monkeypatch):
+    _attach()
+    _live_inventory(monkeypatch)
+    res = client.post("/api/command/parse", json={"text": "take over"})
+    assert res.json()["status"] == "control"
+    assert res.json()["control"] == "take-over"
+    res = client.post("/api/command/parse", json={"text": "hand back"})
+    assert res.json()["control"] == "hand-back"
+
+
+def test_parse_refusal_names_allowlist(client, monkeypatch):
+    _attach()
+    _live_inventory(monkeypatch)
+    monkeypatch.delenv("MODEL_API_KEY", raising=False)
+    res = client.post("/api/command/parse",
+                      json={"text": "delete everything on willow"})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "refused"
+    assert body["ai_used"] is False
+
+
+def test_parse_model_only_when_offline_stuck(client, monkeypatch):
+    from crucible import commands
+
+    _attach()
+    _live_inventory(monkeypatch)
+    monkeypatch.setenv("MODEL_API_KEY", "test-key")
+    calls = []
+
+    def fake_model(text, inventory, services, **kwargs):
+        calls.append(text)
+        return {"status": "ok", "tool": "read_logs",
+                "args": {"host": "wren", "n": 50},
+                "reasoning": "model reading", "cost_usd": 0.01}
+
+    monkeypatch.setattr(commands, "parse_with_model", fake_model)
+    clear = client.post("/api/command/parse",
+                        json={"text": "read logs on wren"}).json()
+    assert clear["status"] == "ok" and clear["ai_used"] is False
+    assert calls == []
+    vague = client.post("/api/command/parse",
+                        json={"text": "hmm, maybe look around"}).json()
+    assert vague["status"] == "ok" and vague["ai_used"] is True
+    assert vague["cost_usd"] == pytest.approx(0.01)
+    assert calls == ["hmm, maybe look around"]
+    state = client.get("/api/command/state").json()
+    assert state["spend_usd"] == pytest.approx(0.01)
+
+
+def test_parse_capped_session_skips_model(client, monkeypatch):
+    from crucible import commands
+
+    _attach()
+    _live_inventory(monkeypatch)
+    monkeypatch.setenv("MODEL_API_KEY", "test-key")
+    voice_api._add_spend(voice_api.HUMAN_SESSION_CAP_USD)
+
+    def boom(*args, **kwargs):
+        raise AssertionError("model must not run past the cap")
+
+    monkeypatch.setattr(commands, "parse_with_model", boom)
+    body = client.post("/api/command/parse",
+                       json={"text": "hmm, maybe look around"}).json()
+    assert body["ai_used"] is False
+    assert "cap" in body.get("note", "")
+
+
+def test_takeover_queues_markers(client):
+    cmd_queue = _attach()
+    res = client.post("/api/takeover", json={"take": True})
+    assert res.json()["status"] == "queued"
+    assert cmd_queue.pop(timeout=0)["text"] == "take over"
+    res = client.post("/api/takeover", json={"take": False})
+    assert res.json()["take"] is False
+    assert cmd_queue.pop(timeout=0)["text"] == "hand back"
+
+
+def test_takeover_noop_in_human_mode(client):
+    cmd_queue = CommandQueue()
+    voice_api.attach_queue(cmd_queue, "ex-h", "human")
+    res = client.post("/api/takeover", json={"take": True})
+    assert res.json()["status"] == "noop"
+    assert cmd_queue.pending() == 0
+
+
+def test_state_reports_latch_from_last_result(client):
+    cmd_queue = _attach()
+    assert client.get("/api/command/state").json()["latched"] is False
+    cmd_queue.note_result({"status": "taken-over"})
+    assert client.get("/api/command/state").json()["latched"] is True
+    cmd_queue.note_result({"status": "handed-back"})
+    assert client.get("/api/command/state").json()["latched"] is False
+
+
+def test_command_accepts_previewed_action(client):
+    cmd_queue = _attach()
+    res = client.post("/api/command", json={
+        "text": "do the previewed thing",
+        "action": {"tool": "isolate_host", "args": {"host": "willow"}}})
+    assert res.status_code == 200
+    receipt = cmd_queue.pop(timeout=0)
+    assert receipt["resolved"] == {"tool": "isolate_host",
+                                   "args": {"host": "willow"}}
+    bad = client.post("/api/command", json={
+        "text": "sneaky", "action": {"tool": "format_disk", "args": {}}})
+    assert bad.status_code == 422
+
+
+def test_audio_session_cap_blocks(client, monkeypatch):
+    _attach()
+    voice_api._add_spend(voice_api.HUMAN_SESSION_CAP_USD)
+    wav = voice.make_probe_wav(seconds=1.0)
+    res = client.post("/api/audio", content=wav,
+                      headers={"Content-Type": "audio/wav"})
+    assert res.status_code == 429
