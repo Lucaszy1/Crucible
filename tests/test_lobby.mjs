@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   HELDOUT_MAX, HELDOUT_MIN, drawLiveScenario, formatDuration, hostNoun,
-  partitionLobby, provText, storyLine, titleOutcomeKey,
+  partitionLobby, provText, storyLine, titleOutcomeKey, voidNoteText,
 } from "../dashboard/js/lobby.js";
 
 function ev(id, actor, tool, args, result) {
@@ -161,5 +161,17 @@ describe("titleOutcomeKey", () => {
     assert.equal(titleOutcomeKey("Hard exercise"), null);
     assert.equal(titleOutcomeKey(null), null);
     assert.equal(titleOutcomeKey(""), null);
+  });
+});
+
+describe("voidNoteText", () => {
+  it("marks void episodes with the sensor-bug note", () => {
+    assert.equal(voidNoteText(true), "Void: sensor bug");
+  });
+
+  it("stays empty for valid episodes", () => {
+    assert.equal(voidNoteText(false), "");
+    assert.equal(voidNoteText(null), "");
+    assert.equal(voidNoteText(undefined), "");
   });
 });

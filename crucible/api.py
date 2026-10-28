@@ -518,11 +518,13 @@ def get_run(
 
     bench pins the exact bench folder; without it a bare id must
     resolve to exactly one copy. The reply names the bench the
-    episode was read from (null for top-level runs).
+    episode was read from (null for top-level runs) and whether
+    the episode is void by the sensor bug.
     """
     found, resolved = _read_run_events(run_id, bench)
     return {"id": run_id, "events": found, "score": _score_or_none(found),
-            "bench": resolved}
+            "bench": resolved,
+            "void": events.is_void_episode(resolved, run_id)}
 
 
 @app.get("/api/runs/{run_id}/debrief")

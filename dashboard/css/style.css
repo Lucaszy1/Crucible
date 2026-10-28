@@ -871,6 +871,10 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
   font-size: 11px; font-weight: 600; color: var(--muted);
   border: 1px solid var(--border); border-radius: 6px; padding: 1px 8px;
 }
+.lobby-badge.lobby-void {
+  color: var(--amber); border-color: var(--amber); background: var(--amber-soft);
+}
+.lobby-void-line { margin-top: 0; margin-bottom: 0; }
 .lobby-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: auto; }
 .lobby-states { display: block; }
 .lobby-glyph {

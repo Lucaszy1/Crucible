@@ -19,7 +19,7 @@ import { focusEvidenceRef, renderEvidence } from "./evidence.js";
 import { initControls, serverStatus, setServer, showConfirm } from "./controls.js";
 import {
   HELDOUT_MAX, HELDOUT_MIN, arenaThumb, drawLiveScenario, formatDuration, hideDeal, partitionLobby,
-  renderDeal, renderLobby, storyLine, titleOutcomeKey,
+  renderDeal, renderLobby, storyLine, titleOutcomeKey, voidNoteText,
 } from "./lobby.js";
 import { playOpening } from "./opening.js";
 import { initThoughtHeads, renderThoughts, setThoughtsCollapsed } from "./thoughts.js";
@@ -495,6 +495,17 @@ function renderStoryPanels(display) {
       : "Score pending";
     meta.textContent = `${score} · ${store.events.length} moves`;
     out.append(badge, line, meta);
+    const voidText = voidNoteText(store.runVoid);
+    if (voidText) {
+      const warn = document.createElement("p");
+      warn.className = "lobby-meta";
+      const chip = document.createElement("span");
+      chip.className = "lobby-badge lobby-void";
+      chip.textContent = voidText;
+      warn.append(chip);
+      warn.title = "This episode ran with silently broken sensors; its result is void.";
+      out.append(warn);
+    }
   }
   renderDebrief(els.debriefBody, store.runId ? store.debrief : null, {
     onEvidence: (id) => {
@@ -743,6 +754,7 @@ async function openExercise(runId, opts) {
   store.events = (data.events || []).filter((ev) => ev && ev.actor !== "system");
   store.replayScore = data.score || null;
   store.runBench = data.bench || o.bench || null;
+  store.runVoid = data.void || false;
   assertFeaturedTitle(runId, store.events);
   loadDebrief(runId, store.runBench);
   store.cursor = 0;
@@ -794,6 +806,8 @@ async function beginRun(agents, scenarioToken) {
     setMode("booting", `Booting range for ${data.exercise_id}`);
     switchTab("arena");
     store.runId = null;
+    store.runBench = null;
+    store.runVoid = false;
     store.events = [];
     store.cursor = 0;
     store.finalScore = null;
@@ -1183,6 +1197,7 @@ async function classifyRun(run, armByEpisode) {
       provenance: (store.lobby.provenance || {})[run.id] || null,
       outcomeKey: out.key,
       bench: data.bench || run.bench || null,
+      void: data.void || false,
       outcome: { label: out.label, tone: out.tone },
       blueScore: typeof score.blue_score === "number" ? score.blue_score : null,
       moves: lane.length,

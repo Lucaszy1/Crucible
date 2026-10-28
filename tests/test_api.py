@@ -141,6 +141,35 @@ def test_bench_param_picks_exact_copy_of_repeated_episode(client, tmp_runs):
     assert client.get("/api/runs/dupe?bench=bench-aaa%2F..").status_code == 404
 
 
+def test_void_episode_rule():
+    assert events.is_void_episode(
+        "bench-stage3-heldout",
+        "gen-9001-easy-solver-sensors-on-memory-on-1") is True
+    assert events.is_void_episode(
+        "bench-stage3-train-solver",
+        "gen-1001-easy-solver-sensors-on-memory-on-1") is True
+    assert events.is_void_episode(
+        "bench-stage3-heldout",
+        "gen-9018-hard-solver-sensors-off-memory-off-1") is False
+    assert events.is_void_episode(
+        "bench-stage3-heldout-sensors",
+        "gen-9001-easy-solver-sensors-on-memory-on-1") is False
+    assert events.is_void_episode(None, "gen-smoke-1") is False
+
+
+def test_run_fetch_reports_void_flag(client, tmp_runs):
+    heldout = tmp_runs / "bench-stage3-heldout"
+    heldout.mkdir()
+    shutil.copy(FIXTURE, heldout / "ep-sensors-on-x.jsonl")
+    shutil.copy(FIXTURE, heldout / "ep-sensors-off-x.jsonl")
+    void = client.get("/api/runs/ep-sensors-on-x?bench=bench-stage3-heldout")
+    assert void.json()["void"] is True
+    valid = client.get("/api/runs/ep-sensors-off-x?bench=bench-stage3-heldout")
+    assert valid.json()["void"] is False
+    top = client.get("/api/runs/demo")
+    assert top.json()["void"] is False
+
+
 def test_bare_id_skips_archive_copies(client, tmp_runs):
     shelf = tmp_runs / "archive"
     shelf.mkdir()

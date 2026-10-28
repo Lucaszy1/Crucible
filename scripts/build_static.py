@@ -65,6 +65,7 @@ sys.path.insert(0, str(ROOT))
 
 from crucible import debrief  # noqa: E402
 from crucible import orchestrator  # noqa: E402
+from crucible.events import is_void_episode  # noqa: E402
 
 BASE_TIME = datetime(2026, 10, 28, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -211,6 +212,10 @@ def build_replays(source_runs: Path) -> dict:
     runs = {}
     for source in SOURCES:
         run_id = source["id"]
+        if is_void_episode(source.get("bench"), source.get("episode")):
+            raise SystemExit(
+                f"error: {run_id} is void by the sensor bug: "
+                f"{source.get('bench')}/{source.get('episode')}")
         events = load_episode_events(source_runs, source)
         if len(events) < 6:
             raise SystemExit(f"error: {run_id} has too few events")

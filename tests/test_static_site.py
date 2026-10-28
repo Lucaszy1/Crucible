@@ -99,6 +99,21 @@ def test_static_site_replays_have_real_sources(tmp_path):
         assert prov.get("seed") is not None, f"{run_id} has no seed"
 
 
+def test_static_site_replays_are_not_void(tmp_path):
+    from crucible import events as events_mod
+    out, _builder = build_to(tmp_path)
+    featured = json.loads((out / "data" / "featured.json")
+                          .read_text(encoding="utf-8"))["featured"]
+    assert len(featured) > 0
+    for run_id in featured:
+        replay = json.loads((out / "data" / "runs" / f"{run_id}.json")
+                            .read_text(encoding="utf-8"))
+        prov = replay.get("provenance") or {}
+        assert not events_mod.is_void_episode(
+            prov.get("bench"), prov.get("episode")), (
+            f"{run_id} is void by the sensor bug")
+
+
 def test_static_site_has_no_unlabeled_synthetic(tmp_path):
     out, _builder = build_to(tmp_path)
     hits = []

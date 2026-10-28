@@ -26,6 +26,21 @@ REQUIRED_FIELDS = (
     "evidence_refs",
 )
 
+# Benches whose sensors-on episodes ran with silently broken
+# sensors (zero alerts in every episode; fixed in c9dd960). Their
+# sensors-on results are void; sensors-off episodes stay valid.
+VOID_SENSOR_BENCHES = frozenset({
+    "bench-stage3-train-solver",
+    "bench-stage3-heldout",
+})
+
+
+def is_void_episode(bench: str | None, episode_id: str | None) -> bool:
+    """Tell whether one bench episode is void by the sensor bug."""
+    if not bench or bench not in VOID_SENSOR_BENCHES:
+        return False
+    return "-sensors-on-" in str(episode_id or "")
+
 
 def utc_now_iso() -> str:
     """Return the current UTC time in ISO format."""

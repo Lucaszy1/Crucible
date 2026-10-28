@@ -215,6 +215,25 @@ function cardTitle(model) {
   return model.title || model.id;
 }
 
+// Visible marker for episodes from the broken-sensors benches.
+// Pure text; voidLine renders it into a card.
+export function voidNoteText(isVoid) {
+  return isVoid ? "Void: sensor bug" : "";
+}
+
+function voidLine(model) {
+  const text = voidNoteText(model && model.void);
+  if (!text) return null;
+  const line = document.createElement("p");
+  line.className = "lobby-meta lobby-void-line";
+  const chip = document.createElement("span");
+  chip.className = "lobby-badge lobby-void";
+  chip.textContent = text;
+  line.append(chip);
+  line.title = "This episode ran with silently broken sensors; its result is void.";
+  return line;
+}
+
 function cardTitleAttr(model) {
   return model.title ? `${model.title} (${model.id})` : model.id;
 }
@@ -254,7 +273,10 @@ function featureCard(model, callbacks, env) {
   const foot = document.createElement("div");
   foot.className = "feature-foot";
   foot.append(playButton(model.id, "Watch", callbacks));
-  body.append(head, story, meta);
+  body.append(head);
+  const voidMark = voidLine(model);
+  if (voidMark) body.append(voidMark);
+  body.append(story, meta);
   const provLine = provenanceLine(model);
   if (provLine) body.append(provLine);
   if (model.flags && model.flags.length > 0) body.append(badgesRow(model.flags));
@@ -327,7 +349,10 @@ function archiveCard(model, callbacks, env) {
   } else {
     upgrade();
   }
-  el.append(head, meta);
+  el.append(head);
+  const voidMark = voidLine(model);
+  if (voidMark) el.append(voidMark);
+  el.append(meta);
   const provLine = provenanceLine(model);
   if (provLine) el.append(provLine);
   if (model.flags && model.flags.length > 0) el.append(badgesRow(model.flags));
