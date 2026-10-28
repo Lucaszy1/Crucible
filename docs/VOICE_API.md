@@ -68,8 +68,9 @@ index, 429 past 30 calls/minute.
 ## Send audio
 
 `POST /api/audio` — raw WAV bytes as the body
-(`Content-Type: audio/wav`). Transcribes, then queues the transcript
-as a `voice` order.
+(`Content-Type: audio/wav`; `audio/x-wav` also accepted). No form
+fields and no multipart parsing: the body IS the file. Transcribes,
+then queues the transcript as a `voice` order.
 
 ```json
 // response (200)
@@ -77,9 +78,15 @@ as a `voice` order.
  "seconds": 1.2, "cost_usd": 0.00012, "pending": 1}
 ```
 
-Caps: 5 MB body, WAV only (1-2 channels, 8/16-bit,
-8-48 kHz), 60 s duration. Errors: 409 with no live exercise, 413 for
-an oversize body, 422 for unreadable audio, 429 past 6 calls/minute
+```sh
+curl -X POST localhost:8000/api/audio \
+  -H "Content-Type: audio/wav" --data-binary @order.wav
+```
+
+Caps: 5 MB body (refused before reading when over), WAV only
+(1-2 channels, 8/16-bit, 8-48 kHz), 60 s duration. Errors: 409 with
+no live exercise, 413 for an oversize body, 415 for any other
+content type, 422 for unreadable audio, 429 past 6 calls/minute
 or past the daily spend cap, 502 when transcription fails. Typed
 orders keep working when audio or the spend cap fails.
 
@@ -144,9 +151,11 @@ log byte-identically to before (proven by golden test).
 
 ## Assumptions and risks
 
-- The file endpoint shape (multipart `file` field, JSON `text`
-  reply) and the realtime message shapes are assumed; no public spec
-  was available. The live probe below checks the file endpoint only.
+- The file endpoint contract is verified by the live probe:
+  multipart parts `request` (JSON: model, audioEncoding, sample
+  rate) and `audio` (WAV bytes); model id
+  `muse-voice-transcribe-1.0`; JSON reply with transcript/turns.
+  The realtime message shapes are still assumed (fake server only).
 - Realtime speech (`wss://api.meta.ai/v1/asr/realtime`) is
   implemented against a fake server and has never touched the real
   endpoint.

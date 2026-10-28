@@ -29,6 +29,7 @@ router = APIRouter()
 
 MAX_TEXT_CHARS = 500
 MAX_UPLOAD_BYTES = voice.MAX_WAV_BYTES + 1024
+AUDIO_CONTENT_TYPES = ("audio/wav", "audio/x-wav")
 
 # Per-route token buckets: (max calls, window seconds). Single-user
 # localhost traffic; the dashboard polls state, which stays unlimited.
@@ -153,6 +154,33 @@ def post_demo(body: DemoIn | None = None) -> dict:
             "pending": cmd_queue.pending()}
 
 
+async def _read_capped_body(request: Request, cap: int) -> bytes:
+    """Read the body, refusing anything over the cap up front."""
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            if int(declared) > cap:
+                raise HTTPException(status_code=413,
+                                    detail="audio file too large")
+        except ValueError:
+            pass
+    chunks = []
+    seen = 0
+    try:
+        async for chunk in request.stream():
+            seen += len(chunk)
+            if seen > cap:
+                raise HTTPException(status_code=413,
+                                    detail="audio file too large")
+            chunks.append(chunk)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=422,
+                            detail=f"could not read upload: {exc}")
+    return b"".join(chunks)
+
+
 @router.post("/api/audio")
 async def post_audio(request: Request) -> dict:
     """Transcribe a raw WAV body and queue it as a voice order.
@@ -162,13 +190,11 @@ async def post_audio(request: Request) -> dict:
     """
     _check_rate("audio")
     cmd_queue = _live_queue()
-    try:
-        raw = await request.body()
-    except Exception as exc:
-        raise HTTPException(status_code=422,
-                            detail=f"could not read upload: {exc}")
-    if len(raw) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="audio file too large")
+    media = (request.headers.get("content-type") or "").split(";")[0]
+    if media.strip().lower() not in AUDIO_CONTENT_TYPES:
+        raise HTTPException(status_code=415,
+                            detail="content-type must be audio/wav")
+    raw = await _read_capped_body(request, MAX_UPLOAD_BYTES)
     try:
         facts = voice.validate_wav(raw)
     except voice.VoiceError as exc:
@@ -181,6 +207,9 @@ async def post_audio(request: Request) -> dict:
         raise HTTPException(status_code=429, detail="daily model spend "
                             "cap reached; typed orders still work")
     except voice.VoiceError as exc:
+        if "no transcript text" in str(exc):
+            raise HTTPException(status_code=422,
+                                detail="no speech detected in clip")
         raise HTTPException(status_code=502, detail=str(exc))
     receipt = cmd_queue.push(result["text"], source="voice")
     return {"id": receipt["id"], "status": "queued",

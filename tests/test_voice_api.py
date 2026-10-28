@@ -107,6 +107,30 @@ def test_audio_rejects_garbage_and_oversize(client):
     res = client.post("/api/audio", content=big,
                       headers={"Content-Type": "audio/wav"})
     assert res.status_code == 413
+    res = client.post("/api/audio", content=b"nope",
+                      headers={"Content-Type": "text/plain"})
+    assert res.status_code == 415
+
+
+def test_audio_rejects_wrong_content_type(client, monkeypatch):
+    _attach()
+    calls = []
+
+    def fake_transcribe(raw, exercise_id=None):
+        calls.append(raw)
+        return {"text": "stand down", "seconds": 1.0, "cost_usd": 0.0}
+
+    monkeypatch.setattr(voice, "transcribe_file", fake_transcribe)
+    wav = voice.make_probe_wav(seconds=1.0)
+    res = client.post("/api/audio", content=wav,
+                      headers={"Content-Type": "text/plain"})
+    assert res.status_code == 415
+    res = client.post("/api/audio", content=wav)
+    assert res.status_code == 415
+    res = client.post("/api/audio", content=wav,
+                      headers={"Content-Type": "audio/x-wav"})
+    assert res.status_code == 200
+    assert calls and calls[0] == wav
 
 
 def test_command_rate_limit(client):
