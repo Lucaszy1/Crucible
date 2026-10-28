@@ -145,10 +145,13 @@ Blue score: 0 to 100. When the secret was read, blue_score is 0. Otherwise blue_
 - [x] Auditor agent
 - [x] Dashboard v1
 - [x] Replay
-- [ ] Voice commands
-- [ ] Open-weights blue team
+- [x] Voice commands (backend; dashboard command bar still open)
+- [x] Open-weights blue team
 - [x] Playbook memory and learning curve
 - [ ] Event injection
-- [ ] README and diagram
+- [x] README and diagram
+- [x] Scenario generator
+- [ ] Stage 3 held-out results
+- [ ] Dashboard command bar
 - [ ] Demo video
 - [ ] Submission
