@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1032" viewBox="0 0 1440 1032" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+<title>Crucible architecture</title>
+<desc>Architecture of the Crucible containment exercise repo: scenario supply, exercise core, red and blue agents, defender context, judgment and memory, records, measurement, and dashboard. All paths name real modules.</desc>
+<style>
+.mp{font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace}
+.lbl{paint-order:stroke;stroke:#f6f8fa;stroke-width:4px;stroke-linejoin:round}
+@media (prefers-color-scheme: dark){
+.bg{fill:#0d1117}
+.box{fill:#161b22;stroke:#30363d}
+.t{fill:#e6edf3}
+.bt{fill:#e6edf3}
+.d{fill:#e6edf3}
+.mp{fill:#79c0ff}
+.lbl{fill:#e6edf3;stroke:#0d1117}
+.ft{fill:#9aa4b2}
+.sub{fill:#9aa4b2}
+.fl{stroke:#9aa4b2}
+.c1{fill:#d2a8ff}.c2{fill:#79c0ff}.c3{fill:#7ee787}.c4{fill:#ff7b72}.c5{fill:#ffa657}.c6{fill:#79c0ff}.c7{fill:#9aa4b2}.c8{fill:#d2a8ff}.c9{fill:#7ee787}
+}
+</style>
+<defs>
+<marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+<path d="M0,0 L10,5 L0,10 z" fill="#8b949e"/>
+</marker>
+</defs>
+<rect class="bg" x="0" y="0" width="1440" height="1032" fill="#f6f8fa"/>
+<text class="t" x="720" y="36" font-size="22" font-weight="bold" text-anchor="middle" fill="#1f2328">Crucible architecture</text>
+<text class="sub" x="720" y="58" font-size="13" text-anchor="middle" fill="#57606a">as built in this repo; module paths in mono</text>
+
+<rect class="box" x="16" y="76" width="400" height="254" rx="8" fill="#ffffff" stroke="#d0d7de" stroke-width="1.5"/>
+<text class="bt c1" x="32" y="102" font-size="15" font-weight="bold" fill="#8250df">Scenario supply</text>
+<text class="mp" x="32" y="124" font-size="10.5" fill="#0969da">crucible/scenarios/generate.py</text>
+<text class="d" x="32" y="139" font-size="11" fill="#24292f">seeded specs: topology, one proven path,</text>
+<text class="d" x="32" y="154" font-size="11" fill="#24292f">decoys, dead ends, noise</text>
+<text class="mp" x="32" y="174" font-size="10.5" fill="#0969da">seeds.py</text>
+<text class="d" x="32" y="189" font-size="11" fill="#24292f">train 1001-1040, held-out 9001-9020</text>
+<text class="mp" x="32" y="209" font-size="10.5" fill="#0969da">simulate.py + schema.py</text>
+<text class="d" x="32" y="224" font-size="11" fill="#24292f">validator: shape, solvability, no-shortcut,</text>
+<text class="d" x="32" y="239" font-size="11" fill="#24292f">sensor coverage</text>
+<text class="mp" x="32" y="259" font-size="10.5" fill="#0969da">stack.py, render.py, catalog.py, chain.py</text>
+<text class="d" x="32" y="274" font-size="11" fill="#24292f">render compose.gen.yml; noisy plan, picker</text>
+<text class="d" x="32" y="294" font-size="11" fill="#24292f">select.py picks the spec per episode</text>
+
+<rect class="box" x="456" y="76" width="520" height="254" rx="8" fill="#ffffff" stroke="#d0d7de" stroke-width="1.5"/>
+<text class="bt c2" x="472" y="102" font-size="15" font-weight="bold" fill="#0969da">Exercise core</text>
+<text class="mp" x="472" y="124" font-size="10.5" fill="#0969da">crucible/orchestrator.py</text>
+<text class="d" x="472" y="139" font-size="11" fill="#24292f">alternating red/blue turns, MAX_TURNS 60; scoring reads the log only</text>
+<text class="mp" x="472" y="159" font-size="10.5" fill="#0969da">crucible/tools.py</text>
+<text class="d" x="472" y="174" font-size="11" fill="#24292f">listed tools only; off-range host raises AllowlistError</text>
+<text class="mp" x="472" y="194" font-size="10" fill="#0969da">scan_host http_request try_credential read_file list_files</text>
+<text class="mp" x="472" y="209" font-size="10" fill="#0969da">report_finding read_logs list_processes wait</text>
+<text class="mp" x="472" y="224" font-size="10" fill="#0969da">isolate_host patch_service restore_host</text>
+<text class="mp" x="472" y="244" font-size="10.5" fill="#0969da">crucible/sandbox.py</text>
+<text class="d" x="472" y="259" font-size="11" fill="#24292f">check_host allowlist; toy hosts, internal-only Docker net, no published ports</text>
+<text class="d" x="472" y="274" font-size="11" fill="#24292f">classic web app db workstation; generated nets hold 6-10 hosts</text>
+<text class="mp" x="472" y="294" font-size="10.5" fill="#0969da">sandbox/docker-compose.yml, compose.gen.yml</text>
+
+<rect class="box" x="1016" y="76" width="400" height="254" rx="8" fill="#ffffff" stroke="#d0d7de" stroke-width="1.5"/>
+<text class="bt c3" x="1032" y="102" font-size="15" font-weight="bold" fill="#1a7f37">Defender context</text>
+<text class="mp" x="1032" y="124" font-size="10.5" fill="#0969da">crucible/sandbox.py blue_inventory()</text>
+<text class="d" x="1032" y="139" font-size="11" fill="#24292f">roles, links, weights, protected-data host</text>
+<text class="mp" x="1032" y="159" font-size="10.5" fill="#0969da">crucible/sensors.py</text>
+<text class="d" x="1032" y="174" font-size="11" fill="#24292f">deterministic rules over log lines blue</text>
+<text class="d" x="1032" y="189" font-size="11" fill="#24292f">already read; alerts quote evidence</text>
+<text class="d" x="1032" y="209" font-size="11" fill="#24292f">alerts and inventory join the blue</text>
+<text class="d" x="1032" y="224" font-size="11" fill="#24292f">prompt every turn</text>
+
+<rect class="box" x="16" y="386" width="400" height="254" rx="8" fill="#ffffff" stroke="#d0d7de" stroke-width="1.5"/>
+<text class="bt c4" x="32" y="412" font-size="15" font-weight="bold" fill="#cf222e">Red agent</text>
+<text class="mp" x="32" y="434" font-size="10.5" fill="#0969da">crucible/solver_red.py SolverRed</text>
+<text class="d" x="32" y="449" font-size="11" fill="#24292f">spec path, seeded imperfection,</text>
+<text class="d" x="32" y="464" font-size="11" fill="#24292f">zero model calls</text>
+<text class="mp" x="32" y="484" font-size="10.5" fill="#0969da">agents/red.py ModelRed</text>
+<text class="d" x="32" y="499" font-size="11" fill="#24292f">muse-spark-1.3, unbriefed</text>
+<text class="mp" x="32" y="519" font-size="10.5" fill="#0969da">agents/briefed_red.py</text>
+<text class="d" x="32" y="534" font-size="11" fill="#24292f">scope briefing, 60-turn budget</text>
+<text class="mp" x="32" y="554" font-size="10.5" fill="#0969da">bench.py + scripted_red.py</text>
+<text class="d" x="32" y="569" font-size="11" fill="#24292f">chain, noisy (seeded decoy probes),</text>
+<text class="d" x="32" y="584" font-size="11" fill="#24292f">model, solver, model-briefed</text>
+
+<rect class="box" x="456" y="386" width="520" height="254" rx="8" fill="#ffffff" stroke="#d0d7de" stroke-width="1.5"/>
+<text class="bt c5" x="472" y="412" font-size="15" font-weight="bold" fill="#9a6700">Judgment and memory</text>
+<text class="mp" x="472" y="434" font-size="10.5" fill="#0969da">agents/auditor.py</text>
+<text class="d" x="472" y="449" font-size="11" fill="#24292f">Layer 1: deterministic evidence checks, no model</text>
+<text class="d" x="472" y="464" font-size="11" fill="#24292f">Layer 2: muse-wonder-1.0 verdict and score;</text>
+<text class="d" x="472" y="479" font-size="11" fill="#24292f">model failure falls back to Layer 1</text>
+<text class="mp" x="472" y="499" font-size="10.5" fill="#0969da">agents/referee.py</text>
+<text class="d" x="472" y="514" font-size="11" fill="#24292f">muse-wonder-1.0 merges lessons; at most 10 rules, scrubbed</text>
+<text class="mp" x="472" y="534" font-size="10.5" fill="#0969da">playbooks/blue.json (+ blue.md)</text>
+<text class="d" x="472" y="549" font-size="11" fill="#24292f">frozen copy runs/stage3/frozen-playbook.json</text>
+<text class="d" x="472" y="569" font-size="11" fill="#24292f">bench --freeze-playbook: blue reads, referee never writes</text>
+
+<rect class="box" x="1016" y="386" width="400" height="254" rx="8" fill="#ffffff" stroke="#d0d7de" stroke-width="1.5"/>
+<text class="bt c6" x="1032" y="412" font-size="15" font-weight="bold" fill="#0969da">Blue agent (defender)</text>
+<text class="mp" x="1032" y="434" font-size="10.5" fill="#0969da">agents/blue.py ModelBlue</text>
+<text class="d" x="1032" y="449" font-size="11" fill="#24292f">muse-spark-1.3; reports, then contains</text>
+<text class="mp" x="1032" y="469" font-size="10.5" fill="#0969da">role blue-open</text>
+<text class="d" x="1032" y="484" font-size="11" fill="#24292f">meta-models/muse-spark-open-1026</text>
+<text class="d" x="1032" y="499" font-size="11" fill="#24292f">on Baseten</text>
+<text class="mp" x="1032" y="519" font-size="10.5" fill="#0969da">agents/scripted_blue.py</text>
+<text class="d" x="1032" y="534" font-size="11" fill="#24292f">fallback when the model fails</text>
+<text class="d" x="1032" y="554" font-size="11" fill="#24292f">reads playbook, inventory, alerts</text>
+
+<rect class="box" x="16" y="680" width="400" height="254" rx="8" fill="#ffffff" stroke="#d0d7de" stroke-width="1.5"/>
+<text class="bt c7" x="32" y="706" font-size="15" font-weight="bold" fill="#6e7781">Records</text>
+<text class="mp" x="32" y="728" font-size="10.5" fill="#0969da">crucible/events.py</text>
+<text class="d" x="32" y="743" font-size="11" fill="#24292f">one event per tool call;</text>
+<text class="d" x="32" y="758" font-size="11" fill="#24292f">runs/*.jsonl feeds replay and scoring</text>
+<text class="mp" x="32" y="778" font-size="10.5" fill="#0969da">crucible/llm.py</text>
+<text class="d" x="32" y="793" font-size="11" fill="#24292f">one client for all model calls:</text>
+<text class="d" x="32" y="808" font-size="11" fill="#24292f">retries, .llm_cache, spend.jsonl</text>
+<text class="mp" x="32" y="828" font-size="10.5" fill="#0969da">check_spend_guard</text>
+<text class="d" x="32" y="843" font-size="11" fill="#24292f">hard daily cap LLM_DAILY_LIMIT_USD</text>
+
+<rect class="box" x="456" y="680" width="520" height="254" rx="8" fill="#ffffff" stroke="#d0d7de" stroke-width="1.5"/>
+<text class="bt c8" x="472" y="706" font-size="15" font-weight="bold" fill="#8250df">Measurement</text>
+<text class="mp" x="472" y="728" font-size="10.5" fill="#0969da">crucible/bench.py</text>
+<text class="d" x="472" y="743" font-size="11" fill="#24292f">profiles x sensors on/off x memory on/off;</text>
+<text class="d" x="472" y="758" font-size="11" fill="#24292f">runs/bench-*/ plus CSV and table</text>
+<text class="mp" x="472" y="778" font-size="10.5" fill="#0969da">crucible/campaign.py</text>
+<text class="d" x="472" y="793" font-size="11" fill="#24292f">sequential episodes, shared playbook</text>
+<text class="mp" x="472" y="813" font-size="10.5" fill="#0969da">scripts/stage3_checks.py</text>
+<text class="d" x="472" y="828" font-size="11" fill="#24292f">gate: splits, freeze, leak-grep, episode scan</text>
+<text class="mp" x="472" y="848" font-size="10.5" fill="#0969da">scripts/stage3_report.py</text>
+
+<rect class="box" x="1016" y="680" width="400" height="254" rx="8" fill="#ffffff" stroke="#d0d7de" stroke-width="1.5"/>
+<text class="bt c9" x="1032" y="706" font-size="15" font-weight="bold" fill="#1a7f37">Dashboard (Operations Center)</text>
+<text class="mp" x="1032" y="728" font-size="10.5" fill="#0969da">crucible/serve.py + api.py</text>
+<text class="d" x="1032" y="743" font-size="11" fill="#24292f">localhost:8000, SSE /api/live</text>
+<text class="d" x="1032" y="763" font-size="11" fill="#24292f">tabs Lobby, Arena, Story, Details, Learning;</text>
+<text class="d" x="1032" y="778" font-size="11" fill="#24292f">replay and past runs</text>
+<text class="mp" x="1032" y="798" font-size="10.5" fill="#0969da">human_blue.py + commands.py</text>
+<text class="d" x="1032" y="813" font-size="11" fill="#24292f">HumanBlue, AIWithOverride orders</text>
+<text class="mp" x="1032" y="833" font-size="10.5" fill="#0969da">crucible/voice_api.py</text>
+<text class="d" x="1032" y="848" font-size="11" fill="#24292f">/api/takeover, /api/audio</text>
+<text class="d" x="1032" y="863" font-size="11" fill="#24292f">(Muse Voice Transcribe)</text>
+
+<g fill="none" stroke="#6e7781" stroke-width="1.5">
+<path class="fl" d="M416,215 H455" marker-end="url(#arr)"/>
+<path class="fl" d="M976,150 H1015" marker-end="url(#arr)"/>
+<path class="fl" d="M300,386 V352 H700 V332" marker-start="url(#arr)" marker-end="url(#arr)"/>
+<path class="fl" d="M1100,386 V370 H760 V332" marker-start="url(#arr)" marker-end="url(#arr)"/>
+<path class="fl" d="M1200,330 V385" marker-end="url(#arr)"/>
+<path class="fl" d="M1016,500 H977" marker-start="url(#arr)" marker-end="url(#arr)"/>
+<path class="fl" d="M200,640 V679" marker-end="url(#arr)"/>
+<path class="fl" d="M600,640 V650 H300 V678" marker-end="url(#arr)"/>
+<path class="fl" d="M700,680 V642" marker-end="url(#arr)"/>
+<path class="fl" d="M1300,640 V662 H350 V678" marker-end="url(#arr)"/>
+<path class="fl" d="M416,800 H455" marker-end="url(#arr)"/>
+<path class="fl" d="M500,680 H436 V260 H454" marker-end="url(#arr)"/>
+<path class="fl" d="M976,290 H996 V800 H1014" marker-start="url(#arr)" marker-end="url(#arr)"/>
+<path class="fl" d="M280,934 V952 H1200 V936" marker-end="url(#arr)"/>
+</g>
+
+<text class="lbl" x="436" y="209" font-size="11" text-anchor="middle" fill="#1f2328">spec + compose</text>
+<text class="lbl" x="996" y="144" font-size="11" text-anchor="middle" fill="#1f2328">log lines</text>
+<text class="lbl" x="520" y="346" font-size="11" text-anchor="middle" fill="#1f2328">red moves + results</text>
+<text class="lbl" x="900" y="364" font-size="11" text-anchor="middle" fill="#1f2328">blue moves + results</text>
+<text class="lbl" x="1206" y="362" font-size="11" fill="#1f2328">alerts + inventory</text>
+<text class="lbl" x="996" y="494" font-size="11" text-anchor="middle" fill="#1f2328">audits + playbook</text>
+<text class="lbl" x="206" y="664" font-size="11" fill="#1f2328">moves</text>
+<text class="lbl" x="450" y="645" font-size="11" text-anchor="middle" fill="#1f2328">verdicts + scores</text>
+<text class="lbl" x="706" y="658" font-size="11" fill="#1f2328">freeze check</text>
+<text class="lbl" x="830" y="657" font-size="11" text-anchor="middle" fill="#1f2328">blue moves + model calls</text>
+<text class="lbl" x="436" y="794" font-size="11" text-anchor="middle" fill="#1f2328">reads logs + spend</text>
+<text class="lbl" x="442" y="676" font-size="11" fill="#1f2328">runs episodes</text>
+<text class="lbl" x="1002" y="656" font-size="11" fill="#1f2328">live events (SSE)</text>
+<text class="lbl" x="1002" y="674" font-size="11" fill="#1f2328">run control + orders</text>
+<text class="lbl" x="740" y="947" font-size="11" text-anchor="middle" fill="#1f2328">replay reads runs logs</text>
+
+<text class="ft" x="32" y="978" font-size="12" fill="#57606a">Solid arrows show calls, reads, and events during an exercise.</text>
+<text class="ft" x="32" y="996" font-size="12" fill="#57606a">Every model call passes crucible/llm.py: retries, on-disk cache, spend log, hard daily spend guard.</text>
+<text class="ft" x="32" y="1014" font-size="12" fill="#57606a">All paths name real modules; scoring reads the event log only.</text>
+</svg>
