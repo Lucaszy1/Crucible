@@ -148,6 +148,7 @@ export function arenaThumb(model, env, opts) {
     w: options.w || 120,
     h: options.h || 68,
     featured: options.featured,
+    cursor: options.cursor,
   });
   return thumb;
 }

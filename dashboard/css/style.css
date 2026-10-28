@@ -776,6 +776,21 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
 .lobby-card[data-tone="blue"] .lobby-outcome { color: var(--accent); }
 .lobby-card[data-tone="amber"] .lobby-outcome { color: var(--amber); }
 .lobby-card[data-tone="gray"] .lobby-outcome { color: var(--muted); }
+.story-outcome { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.story-outcome[data-tone="red"] .lobby-outcome { color: var(--red); font-size: 15px; }
+.story-outcome[data-tone="blue"] .lobby-outcome { color: var(--accent); font-size: 15px; }
+.story-outcome[data-tone="amber"] .lobby-outcome { color: var(--amber); font-size: 15px; }
+.story-outcome[data-tone="gray"] .lobby-outcome { color: var(--muted); font-size: 15px; }
+.story-line { margin: 0; }
+.moments { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.moment { display: flex; gap: 10px; align-items: flex-start; }
+.moment > canvas { flex: none; }
+.moment-body { min-width: 0; }
+.moment-head { margin: 0; font-weight: 700; font-size: 13px; }
+.moment-cap { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+@media (max-width: 480px) {
+  .moment { flex-direction: column; }
+}
 .lobby-meta { margin: 0; font-size: 13px; color: var(--muted); }
 .lobby-arm { color: var(--text); }
 .lobby-badges { display: flex; gap: 6px; flex-wrap: wrap; }

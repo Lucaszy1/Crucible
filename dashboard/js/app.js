@@ -6,7 +6,7 @@ import {
   finishSide, followOpensLive, motionReduced, motionSetting, outcomeLine,
   rankFeatured, reduceHostStates, runFlags, scoreEvents,
 } from "./state.js";
-import { describeEvent, statusSentence } from "./story.js";
+import { describeEvent, keyMoments, statusSentence } from "./story.js";
 import { initMap, updateMap } from "./network.js";
 import { renderFeed } from "./feed.js";
 import { renderStrip, renderTransport, stripModel } from "./timeline.js";
@@ -16,7 +16,7 @@ import { renderScoreboard, renderScoreDetails } from "./scoreboard.js";
 import { focusEvidenceRef, renderEvidence } from "./evidence.js";
 import { initControls, serverStatus, setServer, showConfirm } from "./controls.js";
 import {
-  HELDOUT_MAX, HELDOUT_MIN, drawLiveScenario, formatDuration, hideDeal, partitionLobby,
+  HELDOUT_MAX, HELDOUT_MIN, arenaThumb, drawLiveScenario, formatDuration, hideDeal, partitionLobby,
   renderDeal, renderLobby, storyLine,
 } from "./lobby.js";
 import { playOpening } from "./opening.js";
@@ -51,6 +51,8 @@ const els = {
   redTech: document.getElementById("redTechList"),
   blueTech: document.getElementById("blueLabelList"),
   feed: document.getElementById("feedList"),
+  storyOutcome: document.getElementById("storyOutcome"),
+  momentList: document.getElementById("momentList"),
   presentLatest: document.getElementById("presentLatest"),
   play: document.getElementById("playBtn"),
   pause: document.getElementById("pauseBtn"),
@@ -175,6 +177,7 @@ const store = {
   stageArt: null,
   spend: null,
   finalScore: null,
+  storyKey: "",
   label: "No exercise loaded",
   liveSource: null,
   liveExerciseId: null,
@@ -371,6 +374,7 @@ function render(animate) {
   renderFeed(els.feed, store.events, store.cursor, store.attackMap, onEvidenceRef, audits.byTarget, {
     autoscroll: store.mode === "live",
   });
+  renderStoryPanels(display);
   renderPresent(slice);
   els.status.textContent = statusSentence({
     latest: latestLaneEvent(slice),
@@ -408,6 +412,77 @@ function render(animate) {
   renderScoreDetails(scoreEls(), store.events, store.cursor, store.weights, store.spend, store.finalScore);
   renderEvidence({ chips: els.chips, tabs: els.tabs, viewer: els.viewer }, store.events, store.cursor, hosts);
   els.eventCount.textContent = `${store.events.length} event${store.events.length === 1 ? "" : "s"}`;
+}
+
+// Story tab panels: the honest outcome card plus the key-moment
+// timeline, each moment frozen as a real arena frame. Rebuilt only
+// when the story changes (new run or longer lane); frames are
+// static stills, so the Motion setting needs no special case.
+function renderStoryPanels(display) {
+  const key = `${store.runId}|${store.events.length}|${store.finalScore ? "end" : "live"}`;
+  if (store.storyKey === key) return;
+  store.storyKey = key;
+  const out = els.storyOutcome;
+  out.innerHTML = "";
+  out.dataset.tone = display ? display.tone : "";
+  if (!display) {
+    const idle = document.createElement("p");
+    idle.className = "empty";
+    idle.textContent = "Open an exercise to see its outcome.";
+    out.append(idle);
+  } else {
+    const badge = document.createElement("span");
+    badge.className = "lobby-outcome";
+    badge.textContent = display.label;
+    const line = document.createElement("p");
+    line.className = "story-line";
+    line.textContent = outcomeLine(display.key);
+    const meta = document.createElement("p");
+    meta.className = "lobby-meta";
+    const score = store.finalScore && typeof store.finalScore.blue_score === "number"
+      ? `Blue score ${store.finalScore.blue_score}`
+      : "Score pending";
+    meta.textContent = `${score} · ${store.events.length} moves`;
+    out.append(badge, line, meta);
+  }
+  const list = els.momentList;
+  list.innerHTML = "";
+  const moments = keyMoments(store.events);
+  if (moments.length === 0) {
+    const idle = document.createElement("li");
+    idle.className = "empty";
+    idle.textContent = "Key moments appear here once the exercise starts.";
+    list.append(idle);
+    return;
+  }
+  const card = {
+    id: store.runId || "story",
+    moves: store.events.length,
+    events: store.events,
+    layout: store.layout,
+    weights: store.weights,
+    outcome: display ? { label: display.label } : { label: "Exercise" },
+  };
+  const env = { art: store.stageArt || {}, attackMap: store.attackMap };
+  for (const moment of moments) {
+    const item = document.createElement("li");
+    item.className = "moment";
+    const frame = arenaThumb(card, env, {
+      w: 120, h: 68, cursor: moment.index + 1,
+      label: `${moment.title} on move ${moment.index + 1}`,
+    });
+    const body = document.createElement("div");
+    body.className = "moment-body";
+    const head = document.createElement("p");
+    head.className = "moment-head";
+    head.textContent = `${moment.title} · move ${moment.index + 1}`;
+    const cap = document.createElement("p");
+    cap.className = "moment-cap";
+    cap.textContent = moment.caption;
+    body.append(head, cap);
+    item.append(frame, body);
+    list.append(item);
+  }
 }
 
 function stopTimer() {
