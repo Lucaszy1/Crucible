@@ -26,8 +26,8 @@ cells only.
 
 Total ~$12.20 Meta plus ~7.6M Baseten tokens (check the invoice).
 Train and main fit one $40 day; the OK gate after train still
-holds. The optional model-red probe (step 6) adds ~$0.65 Meta plus
-~0.3M Baseten tokens.
+holds. The optional briefed-red probe (step 6) adds about $0.50
+Meta and no Baseten (scripted blue makes no model calls).
 
 ## 0. Preflight (no model spend)
 
@@ -135,22 +135,27 @@ caffeinate -i python -m crucible.bench --name stage3-xcheck \
 The cross-check uses default Spark blue on Meta (no `$BLUE` flags)
 with solver red.
 
-## 6. Model-red probe (optional, gated, after the prompt fixes)
+## 6. Model-red probe (optional, gated; briefed profile is ready)
 
-Do this only after implementing the five fixes in
-`docs/STAGE3_RED_DIAGNOSIS.md` section 4. Six episodes, no audit:
+Six episodes of briefed red against scripted blue on train seeds,
+no audit. About $0.50 Meta, no Baseten:
 
 ```bash
 caffeinate -i python -m crucible.bench --name stage3-redprobe \
-  --red model --sensors on --memory off --episodes-per-cell 2 \
+  --red model-briefed --blue scripted --sensors on --memory off \
+  --episodes-per-cell 2 \
   --scenarios "gen:1001:easy,gen:1005:medium,gen:1008:hard" \
-  --max-turns 60 --audit off --no-cache $BLUE \
+  --max-turns 60 --audit off --no-cache \
   --spend-cap-usd "$(scripts/cap.sh 3)"
+awk -F, 'NR>1 && $8=="True" {n++} END {print n+0 " intrusions of " NR-1}' \
+  runs/bench-stage3-redprobe/summary.csv
 ```
 
-Expand model red to a full cell if and only if it intrudes at
-least once here. On 0 of 6, model red stays out of the main
-evaluation and the write-up keeps the solver framing.
+Stop rule: report the intrusion count; on 0 of 6, stop and report,
+and model red stays out of the main evaluation. Expand to a full
+cell only on at least one intrusion. See
+`docs/STAGE3_RED_DIAGNOSIS.md` section 7 for the headwind caveat
+(scripted blue isolates at move 3) before concluding from a zero.
 
 ## 7. Merge and checks (no model spend, at the end)
 

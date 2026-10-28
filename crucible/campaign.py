@@ -74,7 +74,7 @@ def parse_args(argv=None):
                         help="on shows blue new sensor alerts each turn, "
                         "off leaves blue on logs alone")
     parser.add_argument("--max-turns", type=int, default=40,
-                        help="Turns per episode, capped at 40")
+                        help="Turns per episode, capped at 60")
     parser.add_argument("--blue-model", default=None,
                         help="Model id for blue (default: the blue role model)")
     parser.add_argument("--blue-base-url", default=None,

@@ -313,7 +313,7 @@ def _run_live_exercise(
             tools.restore_host(host)
         extra = {"scenario": info} if info else {}
         result = orchestrator.run_exercise(
-            red, blue, max_turns=orchestrator.MAX_TURNS,
+            red, blue, max_turns=40,  # live episodes keep the classic length
             run_path=run_path, exercise_id=exercise_id,
             audit="live",
             **extra,

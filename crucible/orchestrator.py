@@ -26,7 +26,7 @@ from crucible.agents.scripted_blue import ScriptedBlue
 from crucible.agents.scripted_red import ScriptedRed
 
 CONTAINMENT_TOOLS = ("isolate_host", "patch_service", "restore_host")
-MAX_TURNS = 40
+MAX_TURNS = 60
 
 DEFAULT_BUSINESS_WEIGHTS = {"web": 3, "app": 3, "db": 5, "workstation": 1}
 BLUE_SCORE_MAX = 100
@@ -693,7 +693,7 @@ def run_exercise(
     Each turn gives one agent a single tool call, starting with red.
     Agents that return None sit out their turn. The loop ends as soon as
     the secret is read, when both agents are finished, or when max_turns
-    moves have been attempted. Turns are capped at forty (20 moves per
+    moves have been attempted. Turns are capped at sixty (30 moves per
     team) so model exercises stay bounded. Agent errors are logged as
     events and the loop moves on, so an exercise never hangs on one bad
     turn. Before move 1 the range is restored, log scope starts, and a

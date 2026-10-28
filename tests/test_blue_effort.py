@@ -104,10 +104,11 @@ def test_effort_flag_parses_on_all_clis(module, argv):
 
 
 def test_bench_csv_appends_effort_column():
-    assert bench.CSV_FIELDS[-4] == "blue_reasoning_effort"
-    assert bench.CSV_FIELDS[-3:] == ("scenario_id", "scenario_seed",
-                                     "scenario_difficulty")
-    assert bench.CSV_FIELDS[:-4] == (
+    assert bench.CSV_FIELDS[-5] == "blue_reasoning_effort"
+    assert bench.CSV_FIELDS[-4:-1] == ("scenario_id", "scenario_seed",
+                                       "scenario_difficulty")
+    assert bench.CSV_FIELDS[-1] == "blue_profile"
+    assert bench.CSV_FIELDS[:-5] == (
         "episode", "cell", "red_profile", "sensors", "memory", "seed",
         "outcome", "intrusion", "contained_after_intrusion", "secret_read",
         "relevant_detection_delay", "detection_delay", "time_to_contain",

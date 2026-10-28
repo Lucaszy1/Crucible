@@ -37,7 +37,7 @@ def parse_args(argv=None):
         "--max-turns",
         type=int,
         default=40,
-        help="Turns to attempt, capped at 40",
+        help="Turns to attempt, capped at 60",
     )
     parser.add_argument(
         "--out",

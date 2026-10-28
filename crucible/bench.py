@@ -4,7 +4,9 @@
 Red profiles: chain runs the full intrusion chain with fixed moves and
 no model calls; noisy runs the same chain with seeded decoy probes
 mixed in; solver runs the spec-derived chain with seeded imperfection
-and no model calls; model is the existing model red team. Blue arms vary memory
+and no model calls; model is the existing model red team, and
+model-briefed is model red with an engagement scope briefing and a
+60-turn budget. Blue arms vary memory
 on or off and sensors on or off. Cells interleave round-robin so time
 effects spread
 evenly, episodes carry fixed seeds, and every episode gets the same
@@ -37,11 +39,14 @@ from pathlib import Path
 from crucible import events, llm, orchestrator, run_exercise, sandbox, tools
 from crucible.solver_red import SolverRed
 from crucible.agents import ModelBlue, ModelRed
+from crucible.agents.briefed_red import ModelBriefedRed
+from crucible.agents.scripted_blue import ScriptedBlue
 from crucible.agents import referee
 from crucible.scenarios import select, stack
 from crucible.scenarios.schema import DIFFICULTIES
 
-RED_PROFILES = ("chain", "noisy", "model", "solver")
+RED_PROFILES = ("chain", "noisy", "model", "solver", "model-briefed")
+BLUE_PROFILES = ("model", "scripted")
 SENSOR_MODES = ("on", "off")
 MEMORY_MODES = ("on", "off")
 
@@ -66,6 +71,7 @@ CSV_FIELDS = (
     "scenario_id",
     "scenario_seed",
     "scenario_difficulty",
+    "blue_profile",
 )
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -276,7 +282,11 @@ def parse_args(argv=None):
     parser.add_argument("--name", required=True, help="Benchmark name")
     parser.add_argument("--red", default="chain,noisy",
                         help="Comma-separated red profiles: chain, noisy, "
-                        "model, solver")
+                        "model, solver, model-briefed")
+    parser.add_argument("--blue", default="model", choices=BLUE_PROFILES,
+                        help="Blue profile for every cell: model (default) "
+                        "or scripted (zero-cost baseline). One blue per "
+                        "benchmark.")
     parser.add_argument("--sensors", default="on,off",
                         help="Comma-separated blue sensor modes: on, off")
     parser.add_argument("--memory", default="off",
@@ -300,7 +310,7 @@ def parse_args(argv=None):
                         help="Comma-separated cell keys to audit when "
                         "--audit end (default: audit every cell)")
     parser.add_argument("--max-turns", type=int, default=40,
-                        help="Turns per episode, capped at 40")
+                        help="Turns per episode, capped at 60")
     parser.add_argument("--no-cache", action="store_true",
                         help="Skip the model response cache for this run")
     parser.add_argument("--spend-cap-usd", type=float, default=None,
@@ -455,6 +465,11 @@ def _open_bench(name: str, cells: list, per_cell: int, args,
             print(f"bench: resume audit mode differs from the saved "
                   f"benchmark {name!r}; aborting", file=sys.stderr)
             return None
+        saved_blue = state.get("blue_profile")
+        if saved_blue is not None and saved_blue != args.blue:
+            print(f"bench: resume blue profile differs from the saved "
+                  f"benchmark {name!r}; aborting", file=sys.stderr)
+            return None
         rows = list(state.get("episodes", []) or [])
         for cell in cells:
             playbooks[cell["key"]] = referee.load_playbook(
@@ -528,14 +543,20 @@ def _run_episode(bench: dict, cell: dict, rep: int, args, client,
         red = NoisyRed(seed)
     elif cell["red"] == "solver":
         red = SolverRed(seed)
+    elif cell["red"] == "model-briefed":
+        red = ModelBriefedRed(exercise_id=exercise_id,
+                              use_cache=not args.no_cache, seed=seed)
     else:
         red = ModelRed(exercise_id=exercise_id,
                        use_cache=not args.no_cache, seed=seed)
-    blue = ModelBlue(exercise_id=exercise_id,
-                     use_cache=not args.no_cache,
-                     playbook=rules if cell["memory"] == "on" else None,
-                     seed=seed, client=client, model=args.blue_model,
-                     reasoning_effort=args.blue_reasoning_effort)
+    if args.blue == "scripted":
+        blue = ScriptedBlue()
+    else:
+        blue = ModelBlue(exercise_id=exercise_id,
+                         use_cache=not args.no_cache,
+                         playbook=rules if cell["memory"] == "on" else None,
+                         seed=seed, client=client, model=args.blue_model,
+                         reasoning_effort=args.blue_reasoning_effort)
     for host in sandbox.active_hosts():
         tools.restore_host(host)
     spend_start = run_exercise._spend_line_count()
@@ -586,6 +607,7 @@ def _run_episode(bench: dict, cell: dict, rep: int, args, client,
         "scenario_id": (scenario or {}).get("scenario_id", "classic"),
         "scenario_seed": (scenario or {}).get("seed"),
         "scenario_difficulty": (scenario or {}).get("difficulty"),
+        "blue_profile": args.blue,
     })
     latest = bench["rows"][-1]
     print(f"{exercise_id}: outcome={latest['outcome']} "
@@ -600,6 +622,7 @@ def _run_episode(bench: dict, cell: dict, rep: int, args, client,
         "playbook_frozen": bool(args.freeze_playbook),
         "audit": args.audit,
         "audit_cells": bench.get("audit_cells"),
+        "blue_profile": args.blue,
         "episodes": bench["rows"],
     })
     return result

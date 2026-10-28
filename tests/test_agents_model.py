@@ -579,14 +579,14 @@ def test_exercise_turn_cap(tmp_path, monkeypatch):
     monkeypatch.setattr(tools, "begin_episode",
                         lambda: {"ok": True, "attempts": 1, "checks": {}})
     run_path = tmp_path / "capped.jsonl"
-    result = orchestrator.run_exercise(_Always(), _AlwaysBlue(), max_turns=50,
+    result = orchestrator.run_exercise(_Always(), _AlwaysBlue(), max_turns=70,
                                        run_path=run_path)
-    assert len(result["events"]) == 41
-    assert result["score"]["turns_used"] == 40
+    assert len(result["events"]) == 61
+    assert result["score"]["turns_used"] == 60
 
 
-def test_default_turn_cap_is_forty():
-    assert orchestrator.MAX_TURNS == 40
+def test_default_turn_cap_is_sixty_with_classic_model_default():
+    assert orchestrator.MAX_TURNS == 60
     assert _common.DEFAULT_MAX_TURNS == 40
     messages = red_build_messages(1, [])
     assert "turn 1 of 40" in messages[1]["content"].lower()
