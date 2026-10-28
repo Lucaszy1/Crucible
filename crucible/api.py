@@ -293,12 +293,13 @@ def _run_live_exercise(
     action. Tests replace this function with a fake runner;
     production always uses this real one.
     """
-    red, blue = _build_agents(agents, exercise_id)
-
     try:
         info = stack.activate(scenario_key)
     except ValueError as exc:
         raise RuntimeError(f"scenario activation failed: {exc}") from exc
+    # Agents after activation: ScriptedRed snapshots the active spec
+    # at construction, like run_exercise and batch already do.
+    red, blue = _build_agents(agents, exercise_id)
     publish({"type": "status", "phase": "booting", "exercise_id": exercise_id})
     try:
         sandbox.start()

@@ -473,3 +473,39 @@ def test_live_exercise_auditor_ignores_cache(tmp_path, monkeypatch):
     assert seen["auditor_use_cache"] is False
     assert result["exercise_cost"] == 0.0
     assert result["spend_cap_hit"] is False
+
+
+def test_live_exercise_builds_agents_after_activate(tmp_path, monkeypatch):
+    from crucible import orchestrator, sandbox, tools, voice_api
+    from crucible.scenarios import stack
+
+    order = []
+    real_build = api._build_agents
+
+    def spy_activate(key):
+        order.append("activate")
+        return None
+
+    def spy_build(agents, exercise_id):
+        order.append("build")
+        return real_build(agents, exercise_id)
+
+    monkeypatch.setattr(stack, "activate", spy_activate)
+    monkeypatch.setattr(stack, "deactivate", lambda: None)
+    monkeypatch.setattr(api, "_build_agents", spy_build)
+    monkeypatch.setattr(sandbox, "start", lambda: {"web": True})
+    monkeypatch.setattr(sandbox, "stop", lambda: None)
+    monkeypatch.setattr(sandbox, "active_hosts", lambda: [])
+    monkeypatch.setattr(tools, "reset_state", lambda: None)
+    monkeypatch.setattr(voice_api, "detach_queue", lambda: None)
+    monkeypatch.setattr(llm, "SPEND_FILE", tmp_path / "spend.jsonl")
+    monkeypatch.setattr(
+        orchestrator, "run_exercise",
+        lambda *a, **k: {"events": [], "score": {}})
+
+    api._run_live_exercise(
+        "scripted", "live-2", tmp_path / "live-2.jsonl",
+        lambda message: None)
+    # ScriptedRed snapshots the active spec at construction, so it
+    # must be built after activation (as in run_exercise and batch).
+    assert order == ["activate", "build"]
