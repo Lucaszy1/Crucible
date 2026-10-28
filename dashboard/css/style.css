@@ -799,6 +799,10 @@ canvas.lobby-thumb {
   display: block; border-radius: 6px; background: #10131a;
   border: 1px solid var(--border); max-width: 100%;
 }
+.thumb-slot { position: relative; display: inline-block; width: 120px; height: 68px; flex: none; }
+.thumb-slot > canvas.lobby-thumb {
+  position: absolute; inset: 0; width: 120px; height: 68px;
+}
 canvas.lobby-thumb:focus-visible { outline: 2px solid #8fb8ff; outline-offset: 2px; }
 
 /* Move timeline strip along the bottom edge of the stage. */

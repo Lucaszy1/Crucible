@@ -223,8 +223,10 @@ function featureCard(model, callbacks, env) {
 }
 
 // Compact archive card: outcome and shape, never a bare score.
-// Archive rows carry no canvas: a static outcome glyph holds the
-// slot, and a real thumbnail mounts only on hover or focus.
+// Archive rows mount a real arena frame only while on screen: a
+// static outcome glyph holds the slot, a canvas mounts over it on
+// entry (or hover/focus), and the canvas is released on exit. The
+// bitmap stays cached, so scrolling back blits from memory.
 function archiveCard(model, callbacks, env) {
   const el = document.createElement("article");
   el.className = "lobby-card";
@@ -247,21 +249,43 @@ function archiveCard(model, callbacks, env) {
   }
   const foot = document.createElement("div");
   foot.className = "lobby-foot";
-  const glyph = outcomeGlyph(model.outcome);
-  glyph.classList.add("lobby-states");
-  foot.append(glyph, playButton(model.id, "Play", callbacks));
+  const slot = document.createElement("span");
+  slot.className = "lobby-states thumb-slot";
+  slot.append(outcomeGlyph(model.outcome));
+  foot.append(slot, playButton(model.id, "Play", callbacks));
+  let live = null;
   const upgrade = () => {
-    if (el._thumbUpgraded) return;
-    el._thumbUpgraded = true;
-    const states = arenaThumb(model, env, {
+    if (live) return;
+    live = arenaThumb(model, env, {
       w: 120, h: 68,
       label: `Arena frame for ${model.id}: ${model.outcome.label}`,
     });
-    states.classList.add("lobby-states");
-    foot.replaceChild(states, glyph);
+    live.classList.add("lobby-states");
+    slot.append(live);
+  };
+  const downgrade = () => {
+    if (!live) return;
+    if (live._thumbSeen) {
+      live._thumbSeen.disconnect();
+      live._thumbSeen = null;
+    }
+    slot.removeChild(live);
+    live = null;
   };
   el.addEventListener("mouseenter", upgrade);
   el.addEventListener("focusin", upgrade);
+  if (typeof IntersectionObserver === "function") {
+    const watch = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) upgrade();
+        else downgrade();
+      }
+    }, { rootMargin: "80px" });
+    watch.observe(el);
+    el._thumbWatch = watch;
+  } else {
+    upgrade();
+  }
   el.append(head, meta);
   if (model.flags && model.flags.length > 0) el.append(badgesRow(model.flags));
   el.append(foot);
