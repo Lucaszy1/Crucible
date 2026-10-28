@@ -3,7 +3,7 @@ import { fetchAttackMap, fetchCampaign, fetchCampaigns, fetchConfig, fetchFeatur
 import { renderLearning } from "./learn.js";
 import {
   acceptLiveTraffic, autoplayQueue, bootStale, bootTimedOut, displayOutcome, endCardStats, eventHost,
-  errorRetryTarget, finishSide, followOpensLive, motionReduced, motionSetting, outcomeLine,
+  errorRetryTarget, finishSide, followOpensLive, motionReduced, motionSetting, normalizeActor, outcomeLine,
   phaseLabel, rankFeatured, reduceHostStates, runFlags, scoreEvents, streamDead,
 } from "./state.js";
 import { describeEvent, keyMoments, statusSentence } from "./story.js";
@@ -23,6 +23,7 @@ import { playOpening } from "./opening.js";
 import { initThoughtHeads, renderThoughts, setThoughtsCollapsed } from "./thoughts.js";
 import { endCardVisible, hideEndCard, initEndCard, setEndNext, showEndCard } from "./endcard.js";
 import { clearArenaThumbCache, thumbnailState } from "./thumbnail.js";
+import { initCommandBar } from "./commandbar.js";
 import {
   arenaNotify, cancelArena, firstAccessStinger, flashArenaHost, glitchStinger,
   initArena, renderArenaStatic, setArenaActive, setArenaLayout, toggleArenaSound,
@@ -138,6 +139,18 @@ const els = {
   settingsPop: document.getElementById("settingsPop"),
   classicBox: document.getElementById("classicBox"),
   followBox: document.getElementById("followBox"),
+  cmdBar: document.getElementById("cmdBar"),
+  cmdMic: document.getElementById("cmdMic"),
+  cmdInput: document.getElementById("cmdInput"),
+  cmdSend: document.getElementById("cmdSend"),
+  cmdDemo: document.getElementById("cmdDemo"),
+  cmdTakeover: document.getElementById("cmdTakeover"),
+  cmdTranscript: document.getElementById("cmdTranscript"),
+  cmdPreview: document.getElementById("cmdPreview"),
+  cmdPreviewLine: document.getElementById("cmdPreviewLine"),
+  cmdConfirm: document.getElementById("cmdConfirm"),
+  cmdSpend: document.getElementById("cmdSpend"),
+  cmdNote: document.getElementById("cmdNote"),
 };
 
 const controls = {
@@ -222,6 +235,7 @@ function reducedMotion() {
 let mapRefs = null;
 let arenaRefs = null;
 let stageRefs = null;
+let commandBar = null;
 
 // The cinematic stage and the flat arena share one canvas and one
 // call shape; the toggle picks which one paints and animates.
@@ -847,7 +861,7 @@ function onLiveMessage(msg) {
       const name = store.liveExerciseId ? `Live exercise ${store.liveExerciseId}` : "Live exercise";
       setMode("live", name);
     }
-    store.events.push(msg.event);
+    store.events.push(normalizeActor(msg.event));
     store.cursor = store.events.length;
     clearBootTimer();
     if (store.firstAuthIndex === null) {
@@ -1159,6 +1173,11 @@ async function refreshRuns() {
   await Promise.all(workers);
   store.lobby.loading = false;
   paintLobby();
+  // A live run ends while the shelf reloads, so the end card opens
+  // with no Next yet; re-arm it once the ranks are known.
+  if (endCardVisible(endEls())) {
+    endEls().next.disabled = !nextFeaturedId();
+  }
 }
 
 function watchReplay() {
@@ -1455,6 +1474,21 @@ async function boot() {
     onPace: (pace) => applyPace(pace),
     onMotion: (mode) => applyMotionSetting(mode),
   });
+  commandBar = initCommandBar(
+    {
+      bar: els.cmdBar, mic: els.cmdMic, input: els.cmdInput,
+      send: els.cmdSend, demo: els.cmdDemo, takeover: els.cmdTakeover,
+      transcript: els.cmdTranscript, preview: els.cmdPreview,
+      previewLine: els.cmdPreviewLine, confirm: els.cmdConfirm,
+      spend: els.cmdSpend, note: els.cmdNote,
+    },
+    {
+      hosts: () => (store.layout && store.layout.hosts
+        ? store.layout.hosts.map((h) => h.id) : []),
+      jewel: () => (store.layout ? store.layout.jewel_host : null),
+    },
+  );
+  if (commandBar) commandBar.start();
   applyMotionSetting(motionSetting(), false);
   let savedPace = "standard";
   try {

@@ -120,6 +120,33 @@ describe("describeEvent edge cases", () => {
   });
 });
 
+describe("describeEvent human defender", () => {
+  const cases = [
+    [ev("human", "isolate_host", { host: "wren" }, { ok: true }), "Human defender isolated wren."],
+    [ev("human", "isolate_host", { host: "wren" }, { ok: false, error: "busy" }),
+      "Human defender tried to isolate wren but it failed (busy)."],
+    [ev("human", "read_logs", { host: "wren" }, { ok: true }), "Human defender checked recent logs on wren."],
+    [ev("human", "scan_host", { host: "wren" }, { ok: true, running: true }),
+      "Human defender checked whether wren is up."],
+    [ev("human", "report_finding", { text: "odd" }, { ok: true }), "Human defender reported: odd"],
+    [{ ...ev("blue", "patch_service", { host: "web", service: "webapp" }, { ok: true }), human: true },
+      "Human defender patched webapp on web."],
+  ];
+  for (const [event, want] of cases) {
+    it(`${event.tool} names the defender`, () => {
+      const got = describeEvent(event);
+      assert.equal(got, want);
+      assertPlain(got);
+    });
+  }
+
+  it("keeps blue scans on the blue side", () => {
+    assert.equal(
+      describeEvent(ev("blue", "scan_host", { host: "web" }, { ok: true, running: true })),
+      "Blue checked whether web is up.");
+  });
+});
+
 describe("statusSentence", () => {
   it("narrates the latest move", () => {
     assert.equal(

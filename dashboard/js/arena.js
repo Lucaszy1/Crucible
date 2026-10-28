@@ -1395,6 +1395,15 @@ function updateHud(refs) {
     }
     if (hud.capText) hud.capText.textContent = snap.caption;
     if (hud.capSub) hud.capSub.textContent = snap.sub;
+    if (hud.cap) {
+      hud.cap.classList.remove("mini");
+      if (refs.capTimer) clearTimeout(refs.capTimer);
+      const cap = hud.cap;
+      refs.capTimer = setTimeout(() => {
+        cap.classList.add("mini");
+        if (refs) refs.capTimer = 0;
+      }, 2000);
+    }
     if (hud.cap && !reducedMotion()) {
       hud.cap.classList.remove("slam");
       void hud.cap.offsetWidth;
@@ -1943,6 +1952,10 @@ export function cancelArena(refs) {
   refs.trauma = 0;
   refs.camTarget = { ...CAM_HOME };
   hideAuditor(refs);
+  if (refs.capTimer) {
+    clearTimeout(refs.capTimer);
+    refs.capTimer = 0;
+  }
   if (refs.canvas) refs.canvas.classList.remove("glitch");
 }
 

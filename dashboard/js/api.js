@@ -1,4 +1,5 @@
 // Thin fetch helpers for the Operations Center API.
+import { normalizeActor } from "./state.js";
 
 async function getJson(path) {
   const res = await fetch(path);
@@ -10,8 +11,66 @@ export function fetchRuns() {
   return getJson("/api/runs");
 }
 
-export function fetchRun(runId) {
-  return getJson(`/api/runs/${encodeURIComponent(runId)}`);
+export async function fetchRun(runId) {
+  const data = await getJson(`/api/runs/${encodeURIComponent(runId)}`);
+  // Human defender turns ride the blue lane in every view.
+  if (data && Array.isArray(data.events)) {
+    data.events = data.events.map((ev) => normalizeActor(ev));
+  }
+  return data;
+}
+
+// Defender-order routes (relative URLs, same origin as the page).
+async function postJson(path, body) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = typeof data.detail === "string" ? data.detail : null;
+    const err = new Error(detail || `${path} returned ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+export function parseOrder(text) {
+  return postJson("/api/command/parse", { text });
+}
+
+export function sendOrder(text, source, action) {
+  return postJson("/api/command", { text, source, action });
+}
+
+export function sendDemo(index) {
+  return postJson("/api/command/demo", index === undefined ? {} : { index });
+}
+
+export function sendTakeover(take) {
+  return postJson("/api/takeover", { take: Boolean(take) });
+}
+
+export function fetchCommandState() {
+  return getJson("/api/command/state");
+}
+
+export async function sendAudio(wavBytes) {
+  const res = await fetch("/api/audio", {
+    method: "POST",
+    headers: { "Content-Type": "audio/wav" },
+    body: wavBytes,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = typeof data.detail === "string" ? data.detail : null;
+    const err = new Error(detail || `/api/audio returned ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
 }
 
 export function fetchStatus() {

@@ -1288,6 +1288,17 @@ function updateStageHud(refs) {
     }
     if (hud.capText) hud.capText.textContent = snap.caption;
     if (hud.capSub) hud.capSub.textContent = snap.sub;
+    // The big caption yields the stage after 2s: it shrinks to a
+    // slim strip until the next move replaces it.
+    if (hud.cap) {
+      hud.cap.classList.remove("mini");
+      if (refs.capTimer) clearTimeout(refs.capTimer);
+      const cap = hud.cap;
+      refs.capTimer = setTimeout(() => {
+        cap.classList.add("mini");
+        if (refs) refs.capTimer = 0;
+      }, 2000);
+    }
   }
 }
 
@@ -1390,6 +1401,10 @@ export function cancelStage(refs) {
   if (refs.audTimer) {
     clearTimeout(refs.audTimer);
     refs.audTimer = 0;
+  }
+  if (refs.capTimer) {
+    clearTimeout(refs.capTimer);
+    refs.capTimer = 0;
   }
 }
 

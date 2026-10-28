@@ -18,7 +18,9 @@ export function initEndCard(els, callbacks) {
 export function showEndCard(els, stats, justifiedPct, nextId) {
   els.root.hidden = false;
   els.root.dataset.tone = stats.tone;
-  els.eyebrow.textContent = "Exercise complete";
+  els.eyebrow.textContent = stats && stats.assisted
+    ? "Exercise complete · Human-assisted"
+    : "Exercise complete";
   els.title.textContent = stats.label;
   els.score.textContent = `Blue score ${stats.blueScore ?? "--"}`;
   els.stats.innerHTML = "";

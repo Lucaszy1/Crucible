@@ -9,6 +9,20 @@ export const DEFAULT_WEIGHTS = { web: 3, app: 3, db: 5, workstation: 1 };
 
 export const RECON_TOOLS = ["scan_host", "http_request", "list_files"];
 
+// Defender side: the blue agent or a human defender. Human turns log
+// under actor "human"; every blue-side check goes through here so
+// assisted runs score and display exactly like agent runs.
+export function isBlueTeam(actor) {
+  return actor === "blue" || actor === "human";
+}
+
+// Normalize one raw event for the views: human turns ride the blue
+// lane everywhere and keep a human flag for the assisted label.
+export function normalizeActor(ev) {
+  if (!ev || ev.actor !== "human") return ev;
+  return { ...ev, actor: "blue", human: true };
+}
+
 // Single shared host-state reducer. Every panel derives node state from
 // the event stream through this function and nothing else. Hosts
 // default to the classic four; generated exercises pass their own.
@@ -30,7 +44,7 @@ export function reduceHostStates(eventList, hosts) {
       } else if (RECON_TOOLS.includes(tool) && ok) {
         if (states[host] === "clean" || states[host] === "restored") states[host] = "probed";
       }
-    } else if (ev.actor === "blue" && ok) {
+    } else if (isBlueTeam(ev.actor) && ok) {
       if (tool === "isolate_host" || tool === "patch_service") {
         states[host] = "isolated";
       } else if (tool === "restore_host") {
@@ -93,7 +107,7 @@ export function scoreEvents(eventList, weights) {
   let timeToDetect = null;
   list.forEach((ev, i) => {
     if (timeToDetect !== null) return;
-    if (ev.actor === "blue" && ev.tool === "report_finding" && (ev.result || {}).ok === true) {
+    if (isBlueTeam(ev.actor) && ev.tool === "report_finding" && (ev.result || {}).ok === true) {
       timeToDetect = i + 1;
     }
   });
@@ -104,7 +118,7 @@ export function scoreEvents(eventList, weights) {
   let timeToContain = null;
   if (compromised.size > 0 && firstCompromiseAt !== null) {
     list.forEach((ev, i) => {
-      if (timeToContain !== null || i + 1 < firstCompromiseAt || ev.actor !== "blue") return;
+      if (timeToContain !== null || i + 1 < firstCompromiseAt || !isBlueTeam(ev.actor)) return;
       if (!CONTAINMENT_TOOLS.includes(ev.tool)) return;
       if ((ev.result || {}).ok === true) timeToContain = i + 1;
     });
@@ -112,7 +126,7 @@ export function scoreEvents(eventList, weights) {
 
   let blueActed = false;
   for (const ev of list) {
-    if (ev.actor !== "blue" || (ev.result || {}).ok !== true) continue;
+    if (!isBlueTeam(ev.actor) || (ev.result || {}).ok !== true) continue;
     if (ev.tool === "report_finding" || CONTAINMENT_TOOLS.includes(ev.tool)) blueActed = true;
   }
   const outcome = secret ? "red_succeeded" : blueActed ? "blue_held" : "stalemate";
@@ -147,6 +161,7 @@ export function scoreEvents(eventList, weights) {
     time_to_detect: timeToDetect,
     detection_delay: detectionDelay,
     time_to_contain: timeToContain,
+    assisted: list.some((ev) => ev && (ev.actor === "human" || ev.human === true)),
     hosts_compromised: compromised.size,
     compromised_hosts: [...compromised].sort(),
     secret_exfiltrated: secret,
@@ -421,7 +436,7 @@ function redGotIn(eventList) {
 
 function blueContained(eventList) {
   for (const ev of eventList || []) {
-    if (!ev || ev.actor !== "blue") continue;
+    if (!ev || !isBlueTeam(ev.actor)) continue;
     if (!DISPLAY_CONTAINMENT.includes(ev.tool)) continue;
     if ((ev.result || {}).ok === true) return true;
   }
@@ -430,7 +445,7 @@ function blueContained(eventList) {
 
 function blueActed(eventList) {
   for (const ev of eventList || []) {
-    if (!ev || ev.actor !== "blue" || (ev.result || {}).ok !== true) continue;
+    if (!ev || !isBlueTeam(ev.actor) || (ev.result || {}).ok !== true) continue;
     if (ev.tool === "report_finding" || CONTAINMENT_TOOLS.includes(ev.tool)) return true;
   }
   return false;
@@ -504,7 +519,7 @@ export function controlBar(fullEvents, sliceEvents) {
   const redShare = prog.total > 0 ? lit / prog.total : 0;
   let containments = 0;
   for (const ev of slice) {
-    if (ev && ev.actor === "blue" && (ev.result || {}).ok === true &&
+    if (ev && isBlueTeam(ev.actor) && (ev.result || {}).ok === true &&
         DISPLAY_CONTAINMENT.includes(ev.tool)) containments += 1;
   }
   const blueShare = Math.min(1, containments / 2);
@@ -642,13 +657,15 @@ export function endCardStats(eventList, score, weights) {
   let containMove = null;
   for (let i = 0; i < lane.length; i += 1) {
     const ev = lane[i];
-    if (ev.actor !== "blue" || !DISPLAY_CONTAINMENT.includes(ev.tool)) continue;
+    if (!isBlueTeam(ev.actor) || !DISPLAY_CONTAINMENT.includes(ev.tool)) continue;
     if ((ev.result || {}).ok === true) {
       containMove = i + 1;
       break;
     }
   }
   const detect = shown.detection_delay;
+  const assisted = shown.assisted === true || live.assisted === true ||
+    list.some((ev) => ev && (ev.actor === "human" || ev.human === true));
   return {
     key: out.key,
     label: out.label,
@@ -658,6 +675,7 @@ export function endCardStats(eventList, score, weights) {
     containMove,
     downtimePct: Number(shown.downtime_pct ?? live.downtime_pct ?? 0),
     explanation: outcomeLine(out.key),
+    assisted,
   };
 }
 

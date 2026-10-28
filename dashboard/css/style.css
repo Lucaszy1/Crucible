@@ -597,6 +597,16 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
 #arenaCapSub { font-size: clamp(10px, 1.15cqw, 15px); line-height: 1.4; color: #8791a3; max-width: 70ch; }
 #arenaCap.slam #arenaCapBody, #arenaCap.slam #arenaCapTag { animation: arenaSlam .32s cubic-bezier(.2,1.4,.4,1) both; }
 @keyframes arenaSlam { from { transform: translateY(34px) scale(1.08); opacity: 0; } to { transform: none; opacity: 1; } }
+/* Two seconds after a move, the caption shrinks to a slim strip so
+   the stage stays visible until the next caption replaces it. */
+#arenaCap.mini { min-height: 0; }
+#arenaCap.mini #arenaCapBody { padding-top: 4px; padding-bottom: 4px; gap: 0; }
+#arenaCap.mini #arenaCapText { font-size: clamp(12px, 1.6cqw, 18px); }
+#arenaCap.mini #arenaCapSub { display: none; }
+#arenaCap.mini #arenaCapTag { font-size: clamp(11px, 1.4cqw, 16px); width: clamp(52px, 8cqw, 110px); }
+@media (prefers-reduced-motion: reduce) {
+  #arenaCap.mini #arenaCapBody, #arenaCap.mini #arenaCapTag { animation: none; }
+}
 /* Auditor verdict: docked in the right rail under the blue
    thought panel, off the canvas by construction, so it can never
    cover hosts or the Guardian. */
@@ -854,6 +864,36 @@ canvas.lobby-thumb:focus-visible { outline: 2px solid #8fb8ff; outline-offset: 2
 .strip-pip[data-verdict] { outline: 2px solid #ffc83d; outline-offset: 1px; }
 .strip-pip:disabled { cursor: default; }
 .strip-verdict { display: none; }
+
+/* Defender command bar: speak or type orders during a live run.
+   Sits under the move strip, only while a live queue is attached. */
+.cmd-bar {
+  width: min(100%, calc((100vh - 306px) * 16 / 9));
+  margin: 6px auto 0; padding: 8px 10px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.cmd-bar[hidden] { display: none; }
+.cmd-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.cmd-input {
+  flex: 1 1 220px; min-width: 0; padding: 6px 10px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; font-size: 14px;
+}
+#cmdMic.live { background: var(--red); border-color: var(--red); color: #fff; }
+.cmd-transcript { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
+.cmd-preview {
+  margin-top: 6px; padding: 6px 10px; font-size: 14px;
+  background: var(--bg); border: 1px dashed var(--border); border-radius: 8px;
+}
+.cmd-confirm { margin-left: 10px; font-size: 12px; color: var(--muted); }
+.cmd-meta { margin-top: 6px; }
+.cmd-spend { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.cmd-note { font-size: 13px; }
+.cmd-bar :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (max-width: 560px) {
+  .cmd-input { flex-basis: 100%; }
+}
 
 /* Thought streams: typed reasoning in the page margins beside the
    stage, one panel per side. Flow layout keeps them off the canvas

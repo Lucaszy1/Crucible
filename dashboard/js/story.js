@@ -26,16 +26,25 @@ function failText(ev) {
   return err ? ` (${err})` : "";
 }
 
+// Tools with their own sentence below; anything else a human says
+// stays an operator note.
+const TOOL_SENTENCES = new Set([
+  "scan_host", "http_request", "try_credential", "read_file",
+  "list_files", "report_finding", "read_logs", "list_processes",
+  "wait", "block_ip", "isolate_host", "patch_service", "restore_host",
+]);
+
 // One plain sentence per tool event, using only fields in the event.
 export function describeEvent(ev) {
   if (!ev || typeof ev !== "object") return "Something happened.";
-  const who = actorName(ev);
+  const humanTook = ev.actor === "human" || ev.human === true;
+  const who = humanTook ? "Human defender" : actorName(ev);
   const host = hostOf(ev);
   const args = ev.args || {};
   const result = ev.result || {};
   const tool = ev.tool || "unknown";
 
-  if (ev.actor === "human") {
+  if (ev.actor === "human" && !TOOL_SENTENCES.has(tool)) {
     const said = args.text || args.command || result.text || "";
     const clipped = String(said).slice(0, 120);
     return clipped ? `Operator note: ${clipped}` : "Operator added a note.";
@@ -56,6 +65,11 @@ export function describeEvent(ev) {
 
   switch (tool) {
     case "scan_host":
+      if (ev.actor === "blue" || humanTook) {
+        if (failed(ev)) return `${who} tried to check ${host} but the check failed${failText(ev)}.`;
+        if (result.running === false) return `${who} checked ${host}, which is down.`;
+        return `${who} checked whether ${host} is up.`;
+      }
       if (failed(ev)) return `Red tried to check ${host} but the check failed${failText(ev)}.`;
       if (result.running === false) return `Red checked ${host}, which is down.`;
       return `Red is checking whether ${host} is up.`;
@@ -87,33 +101,34 @@ export function describeEvent(ev) {
     }
     case "report_finding": {
       const text = String(args.text || "").slice(0, 90);
-      if (who === "Blue") return text ? `Blue reported: ${text}` : "Blue reported a finding.";
+      if (who === "Blue" || humanTook) return text ? `${who} reported: ${text}` : `${who} reported a finding.`;
       return text ? `Red noted: ${text}` : "Red recorded a note.";
     }
     case "read_logs":
-      if (failed(ev)) return `Blue tried to check logs on ${host} but could not${failText(ev)}.`;
-      return `Blue checked recent logs on ${host}.`;
+      if (failed(ev)) return `${who} tried to check logs on ${host} but could not${failText(ev)}.`;
+      return `${who} checked recent logs on ${host}.`;
     case "list_processes":
-      if (failed(ev)) return `Blue tried to check programs on ${host} but could not${failText(ev)}.`;
-      return `Blue checked running programs on ${host}.`;
+      if (failed(ev)) return `${who} tried to check programs on ${host} but could not${failText(ev)}.`;
+      return `${who} checked running programs on ${host}.`;
     case "wait":
-      return "Blue waited this round.";
+      return `${who} waited this round.`;
     case "block_ip": {
       const ip = args.ip || result.ip || "an address";
-      if (failed(ev)) return `Blue tried to block ${ip} but it failed${failText(ev)}.`;
-      return `Blue blocked network traffic from ${ip}.`;
+      if (failed(ev)) return `${who} tried to block ${ip} but it failed${failText(ev)}.`;
+      return `${who} blocked network traffic from ${ip}.`;
     }
     case "isolate_host":
-      if (failed(ev)) return `Blue tried to isolate ${host} but it failed${failText(ev)}.`;
-      return `Blue isolated ${host}.`;
+      if (failed(ev)) return `${who} tried to isolate ${host} but it failed${failText(ev)}.`;
+      return `${who} isolated ${host}.`;
     case "patch_service": {
       const service = args.service || result.service || "a service";
-      if (failed(ev)) return `Blue tried to patch ${service} on ${host} but it failed${failText(ev)}.`;
-      return `Blue patched ${service} on ${host}.`;
+      if (failed(ev)) return `${who} tried to patch ${service} on ${host} but it failed${failText(ev)}.`;
+      return `${who} patched ${service} on ${host}.`;
     }
-    case "restore_host":
-      if (failed(ev)) return `Blue tried to restore ${host} but it failed${failText(ev)}.`;
-      return `Blue restored ${host}.`;
+    case "restore_host": {
+      if (failed(ev)) return `${who} tried to restore ${host} but it failed${failText(ev)}.`;
+      return `${who} restored ${host}.`;
+    }
     default:
       if (failed(ev)) return `${who} tried ${tool} but it failed${failText(ev)}.`;
       return `${who} ran ${tool}.`;

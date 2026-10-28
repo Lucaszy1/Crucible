@@ -16,8 +16,10 @@ import {
   errorRetryTarget,
   finishSide,
   followOpensLive,
+  isBlueTeam,
   motionReduced,
   motionSetting,
+  normalizeActor,
   outcomeLine,
   phaseLabel,
   rankFeatured,
@@ -252,6 +254,48 @@ describe("endCardStats", () => {
     const stats = endCardStats(events, null, null);
     assert.equal(stats.key, "secret-exposed");
     assert.equal(stats.blueScore, 0);
+  });
+
+  it("marks human-assisted runs from the score or the events", () => {
+    const humanIsolate = ev("human", "isolate_host", { host: "app" }, { ok: true, host: "app" });
+    const events = [AUTH_APP(), humanIsolate];
+    const stats = endCardStats(events, null, null);
+    assert.equal(stats.key, "contained");
+    assert.equal(stats.containMove, 2);
+    assert.equal(stats.assisted, true);
+    const flagged = endCardStats([AUTH_APP()], {
+      outcome: "blue_held", blue_score: 90, downtime_pct: 1,
+      detection_delay: null, time_to_contain: null, assisted: true,
+    }, null);
+    assert.equal(flagged.assisted, true);
+    const plain = endCardStats([AUTH_APP(), ISOLATE("app")], null, null);
+    assert.equal(plain.assisted, false);
+  });
+});
+
+describe("human defender side", () => {
+  it("treats human and blue as one defending side", () => {
+    assert.equal(isBlueTeam("blue"), true);
+    assert.equal(isBlueTeam("human"), true);
+    assert.equal(isBlueTeam("red"), false);
+    assert.equal(isBlueTeam("auditor"), false);
+  });
+
+  it("normalizes human turns onto the blue lane with a flag", () => {
+    const raw = ev("human", "isolate_host", { host: "wren" }, { ok: true });
+    const view = normalizeActor(raw);
+    assert.equal(view.actor, "blue");
+    assert.equal(view.human, true);
+    assert.equal(raw.actor, "human");
+    const red = ev("red", "scan_host", {}, { ok: true });
+    assert.equal(normalizeActor(red), red);
+  });
+
+  it("scores human containment and detection like blue", () => {
+    const humanReport = ev("human", "report_finding", { text: "odd" }, { ok: true });
+    const humanIsolate = ev("human", "isolate_host", { host: "app" }, { ok: true, host: "app" });
+    assert.equal(displayOutcome([AUTH_APP(), humanReport, humanIsolate]).key, "contained");
+    assert.equal(displayOutcome([FAIL_AUTH(), humanReport]).key, "no-intrusion");
   });
 });
 
