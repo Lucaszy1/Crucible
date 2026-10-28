@@ -106,6 +106,51 @@ def test_resolve_run_still_rejects_traversal(client, tmp_runs):
     assert client.get("/api/runs/nope").status_code == 404
 
 
+def _held_copy(path):
+    """Rewrite the fixture with its secret reads failed: blue_held."""
+    held = []
+    for line in FIXTURE.read_text(encoding="utf-8").splitlines():
+        event = json.loads(line)
+        result = event.get("result") or {}
+        if (event.get("actor") == "red" and event.get("tool") == "read_file"
+                and str(result.get("path", "")).startswith("/secret/")):
+            result["ok"] = False
+        held.append(json.dumps(event))
+    path.write_text("\n".join(held) + "\n")
+
+
+def test_bench_param_picks_exact_copy_of_repeated_episode(client, tmp_runs):
+    first = tmp_runs / "bench-aaa"
+    second = tmp_runs / "bench-bbb"
+    first.mkdir()
+    second.mkdir()
+    shutil.copy(FIXTURE, first / "dupe.jsonl")
+    _held_copy(second / "dupe.jsonl")
+    bare = client.get("/api/runs/dupe")
+    assert bare.status_code == 409
+    assert "bench-aaa" in bare.json()["detail"]
+    assert "bench-bbb" in bare.json()["detail"]
+    exposed = client.get("/api/runs/dupe?bench=bench-aaa").json()
+    assert exposed["bench"] == "bench-aaa"
+    assert exposed["score"]["outcome"] == "red_succeeded"
+    pinned = client.get("/api/runs/dupe?bench=bench-bbb").json()
+    assert pinned["bench"] == "bench-bbb"
+    assert pinned["score"]["outcome"] == "blue_held"
+    assert client.get("/api/runs/dupe/debrief?bench=bench-bbb").status_code == 200
+    assert client.get("/api/runs/dupe?bench=..").status_code == 404
+    assert client.get("/api/runs/dupe?bench=bench-aaa%2F..").status_code == 404
+
+
+def test_bare_id_skips_archive_copies(client, tmp_runs):
+    shelf = tmp_runs / "archive"
+    shelf.mkdir()
+    shutil.copy(FIXTURE, shelf / "shelved.jsonl")
+    assert client.get("/api/runs/shelved").status_code == 404
+    explicit = client.get("/api/runs/shelved?bench=archive").json()
+    assert explicit["bench"] == "archive"
+    assert len(explicit["events"]) > 1
+
+
 def test_featured_json_resolves_fresh_and_uncached(client, monkeypatch, tmp_path):
     monkeypatch.setattr(api, "DASHBOARD_DIR", tmp_path)
     (tmp_path / "featured.json").write_text('{"featured": ["a"]}')
