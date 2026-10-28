@@ -7,7 +7,7 @@ import {
   applyCamera, auditorChrome, blueLine, calloutForEvent, clashCrop, dollyTarget, FINISH_PACES, finishPlan,
   flashHold, FLIGHT_MS, flightLaneRect, frameBudget, frameP95, flightLane, fxForEvent,
   guardianPulse, hitstopFor, initStage, intrusionLevel, laneFeed, lanePoint, LOW_STREAK,
-  meltChar, meltGlyphAlpha, meltGlyphPx, meltHaloAlpha, meltSpriteAlpha, meltStride, moveSpanMs, paintGuardian,
+  meltChar, meltDrift, meltGlyphAlpha, meltGlyphPx, meltHaloAlpha, meltSpriteAlpha, meltStride, moveSpanMs, paintGuardian,
   paintIntrusion, projBody, redLine, renderStageStatic, renderStageThumb, sampleMeltMask,
   setStageActive, setStageReduced, stageLayout, stageNotify, stageWash, stepCamera, trailSpan,
 } from "../dashboard/js/stage.js";
@@ -877,5 +877,18 @@ describe("melt timing", () => {
     assert.ok(meltHaloAlpha(0.5) < meltGlyphAlpha(0.5));
     assert.ok(meltHaloAlpha(0.9) > 0.1, String(meltHaloAlpha(0.9)));
     assert.equal(meltHaloAlpha(1), 0);
+  });
+
+  it("spreads the cloud around the sprite instead of only upward", () => {
+    const still = meltDrift(3, 0, 82, 0.5, 0.5);
+    assert.deepEqual(still, { dx: 0, dy: 0 });
+    // Bottom-rim glyphs drift down (positive canvas y), top ones rise.
+    assert.ok(meltDrift(3, 1, 82, 0, 1).dy > 0);
+    assert.ok(meltDrift(3, 1, 82, 0, -1).dy < 0);
+    // Sideways shuffle is deterministic and moves glyphs apart.
+    const a = meltDrift(3, 1, 82, 0, 0);
+    const b = meltDrift(4, 1, 82, 0, 0);
+    assert.equal(a.dx, meltDrift(3, 1, 82, 0, 0).dx);
+    assert.ok(Math.abs(a.dx - b.dx) > 1, `${a.dx} vs ${b.dx}`);
   });
 });

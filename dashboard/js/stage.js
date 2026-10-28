@@ -1930,7 +1930,21 @@ export function meltGlyphAlpha(lp) {
 
 export function meltHaloAlpha(lp) {
   const t = Math.max(0, Math.min(1, Number(lp) || 0));
-  return Math.pow(1 - t, 0.6) * 0.6;
+  // Dark enough to ring each glyph even over the white-hot core.
+  return Math.pow(1 - t, 0.6) * 0.8;
+}
+
+// Melt drift at life lp: mostly radial with a mild upward bias
+// plus a deterministic sideways shuffle, so the late cloud
+// spreads around the sprite instead of stacking above it.
+export function meltDrift(j, lp, rr, sx, sy) {
+  const len = Math.hypot(sx, sy) || 1;
+  const d = lp * lp;
+  const r = Math.max(8, Number(rr) || 8);
+  return {
+    dx: (sx / len) * d * r * 1.4 + (fhash(j * 2 + 1) - 0.5) * d * r * 1.2,
+    dy: (sy / len) * d * r * 1.0 - d * r * 0.35,
+  };
 }
 
 function roundRectPath(ctx, x, y, w, h, r) {
@@ -2695,14 +2709,13 @@ function paintMeltGlyphs(refs, ctx, side, x, y, r, age) {
     const lp = (p - (j / count) * (1 - LIFE)) / LIFE;
     if (lp <= 0 || lp >= 1) continue;
     const s = pts[j * stride];
-    const len = Math.hypot(s.x, s.y) || 1;
-    const drift = lp * lp;
+    const drift = meltDrift(j, lp, rr, s.x, s.y);
     live.push({
       s,
       lp,
       ch: meltChar(j, refs.clock),
-      gx: x + s.x * bs + (s.x / len) * drift * rr * 1.4,
-      gy: y + s.y * bs + (s.y / len) * drift * rr * 0.7 - drift * rr * 0.9,
+      gx: x + s.x * bs + drift.dx,
+      gy: y + s.y * bs + drift.dy,
     });
   }
   if (live.length === 0) return;
@@ -2711,9 +2724,9 @@ function paintMeltGlyphs(refs, ctx, side, x, y, r, age) {
   ctx.font = `${size}px ${MONO}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.lineWidth = Math.max(2, Math.round(size * 0.2));
+  ctx.lineWidth = Math.max(2, Math.round(size * 0.25));
   ctx.lineJoin = "round";
-  ctx.strokeStyle = "rgba(2,4,8,0.6)";
+  ctx.strokeStyle = "rgba(2,4,8,0.8)";
   for (const g of live) {
     ctx.globalAlpha = meltHaloAlpha(g.lp);
     ctx.strokeText(g.ch, g.gx, g.gy);
