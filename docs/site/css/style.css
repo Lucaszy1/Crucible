@@ -837,7 +837,8 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
   display: flex; flex-direction: column; gap: 8px; min-width: 0;
 }
 .lobby-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.lobby-id { margin: 0; font-size: 14px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 auto; }
+.lobby-id { margin: 0; font-size: 14px; font-weight: 650; line-height: 1.3; min-width: 0; flex: 1 1 auto; }
+.lobby-id-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .lobby-outcome { font-size: 12px; font-weight: 700; white-space: nowrap; }
 .lobby-card[data-tone="red"] .lobby-outcome { color: var(--red); }
 .lobby-card[data-tone="blue"] .lobby-outcome { color: var(--accent); }
@@ -871,6 +872,10 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
   font-size: 11px; font-weight: 600; color: var(--muted);
   border: 1px solid var(--border); border-radius: 6px; padding: 1px 8px;
 }
+.lobby-badge.lobby-void {
+  color: var(--amber); border-color: var(--amber); background: var(--amber-soft);
+}
+.lobby-void-line { margin-top: 0; margin-bottom: 0; }
 .lobby-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: auto; }
 .lobby-states { display: block; }
 .lobby-glyph {

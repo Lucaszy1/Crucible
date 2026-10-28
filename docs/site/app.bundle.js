@@ -8233,7 +8233,17 @@ const { classicLayout } = __mod_layout__;
 const { eventHost, motionReduced, rankFeatured } = __mod_state__;
 const { mountArenaThumb, mountThumbnail, outcomeGlyph, thumbnailState } = __mod_thumbnail__;
 
-const FLAG_LABEL = { test: "test", fallback: "fallback", scripted: "scripted" };
+const FLAG_LABEL = { test: "test", fallback: "fallback", scripted: "scripted", mismatch: "title mismatch" };
+
+// Outcome key a curated card title promises, from its plain words:
+// "contained" titles promise Contained, "exposed" titles promise a
+// secret read. Anything else promises nothing (null).
+function titleOutcomeKey(title) {
+  const text = String(title || "").toLowerCase();
+  if (text.includes("exposed")) return "secret-exposed";
+  if (text.includes("contained")) return "contained";
+  return null;
+}
 
 const HELDOUT_MIN = 9001;
 const HELDOUT_MAX = 9020;
@@ -8431,6 +8441,25 @@ function cardTitle(model) {
   return model.title || model.id;
 }
 
+// Visible marker for episodes from the broken-sensors benches.
+// Pure text; voidLine renders it into a card.
+function voidNoteText(isVoid) {
+  return isVoid ? "Void: sensor bug" : "";
+}
+
+function voidLine(model) {
+  const text = voidNoteText(model && model.void);
+  if (!text) return null;
+  const line = document.createElement("p");
+  line.className = "lobby-meta lobby-void-line";
+  const chip = document.createElement("span");
+  chip.className = "lobby-badge lobby-void";
+  chip.textContent = text;
+  line.append(chip);
+  line.title = "This episode ran with silently broken sensors; its result is void.";
+  return line;
+}
+
 function cardTitleAttr(model) {
   return model.title ? `${model.title} (${model.id})` : model.id;
 }
@@ -8452,7 +8481,10 @@ function featureCard(model, callbacks, env) {
   head.className = "feature-head";
   const id = document.createElement("h3");
   id.className = "lobby-id";
-  id.textContent = cardTitle(model);
+  const words = document.createElement("span");
+  words.className = "lobby-id-text";
+  words.textContent = cardTitle(model);
+  id.append(words);
   id.title = cardTitleAttr(model);
   head.append(id, outcomeBadge(model.outcome));
   const story = document.createElement("p");
@@ -8470,7 +8502,10 @@ function featureCard(model, callbacks, env) {
   const foot = document.createElement("div");
   foot.className = "feature-foot";
   foot.append(playButton(model.id, "Watch", callbacks));
-  body.append(head, story, meta);
+  body.append(head);
+  const voidMark = voidLine(model);
+  if (voidMark) body.append(voidMark);
+  body.append(story, meta);
   const provLine = provenanceLine(model);
   if (provLine) body.append(provLine);
   if (model.flags && model.flags.length > 0) body.append(badgesRow(model.flags));
@@ -8492,7 +8527,10 @@ function archiveCard(model, callbacks, env) {
   head.className = "lobby-card-head";
   const id = document.createElement("h3");
   id.className = "lobby-id";
-  id.textContent = cardTitle(model);
+  const words = document.createElement("span");
+  words.className = "lobby-id-text";
+  words.textContent = cardTitle(model);
+  id.append(words);
   id.title = cardTitleAttr(model);
   head.append(id, outcomeBadge(model.outcome));
   const meta = document.createElement("p");
@@ -8543,7 +8581,10 @@ function archiveCard(model, callbacks, env) {
   } else {
     upgrade();
   }
-  el.append(head, meta);
+  el.append(head);
+  const voidMark = voidLine(model);
+  if (voidMark) el.append(voidMark);
+  el.append(meta);
   const provLine = provenanceLine(model);
   if (provLine) el.append(provLine);
   if (model.flags && model.flags.length > 0) el.append(badgesRow(model.flags));
@@ -8654,7 +8695,7 @@ function hideDeal(slot) {
   slot.hidden = true;
 }
 
-return { drawLiveScenario, hostNoun, storyLine, formatDuration, partitionLobby, thumbnail, arenaThumb, provText, renderLobby, renderDeal, hideDeal, HELDOUT_MIN, HELDOUT_MAX, MAX_FEATURED };
+return { titleOutcomeKey, drawLiveScenario, hostNoun, storyLine, formatDuration, partitionLobby, thumbnail, arenaThumb, provText, voidNoteText, renderLobby, renderDeal, hideDeal, HELDOUT_MIN, HELDOUT_MAX, MAX_FEATURED };
 })();
 const __mod_opening__ = (() => {
 "use strict";
@@ -11636,7 +11677,7 @@ const { reduceAudits, renderAuditor } = __mod_audit__;
 const { renderScoreboard, renderScoreDetails } = __mod_scoreboard__;
 const { focusEvidenceRef, renderEvidence } = __mod_evidence__;
 const { initControls, serverStatus, setServer, showConfirm } = __mod_controls__;
-const { HELDOUT_MAX, HELDOUT_MIN, arenaThumb, drawLiveScenario, formatDuration, hideDeal, partitionLobby, renderDeal, renderLobby, storyLine } = __mod_lobby__;
+const { HELDOUT_MAX, HELDOUT_MIN, arenaThumb, drawLiveScenario, formatDuration, hideDeal, partitionLobby, renderDeal, renderLobby, storyLine, titleOutcomeKey, voidNoteText } = __mod_lobby__;
 const { playOpening } = __mod_opening__;
 const { initThoughtHeads, renderThoughts, setThoughtsCollapsed } = __mod_thoughts__;
 const { endCardVisible, hideEndCard, initEndCard, setEndNext, showEndCard } = __mod_endcard__;
@@ -12102,6 +12143,17 @@ function renderStoryPanels(display) {
       : "Score pending";
     meta.textContent = `${score} · ${store.events.length} moves`;
     out.append(badge, line, meta);
+    const voidText = voidNoteText(store.runVoid);
+    if (voidText) {
+      const warn = document.createElement("p");
+      warn.className = "lobby-meta";
+      const chip = document.createElement("span");
+      chip.className = "lobby-badge lobby-void";
+      chip.textContent = voidText;
+      warn.append(chip);
+      warn.title = "This episode ran with silently broken sensors; its result is void.";
+      out.append(warn);
+    }
   }
   renderDebrief(els.debriefBody, store.runId ? store.debrief : null, {
     onEvidence: (id) => {
@@ -12175,10 +12227,10 @@ async function copyDebrief(text, btn) {
 
 // Fetch one replay's debrief after its events load. Stale
 // responses (user moved on) are dropped by run id.
-function loadDebrief(runId) {
+function loadDebrief(runId, bench) {
   store.debriefRun = runId;
   store.debrief = null;
-  fetchDebrief(runId).then((data) => {
+  fetchDebrief(runId, bench).then((data) => {
     if (store.debriefRun !== runId) return;
     store.debrief = (data && data.debrief) || { error: true };
     render(false);
@@ -12295,6 +12347,19 @@ function destroyOpening() {
   }
 }
 
+// Runtime title check: a featured title promises an outcome, so
+// an opened episode that came out otherwise says so out loud
+// instead of playing under a wrong name.
+function assertFeaturedTitle(runId, eventList) {
+  const title = (store.lobby.titles || {})[runId];
+  const want = titleOutcomeKey(title);
+  if (!want) return;
+  const got = displayOutcome(eventList || []).key;
+  if (got !== want) {
+    notice(`Title says "${title}" but the episode came out ${got}.`, true);
+  }
+}
+
 // Opening an exercise for playback: slate, countdown, then motion.
 // Scrub and jump never pass through here, so the slate plays once.
 async function openExercise(runId, opts) {
@@ -12322,7 +12387,7 @@ async function openExercise(runId, opts) {
   render(false);
   let data;
   try {
-    data = await fetchRun(runId);
+    data = await fetchRun(runId, o.bench);
   } catch (err) {
     notice(`Could not load run ${runId}: ${err.message}`, true);
     setMode("idle", "No exercise loaded");
@@ -12337,7 +12402,10 @@ async function openExercise(runId, opts) {
   store.events = (data.events || []).filter((ev) => ev && ev.actor !== "system");
   store.replayScore = data.score || null;
   if (window.CRUCIBLE_STATIC) updateProvBadge(data.provenance);
-  loadDebrief(runId);
+  store.runBench = data.bench || o.bench || null;
+  store.runVoid = data.void || false;
+  assertFeaturedTitle(runId, store.events);
+  loadDebrief(runId, store.runBench);
   store.cursor = 0;
   store.firstAuthIndex = store.events.findIndex(
     (ev) => ev.actor === "red" && ev.tool === "try_credential" && (ev.result || {}).authenticated === true,
@@ -12387,6 +12455,8 @@ async function beginRun(agents, scenarioToken) {
     setMode("booting", `Booting range for ${data.exercise_id}`);
     switchTab("arena");
     store.runId = null;
+    store.runBench = null;
+    store.runVoid = false;
     store.events = [];
     store.cursor = 0;
     store.finalScore = null;
@@ -12686,6 +12756,16 @@ function nextFeaturedId() {
   return queue.length > 0 ? queue[0] : null;
 }
 
+// Exact bench for one run id: featured provenance first, then the
+// classified card's resolved bench. Featured replays always open
+// from their curated (bench, episode), never a bare-id guess.
+function benchFor(id) {
+  const prov = (store.lobby.provenance || {})[id];
+  if (prov && prov.bench) return prov.bench;
+  const card = (store.lobby.cards || []).find((entry) => entry && entry.id === id);
+  return (card && card.bench) || null;
+}
+
 function showEndCardFor() {
   const stats = endCardStats(store.events, store.finalScore, store.weights);
   const audits = reduceAudits(store.events, store.events.length);
@@ -12726,7 +12806,7 @@ function scheduleAdvance(nextId) {
   const ticker = setInterval(tick, 1000);
   const timer = setTimeout(() => {
     cancelAdvance();
-    openExercise(nextId);
+    openExercise(nextId, { bench: benchFor(nextId) });
   }, ADVANCE_SECONDS * 1000);
   store.advance = { timer, ticker };
 }
@@ -12737,9 +12817,19 @@ function armLabel(memory) {
   return null;
 }
 
+// Card flags plus the featured title check: a curated title names
+// an outcome, so a card whose exercise came out otherwise carries
+// a visible mismatch flag instead of a quiet wrong badge.
+function cardFlags(runId, eventList, outcomeKey) {
+  const flags = runFlags(runId, eventList);
+  const want = titleOutcomeKey((store.lobby.titles || {})[runId]);
+  if (want && want !== outcomeKey) flags.push("mismatch");
+  return flags;
+}
+
 async function classifyRun(run, armByEpisode) {
   try {
-    const data = await fetchRun(run.id);
+    const data = await fetchRun(run.id, run.bench);
     const full = data.events || [];
     const layout = layoutFromEvents(full);
     const hosts = layoutHosts(layout);
@@ -12755,6 +12845,8 @@ async function classifyRun(run, armByEpisode) {
       title: (store.lobby.titles || {})[run.id] || null,
       provenance: data.provenance || null,
       outcomeKey: out.key,
+      bench: data.bench || run.bench || null,
+      void: data.void || false,
       outcome: { label: out.label, tone: out.tone },
       blueScore: typeof score.blue_score === "number" ? score.blue_score : null,
       moves: lane.length,
@@ -12767,7 +12859,7 @@ async function classifyRun(run, armByEpisode) {
       arm: armLabel(armByEpisode.get(run.id)),
       blocks: reduceHostStates(events, hosts),
       tstate: thumbnailState(events, layout),
-      flags: runFlags(run.id, events),
+      flags: cardFlags(run.id, events, out.key),
       layout,
       weights,
       events,
@@ -12794,7 +12886,7 @@ function paintLobby() {
     cards: store.lobby.cards,
     featuredIds: effectiveFeaturedIds(),
     loading: store.lobby.loading,
-  }, { onPlay: (id) => openExercise(id) },
+  }, { onPlay: (id) => openExercise(id, { bench: benchFor(id) }) },
   { art: store.stageArt || {}, attackMap: store.attackMap });
   // A live run ends while the shelf reloads, so the end card can
   // open with no Next yet; re-arm it as the ranks fill in.
@@ -12853,7 +12945,8 @@ async function refreshRuns() {
   for (const id of store.lobby.featuredIds) {
     if (!seen.has(id)) {
       seen.add(id);
-      queue.push({ id, featuredExtra: true });
+      const prov = (store.lobby.provenance || {})[id] || {};
+      queue.push({ id, featuredExtra: true, bench: prov.bench || null });
     }
   }
   const workers = [];
@@ -12882,7 +12975,7 @@ function watchReplay() {
     return;
   }
   const pick = pool[Math.floor(Math.random() * pool.length)];
-  openExercise(pick.id);
+  openExercise(pick.id, { bench: pick.bench || benchFor(pick.id) });
 }
 
 async function pollStatus() {
@@ -12969,7 +13062,9 @@ function setPresent(on) {
     // Presentation mode loops the featured lobby from the top.
     if (store.mode === "idle" || (store.mode === "replay" && store.cursor >= store.events.length)) {
       const cards = visibleCards();
-      if (cards.length > 0 && store.runId !== cards[0].id) openExercise(cards[0].id);
+      if (cards.length > 0 && store.runId !== cards[0].id) {
+        openExercise(cards[0].id, { bench: cards[0].bench || benchFor(cards[0].id) });
+      }
       else if (cards.length > 0 && store.cursor >= store.events.length) playReplay();
     }
   } else {
@@ -13242,7 +13337,7 @@ async function boot() {
     },
     onNext: () => {
       const next = nextFeaturedId();
-      if (next) openExercise(next);
+      if (next) openExercise(next, { bench: benchFor(next) });
     },
     onLobby: () => switchTab("lobby"),
   });
@@ -13315,7 +13410,11 @@ async function boot() {
   if (wanted) {
     // Deep links open at once; the lobby keeps classifying behind.
     // Unknown ids fall back to the lobby with a notice inside open.
-    openExercise(wanted, at === null ? {} : { at });
+    // ?bench= pins the exact copy for ambiguous episode ids.
+    openExercise(wanted, {
+      ...(at === null ? {} : { at }),
+      bench: params.get("bench") || benchFor(wanted),
+    });
     return;
   }
   if (view && TABS[view]) switchTab(view);
