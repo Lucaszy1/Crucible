@@ -903,14 +903,30 @@ canvas.lobby-thumb:focus-visible { outline: 2px solid #8fb8ff; outline-offset: 2
 @keyframes slatePop { from { transform: scale(1.5); opacity: 0; } to { transform: none; opacity: 1; } }
 .slate-skip { margin: 0; font-size: 11px; color: #5d667a; }
 
-/* End card: the full stop. */
+/* End card: the full stop. Both hero splashes behind a scrim. */
 .end-veil {
   position: absolute; inset: 0; z-index: 6;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  text-align: center; gap: 8px; padding: 20px;
-  background: rgba(9, 11, 16, 0.92); color: #f2efe8;
+  text-align: center; gap: 8px; padding: 20px; overflow: hidden;
+  background: rgba(9, 11, 16, 0.72); color: #f2efe8;
 }
 .end-veil[hidden] { display: none; }
+.end-art {
+  position: absolute; top: 0; bottom: 0; width: 52%;
+  background-size: cover; background-position: center;
+  opacity: 0.6; pointer-events: none;
+}
+.end-art.left {
+  left: 0; background-image: url("/assets/art/intrusion-splash.webp");
+  -webkit-mask-image: linear-gradient(to right, black 45%, transparent 98%);
+  mask-image: linear-gradient(to right, black 45%, transparent 98%);
+}
+.end-art.right {
+  right: 0; background-image: url("/assets/art/guardian-splash.webp");
+  -webkit-mask-image: linear-gradient(to left, black 45%, transparent 98%);
+  mask-image: linear-gradient(to left, black 45%, transparent 98%);
+}
+.end-veil > *:not(.end-art) { position: relative; z-index: 1; }
 .end-eyebrow {
   font-size: clamp(10px, 1.3cqw, 15px); font-weight: 700; letter-spacing: 0.35em;
   text-transform: uppercase; color: #8791a3;
