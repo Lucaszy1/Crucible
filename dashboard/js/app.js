@@ -1032,10 +1032,13 @@ function showEndCardFor() {
 }
 
 function showEndCardNow(stats, audits, nextId) {
-  showEndCard(endEls(), stats, audits.summary.justifiedPct, nextId);
+  // The finish sequence runs before the card opens; re-read Next at
+  // open time so a shelf that loaded mid-finish still counts.
+  const fresh = nextFeaturedId() || nextId;
+  showEndCard(endEls(), stats, audits.summary.justifiedPct, fresh);
   if (stats.key === "secret-exposed") glitchScene();
   const auto = store.presentLoop || (store.lobby.autoplay && store.mode === "replay");
-  if (auto && nextId) scheduleAdvance(nextId);
+  if (auto && fresh) scheduleAdvance(fresh);
 }
 
 function scheduleAdvance(nextId) {
@@ -1117,6 +1120,11 @@ function paintLobby() {
     loading: store.lobby.loading,
   }, { onPlay: (id) => openExercise(id) },
   { art: store.stageArt || {}, attackMap: store.attackMap });
+  // A live run ends while the shelf reloads, so the end card can
+  // open with no Next yet; re-arm it as the ranks fill in.
+  if (endCardVisible(endEls())) {
+    endEls().next.disabled = !nextFeaturedId();
+  }
 }
 
 async function refreshRuns() {
@@ -1173,11 +1181,6 @@ async function refreshRuns() {
   await Promise.all(workers);
   store.lobby.loading = false;
   paintLobby();
-  // A live run ends while the shelf reloads, so the end card opens
-  // with no Next yet; re-arm it once the ranks are known.
-  if (endCardVisible(endEls())) {
-    endEls().next.disabled = !nextFeaturedId();
-  }
 }
 
 function watchReplay() {
