@@ -8,17 +8,21 @@ import {
   acceptLiveTraffic,
   autoplayQueue,
   bootStale,
+  bootTimedOut,
   controlBar,
   controlBarTip,
   displayOutcome,
   endCardStats,
+  errorRetryTarget,
   finishSide,
   followOpensLive,
   motionReduced,
   motionSetting,
   outcomeLine,
+  phaseLabel,
   rankFeatured,
   runFlags,
+  streamDead,
 } from "../dashboard/js/state.js";
 import { stripModel } from "../dashboard/js/timeline.js";
 
@@ -340,6 +344,32 @@ describe("stripModel", () => {
     assert.equal(followOpensLive(true, "idle", null, { running: false }), false);
     assert.equal(followOpensLive(true, "idle", null, { running: true }), false);
     assert.equal(followOpensLive(true, "idle", null, null), false);
+  });
+
+  it("labels known boot phases and stays silent otherwise", () => {
+    assert.equal(phaseLabel("starting"), "Starting the exercise…");
+    assert.equal(phaseLabel("booting"), "Booting the range…");
+    assert.equal(phaseLabel("done"), null);
+    assert.equal(phaseLabel(null), null);
+  });
+
+  it("times boots out after three minutes without an event", () => {
+    assert.equal(bootTimedOut(1000, 1000 + 180000), false);
+    assert.equal(bootTimedOut(1000, 1000 + 180001), true);
+    assert.equal(bootTimedOut(1000, 2000, 500), true);
+  });
+
+  it("declares the stream dead after four straight errors", () => {
+    assert.equal(streamDead(0), false);
+    assert.equal(streamDead(3), false);
+    assert.equal(streamDead(4), true);
+  });
+
+  it("retries scripted errors in place and sends model errors to the lobby", () => {
+    assert.equal(errorRetryTarget("scripted"), "again");
+    assert.equal(errorRetryTarget("model"), "lobby");
+    assert.equal(errorRetryTarget("human"), "lobby");
+    assert.equal(errorRetryTarget(undefined), "lobby");
   });
 });
 

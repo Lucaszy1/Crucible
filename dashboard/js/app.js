@@ -2,9 +2,9 @@
 import { fetchAttackMap, fetchCampaign, fetchCampaigns, fetchConfig, fetchFeatured, fetchPreview, fetchRun, fetchRuns, fetchStage3, fetchStatus, openLive, startExercise } from "./api.js";
 import { renderLearning } from "./learn.js";
 import {
-  acceptLiveTraffic, autoplayQueue, bootStale, displayOutcome, endCardStats, eventHost,
-  finishSide, followOpensLive, motionReduced, motionSetting, outcomeLine,
-  rankFeatured, reduceHostStates, runFlags, scoreEvents,
+  acceptLiveTraffic, autoplayQueue, bootStale, bootTimedOut, displayOutcome, endCardStats, eventHost,
+  errorRetryTarget, finishSide, followOpensLive, motionReduced, motionSetting, outcomeLine,
+  phaseLabel, rankFeatured, reduceHostStates, runFlags, scoreEvents, streamDead,
 } from "./state.js";
 import { describeEvent, keyMoments, statusSentence } from "./story.js";
 import { initMap, updateMap } from "./network.js";
@@ -180,6 +180,11 @@ const store = {
   storyKey: "",
   label: "No exercise loaded",
   liveSource: null,
+  livePath: null,
+  liveErrors: 0,
+  bootTimer: null,
+  bootStartedAt: 0,
+  lastRun: null,
   liveExerciseId: null,
   bootGen: 0,
   follow: false,
@@ -275,15 +280,29 @@ function arenaTransportEls() {
   return { scrubber: els.arenaScrubber, position: els.arenaPosition, play: els.arenaPlay, pause: els.arenaPause };
 }
 
-function notice(text, isError) {
+function notice(text, isError, action) {
+  els.notice.innerHTML = "";
   if (!text) {
     els.notice.hidden = true;
-    els.notice.textContent = "";
+    els.notice.classList.toggle("error", false);
     return;
   }
   els.notice.hidden = false;
-  els.notice.textContent = text;
   els.notice.classList.toggle("error", Boolean(isError));
+  const span = document.createElement("span");
+  span.textContent = text;
+  els.notice.append(span);
+  if (action && action.label && typeof action.onClick === "function") {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn small";
+    btn.textContent = action.label;
+    btn.addEventListener("click", () => {
+      notice("");
+      action.onClick();
+    });
+    els.notice.append(document.createTextNode(" "), btn);
+  }
 }
 
 function setMode(mode, label) {
@@ -554,6 +573,34 @@ function closeLive() {
     store.liveSource.close();
     store.liveSource = null;
   }
+  clearBootTimer();
+}
+
+function clearBootTimer() {
+  if (store.bootTimer) {
+    clearTimeout(store.bootTimer);
+    store.bootTimer = null;
+  }
+}
+
+// Slow boots must say so: three minutes with no event means the
+// range never came up. The retry reattaches to the same exercise,
+// whose buffered events replay if it did start after all.
+const BOOT_LIMIT_MS = 180000;
+
+function armBootTimer(token) {
+  clearBootTimer();
+  store.bootStartedAt = Date.now();
+  store.bootTimer = setTimeout(() => {
+    store.bootTimer = null;
+    if (bootStale(token, store.bootGen)) return;
+    if (store.mode !== "booting" || store.events.length > 0) return;
+    if (!bootTimedOut(store.bootStartedAt, Date.now(), BOOT_LIMIT_MS)) return;
+    const id = store.liveExerciseId;
+    notice("The range did not boot in three minutes.", true, id
+      ? { label: "Reattach", onClick: () => attachLive(id) }
+      : { label: "Back to lobby", onClick: () => switchTab("lobby") });
+  }, BOOT_LIMIT_MS);
 }
 
 function destroyOpening() {
@@ -662,10 +709,33 @@ async function beginRun(agents, scenarioToken) {
     store.firstAccessShown = false;
     applyLayout(classicLayout(), { id: "classic" });
     if (data.warning) notice(data.warning, false);
+    store.lastRun = { agents, scenarioToken };
+    store.livePath = null;
+    store.liveErrors = 0;
     store.liveSource = openLive(onLiveMessage, onLiveError);
+    armBootTimer(token);
     render(false);
   } catch (err) {
-    notice(`Could not start the exercise: ${err.message}`, true);
+    const msg = err.message || "unknown error";
+    if (msg.includes("already running")) {
+      notice(`Could not start the exercise: ${msg}`, true, {
+        label: "Follow it",
+        onClick: async () => {
+          try {
+            const spend = await fetchStatus();
+            if (spend && spend.exercise_id) attachLive(spend.exercise_id);
+            else notice("No exercise is running.", false);
+          } catch (followErr) {
+            notice(`Could not follow the running exercise: ${followErr.message}`, true);
+          }
+        },
+      });
+    } else {
+      notice(`Could not start the exercise: ${msg}`, true, {
+        label: "Try again",
+        onClick: () => beginRun(agents, scenarioToken),
+      });
+    }
   } finally {
     controls.run.disabled = false;
   }
@@ -695,6 +765,8 @@ function attachLive(exerciseId) {
   store.firstAuthIndex = null;
   store.firstAccessShown = false;
   applyLayout(classicLayout(), { id: "classic" });
+  store.livePath = null;
+  store.liveErrors = 0;
   store.liveSource = openLive(onLiveMessage, onLiveError);
   render(false);
 }
@@ -729,6 +801,8 @@ function beginFakeLive(path) {
     if (msg && msg.event) onLiveMessage({ type: "event", event: msg.event });
     else if (msg && msg.done) onLiveMessage({ type: "done", score: msg.score });
   };
+  store.livePath = path;
+  store.liveErrors = 0;
   store.liveSource = openLive(translate, onLiveError, path);
   render(false);
 }
@@ -742,6 +816,21 @@ function firstAuthPosition() {
 function onLiveMessage(msg) {
   // A selection sticks: live traffic only lands while live is shown.
   if (!acceptLiveTraffic(store.mode, Boolean(store.liveSource))) return;
+  store.liveErrors = 0;
+  if (msg.type === "status" && msg.phase) {
+    const label = phaseLabel(msg.phase);
+    if (label && (store.mode === "booting" || store.mode === "live")) setMode(store.mode, label);
+    return;
+  }
+  if (msg.type === "idle") {
+    closeLive();
+    if (store.events.length === 0) {
+      setMode("idle", "No exercise loaded");
+      notice("No exercise is running.", false);
+    }
+    render(false);
+    return;
+  }
   if (msg.type === "event" && msg.event) {
     // System events carry the range layout on the live stream; read
     // it before they are skipped like everywhere else. The layout
@@ -760,6 +849,7 @@ function onLiveMessage(msg) {
     }
     store.events.push(msg.event);
     store.cursor = store.events.length;
+    clearBootTimer();
     if (store.firstAuthIndex === null) {
       const at = firstAuthPosition();
       store.firstAuthIndex = at < 0 ? null : at;
@@ -779,7 +869,11 @@ function onLiveMessage(msg) {
     render(false);
     showEndCardFor("live");
   } else if (msg.type === "error") {
-    notice(`Exercise failed: ${msg.text || "unknown error"}`, true);
+    const last = store.lastRun || {};
+    const retry = errorRetryTarget(last.agents) === "again" && last.scenarioToken !== undefined
+      ? { label: "Try again", onClick: () => beginRun(last.agents, last.scenarioToken) }
+      : { label: "Back to lobby", onClick: () => switchTab("lobby") };
+    notice(`Exercise failed: ${msg.text || "unknown error"}`, true, retry);
     if (store.events.length === 0) setMode("idle", "No exercise loaded");
     closeLive();
     pollStatus();
@@ -792,7 +886,22 @@ function onLiveMessage(msg) {
 function onLiveError() {
   // EventSource reconnects on its own; only flag when live is expected.
   if ((store.mode === "live" || store.mode === "booting") && store.liveSource) {
-    notice("Live stream interrupted, reconnecting…", true);
+    store.liveErrors = (store.liveErrors || 0) + 1;
+    if (!streamDead(store.liveErrors)) {
+      notice("Live stream interrupted, reconnecting…", true);
+      return;
+    }
+    const id = store.liveExerciseId;
+    const path = store.livePath;
+    closeLive();
+    const retry = path
+      ? { label: "Reattach", onClick: () => beginFakeLive(path) }
+      : id
+        ? { label: "Reattach", onClick: () => attachLive(id) }
+        : { label: "Back to lobby", onClick: () => switchTab("lobby") };
+    notice("Live stream lost. The exercise may still be running on the server.", true, retry);
+    if (store.events.length === 0) setMode("idle", "No exercise loaded");
+    render(false);
   }
 }
 
@@ -805,7 +914,10 @@ function onRunRequest(agents) {
           : null;
         showConfirm(confirm, spend, capped, () => dealLive(agents));
       })
-      .catch((err) => notice(`Could not check spend: ${err.message}`, true));
+      .catch((err) => notice(`Could not check spend: ${err.message}`, true, {
+        label: "Try again",
+        onClick: () => onRunRequest(agents),
+      }));
     return;
   }
   dealLive(agents);

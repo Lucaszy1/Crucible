@@ -261,6 +261,11 @@ def test_failed_exercise_publishes_error(client, monkeypatch):
     assert "demo outage" in messages[-1]["text"]
 
 
+def test_live_attach_when_idle_yields_idle_marker(client):
+    messages = _sse_messages(client.get("/api/live").text)
+    assert messages == [{"type": "idle"}]
+
+
 def test_dashboard_index_served(client):
     res = client.get("/")
     assert res.status_code == 200

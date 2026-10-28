@@ -146,6 +146,7 @@ select {
   font-size: 14px;
 }
 .notice.error { border-color: var(--red); background: var(--red-soft); }
+.notice .btn { margin-left: 12px; }
 
 /* View tabs */
 .tabs-main { display: flex; gap: 4px; padding: 14px 24px 0; }

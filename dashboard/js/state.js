@@ -723,6 +723,34 @@ export function followOpensLive(followOn, mode, followedId, spend) {
   return true;
 }
 
+// Boot phase labels for live status messages. Unknown phases stay
+// silent: only known server phases may move the mode label.
+export function phaseLabel(phase) {
+  if (phase === "starting") return "Starting the exercise…";
+  if (phase === "booting") return "Booting the range…";
+  return null;
+}
+
+// The range gets three minutes to produce its first event before the
+// boot is declared stuck. Pure; the caller owns the timer.
+export function bootTimedOut(bootStartedAt, nowMs, limitMs) {
+  const limit = limitMs === undefined ? 180000 : limitMs;
+  return Number(nowMs) - Number(bootStartedAt) > limit;
+}
+
+// An EventSource that errors four times in a row is not coming back
+// on its own: the server is gone or the run ended without a marker.
+export function streamDead(errorCount) {
+  return Number(errorCount) >= 4;
+}
+
+// Where the retry goes after an exercise error: scripted reruns are
+// free, so they retry in place; model runs return to the lobby so
+// the spend confirm gates the next attempt.
+export function errorRetryTarget(agents) {
+  return agents === "scripted" ? "again" : "lobby";
+}
+
 // Blue network held blocks, one per host: clean (blue holds it),
 // breached (red is in), isolated (cut off, drawn striped), patched
 // (sign-in rotated, drawn solid). Probed or restored hosts count as
