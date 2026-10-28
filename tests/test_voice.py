@@ -68,6 +68,8 @@ def test_transcribe_file_success(spend, monkeypatch):
     assert seen["url"] == "https://api.meta.ai/v1/asr/transcribe"
     assert seen["auth"] == "Bearer test-key"
     assert seen["content_type"].startswith("multipart/form-data")
+    assert b'form-data; name="request"' in seen["body"]
+    assert b'form-data; name="audio"' in seen["body"]
     assert b"RIFF" in seen["body"]
     assert b"judge.wav" in seen["body"]
     entries = [json.loads(line) for line in spend.read_text().splitlines()]
@@ -115,6 +117,17 @@ def test_transcribe_empty_reply(spend, monkeypatch):
     _stub_urlopen(monkeypatch, seen, b'{"text": ""}')
     with pytest.raises(voice.VoiceError, match="no transcript"):
         voice.transcribe_file(_clip())
+
+
+def test_transcribe_reads_turns_and_allows_empty(spend, monkeypatch):
+    seen = {}
+    _stub_urlopen(monkeypatch, seen,
+                  b'{"transcript": "", "turns": [{"text": "stand down"}]}')
+    result = voice.transcribe_file(_clip())
+    assert result["text"] == "stand down"
+    _stub_urlopen(monkeypatch, seen, b'{"transcript": "", "turns": []}')
+    result = voice.transcribe_file(_clip(), allow_empty=True)
+    assert result["text"] == ""
 
 
 def test_validate_wav_rejects():

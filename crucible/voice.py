@@ -8,11 +8,11 @@ Audio spend flows through the existing guard: every call estimates
 seconds * USD_PER_SECOND, blocks past the daily cap, and records the
 entry in spend.jsonl. Keys never appear in logs or error text.
 
-Assumed contracts (no public spec was available; see docs/VOICE_API.md
-and the report risks): the file endpoint accepts multipart form audio
-and answers JSON with a text field; the realtime endpoint takes masked
-binary PCM frames and answers JSON text messages. The live probe
-covers only the file endpoint.
+Verified file contract (live probe): multipart parts `request`
+(JSON: model, audioEncoding "WAV", sampleRateHertz) and `audio`
+(WAV bytes); JSON reply with transcript/turns fields. The realtime
+message shapes are still assumed (fake-server tests only); see
+docs/VOICE_API.md.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ import urllib.parse
 import urllib.request
 import wave
 
-VOICE_MODEL = "muse-voice-transcribe"
+VOICE_MODEL = "muse-voice-transcribe-1.0"
 DEFAULT_BASE_URL = "https://api.meta.ai"
 DEFAULT_REALTIME_URL = "wss://api.meta.ai/v1/asr/realtime"
 FILE_PATH = "/v1/asr/transcribe"
@@ -100,33 +100,36 @@ def estimate_cost(seconds: float) -> float:
     return round(max(0.0, float(seconds)) * USD_PER_SECOND, 6)
 
 
-def _multipart(fields: dict, file_bytes: bytes,
+def _multipart(request_json: str, file_bytes: bytes,
                filename: str = "judge.wav") -> tuple:
+    """Build the request+audio multipart body the endpoint requires."""
     boundary = "----crucible-voice-" + base64.urlsafe_b64encode(
         os.urandom(12)).decode("ascii")
-    parts = []
-    for name, value in fields.items():
-        parts.append(f"--{boundary}\r\n"
-                     f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
-                     f"{value}\r\n".encode("utf-8"))
-    parts.append(f"--{boundary}\r\n"
-                 f'Content-Disposition: form-data; name="file"; '
-                 f'filename="{filename}"\r\n'
-                 f"Content-Type: audio/wav\r\n\r\n".encode("utf-8")
-                 + file_bytes + b"\r\n")
-    parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+    parts = [
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="audio"; '
+        f'filename="{filename}"\r\n'
+        f"Content-Type: audio/wav\r\n\r\n".encode("utf-8")
+        + file_bytes + b"\r\n",
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="request"\r\n\r\n'
+        f"{request_json}\r\n".encode("utf-8"),
+        f"--{boundary}--\r\n".encode("utf-8"),
+    ]
     body = b"".join(parts)
     return body, f"multipart/form-data; boundary={boundary}"
 
 
 def transcribe_file(wav_bytes: bytes, *, exercise_id: str | None = None,
                     timeout_s: float = 30.0, base_url: str | None = None,
-                    api_key: str | None = None,
-                    model: str = VOICE_MODEL) -> dict:
+                    api_key: str | None = None, model: str = VOICE_MODEL,
+                    allow_empty: bool = False) -> dict:
     """Transcribe one WAV clip via the file endpoint.
 
     Returns {"text", "seconds", "cost_usd"}. Spend is guarded before
     any network traffic and recorded after a successful reply.
+    allow_empty accepts a no-speech reply (the tone probe); judge
+    audio stays strict.
     """
     from crucible import llm
 
@@ -137,7 +140,12 @@ def transcribe_file(wav_bytes: bytes, *, exercise_id: str | None = None,
     base = (base_url or os.environ.get("VOICE_BASE_URL", "")
             or DEFAULT_BASE_URL).rstrip("/")
     url = base + FILE_PATH
-    body, content_type = _multipart({"model": model}, wav_bytes)
+    request_json = json.dumps({
+        "model": model,
+        "audioEncoding": "WAV",
+        "sampleRateHertz": facts["framerate"],
+    })
+    body, content_type = _multipart(request_json, wav_bytes)
     request = urllib.request.Request(
         url, data=body, method="POST",
         headers={"Content-Type": content_type,
@@ -165,7 +173,13 @@ def transcribe_file(wav_bytes: bytes, *, exercise_id: str | None = None,
                    or payload.get("transcript", "")
                    or (payload.get("data", {}) or {}).get("text", "")
                    or "").strip()
-    if not text:
+        if not text:
+            turns = payload.get("turns", []) or []
+            bits = [str(turn.get("text", "")
+                        or turn.get("transcript", "") or "").strip()
+                    for turn in turns if isinstance(turn, dict)]
+            text = " ".join(bit for bit in bits if bit)
+    if not text and not allow_empty:
         raise VoiceError("transcribe reply held no transcript text")
     llm.record_spend(model=model, input_tokens=0, output_tokens=0,
                      exercise_id=exercise_id, cost_usd=cost)
@@ -418,11 +432,13 @@ def main(argv=None) -> int:
         return 1
     try:
         result = transcribe_file(make_probe_wav(),
-                                 exercise_id="voice-probe")
+                                 exercise_id="voice-probe",
+                                 allow_empty=True)
     except VoiceError as exc:
         print(f"probe failed: {exc}")
         return 1
-    print(f"probe transcript: {result['text']!r}")
+    heard = result["text"] or "(no speech in tone clip, as expected)"
+    print(f"probe transcript: {heard!r}")
     print(f"probe audio: {result['seconds']:.2f}s, "
           f"cost ${result['cost_usd']:.6f} (placeholder rate)")
     return 0
