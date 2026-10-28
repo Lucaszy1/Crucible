@@ -5,9 +5,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  acceptLiveTraffic,
   autoplayQueue,
+  bootStale,
   displayOutcome,
   endCardStats,
+  followOpensLive,
   motionReduced,
   outcomeLine,
   rankFeatured,
@@ -273,5 +276,32 @@ describe("stripModel", () => {
     const model = stripModel([red, blue], 1, new Map());
     assert.equal(model[0].current, true);
     assert.equal(model[1].current, false);
+  });
+
+  it("accepts live traffic only for a shown live exercise", () => {
+    assert.equal(acceptLiveTraffic("live", true), true);
+    assert.equal(acceptLiveTraffic("booting", true), true);
+    assert.equal(acceptLiveTraffic("replay", true), false);
+    assert.equal(acceptLiveTraffic("idle", true), false);
+    assert.equal(acceptLiveTraffic("live", false), false);
+    assert.equal(acceptLiveTraffic("replay", false), false);
+  });
+
+  it("drops stale live boots", () => {
+    assert.equal(bootStale(2, 2), false);
+    assert.equal(bootStale(2, 3), true);
+    assert.equal(bootStale(undefined, 1), true);
+  });
+
+  it("follow-live opens only when idle with a new running exercise", () => {
+    const running = { running: true, exercise_id: "exercise-7" };
+    assert.equal(followOpensLive(true, "idle", null, running), true);
+    assert.equal(followOpensLive(false, "idle", null, running), false);
+    assert.equal(followOpensLive(true, "replay", null, running), false);
+    assert.equal(followOpensLive(true, "live", null, running), false);
+    assert.equal(followOpensLive(true, "idle", "exercise-7", running), false);
+    assert.equal(followOpensLive(true, "idle", null, { running: false }), false);
+    assert.equal(followOpensLive(true, "idle", null, { running: true }), false);
+    assert.equal(followOpensLive(true, "idle", null, null), false);
   });
 });

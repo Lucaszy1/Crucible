@@ -2,7 +2,8 @@
 import { fetchAttackMap, fetchCampaign, fetchCampaigns, fetchConfig, fetchFeatured, fetchPreview, fetchRun, fetchRuns, fetchStatus, openLive, startExercise } from "./api.js";
 import { fillCampaignSelects, renderLearn } from "./learn.js";
 import {
-  autoplayQueue, displayOutcome, endCardStats, eventHost, motionReduced, outcomeLine,
+  acceptLiveTraffic, autoplayQueue, bootStale, displayOutcome, endCardStats, eventHost,
+  followOpensLive, motionReduced, outcomeLine,
   rankFeatured, reduceHostStates, runFlags, scoreEvents,
 } from "./state.js";
 import { describeEvent, statusSentence } from "./story.js";
@@ -133,6 +134,7 @@ const els = {
   settingsBtn: document.getElementById("settingsBtn"),
   settingsPop: document.getElementById("settingsPop"),
   classicBox: document.getElementById("classicBox"),
+  followBox: document.getElementById("followBox"),
 };
 
 const controls = {
@@ -170,6 +172,9 @@ const store = {
   label: "No exercise loaded",
   liveSource: null,
   liveExerciseId: null,
+  bootGen: 0,
+  follow: false,
+  followedId: null,
   arenaCursor: 0,
   firstAuthIndex: null,
   firstAccessShown: false,
@@ -480,6 +485,8 @@ function destroyOpening() {
 // Scrub and jump never pass through here, so the slate plays once.
 async function openExercise(runId, opts) {
   const o = opts || {};
+  // A new selection invalidates any live boot still awaiting the server.
+  store.bootGen = (store.bootGen || 0) + 1;
   destroyOpening();
   hideEndCard(endEls());
   cancelAdvance();
@@ -545,6 +552,8 @@ async function openExercise(runId, opts) {
 }
 
 async function beginRun(agents, scenarioToken) {
+  const token = (store.bootGen || 0) + 1;
+  store.bootGen = token;
   closeLive();
   stopTimer();
   destroyOpening();
@@ -556,7 +565,11 @@ async function beginRun(agents, scenarioToken) {
   controls.run.disabled = true;
   try {
     const data = await startExercise(agents, undefined, scenarioToken);
+    // The server was slow and the user picked something else meanwhile:
+    // a stale boot must never yank the new selection into live.
+    if (bootStale(token, store.bootGen)) return;
     store.liveExerciseId = data.exercise_id;
+    store.followedId = data.exercise_id;
     setMode("booting", `Booting range for ${data.exercise_id}`);
     switchTab("arena");
     store.runId = null;
@@ -576,10 +589,44 @@ async function beginRun(agents, scenarioToken) {
   }
 }
 
+// Explicit follow mode: attach the live stream to the exercise the
+// server is already running, without starting anything new. Only
+// the follow toggle reaches here, and only from an idle lobby, so a
+// selected replay or live run never moves on its own.
+function attachLive(exerciseId) {
+  store.bootGen = (store.bootGen || 0) + 1;
+  closeLive();
+  stopTimer();
+  destroyOpening();
+  hideEndCard(endEls());
+  cancelAdvance();
+  cancelScene();
+  notice("");
+  store.liveExerciseId = exerciseId;
+  store.followedId = exerciseId;
+  setMode("live", `Live exercise ${exerciseId}`);
+  switchTab("arena");
+  store.runId = null;
+  store.events = [];
+  store.cursor = 0;
+  store.finalScore = null;
+  store.firstAuthIndex = null;
+  store.firstAccessShown = false;
+  applyLayout(classicLayout(), { id: "classic" });
+  store.liveSource = openLive(onLiveMessage, onLiveError);
+  render(false);
+}
+
+function maybeFollowLive(spend) {
+  if (!followOpensLive(store.follow, store.mode, store.followedId, spend)) return;
+  attachLive(spend.exercise_id);
+}
+
 // Archived run through the live rendering path, without Docker and
 // without starting an exercise. Only used with an explicit ?live=
 // feed address for verification and demos.
 function beginFakeLive(path) {
+  store.bootGen = (store.bootGen || 0) + 1;
   closeLive();
   stopTimer();
   destroyOpening();
@@ -611,6 +658,8 @@ function firstAuthPosition() {
 }
 
 function onLiveMessage(msg) {
+  // A selection sticks: live traffic only lands while live is shown.
+  if (!acceptLiveTraffic(store.mode, Boolean(store.liveSource))) return;
   if (msg.type === "event" && msg.event) {
     // System events carry the range layout on the live stream; read
     // it before they are skipped like everywhere else. The layout
@@ -639,6 +688,9 @@ function onLiveMessage(msg) {
     if (msg.spend_cap_warning) notice(msg.spend_cap_warning, false);
     els.mode.dataset.mode = "ended";
     els.mode.textContent = "Ended";
+    // The ended stream leaves idle behind it, so follow mode can
+    // pick up the next exercise and stale state never lingers.
+    store.mode = "idle";
     closeLive();
     refreshRuns(false);
     pollStatus();
@@ -918,6 +970,7 @@ async function pollStatus() {
     if (!spend.running && spend.last_warning && store.mode === "idle") {
       notice(spend.last_warning, false);
     }
+    maybeFollowLive(spend);
     renderScoreboard(scoreEls(), store.events, store.cursor, store.weights, store.spend, store.finalScore);
     renderScoreboard(arenaScoreEls(), store.events, store.cursor, store.weights, store.spend, store.finalScore);
     renderScoreDetails(scoreEls(), store.events, store.cursor, store.weights, store.spend, store.finalScore);
@@ -1119,6 +1172,8 @@ async function boot() {
   setTheme(theme === "dark" ? "dark" : "light");
   store.lobby.autoplay = loadBool("crucible-autoplay", false);
   els.autoplayBox.checked = store.lobby.autoplay;
+  store.follow = loadBool("crucible-follow", false);
+  if (els.followBox) els.followBox.checked = store.follow;
   try {
     const config = await fetchConfig();
     if (config.business_weights) store.weights = config.business_weights;
@@ -1180,6 +1235,15 @@ async function boot() {
   });
   if (els.classicBox) {
     els.classicBox.addEventListener("change", () => applyClassic(els.classicBox.checked));
+  }
+  if (els.followBox) {
+    els.followBox.addEventListener("change", () => {
+      store.follow = els.followBox.checked;
+      saveBool("crucible-follow", store.follow);
+      // Turning follow on mid-lobby picks up a running exercise at
+      // the next status poll instead of waiting for a new one.
+      if (store.follow) pollStatus();
+    });
   }
   els.settingsBtn.addEventListener("click", (click) => {
     click.stopPropagation();

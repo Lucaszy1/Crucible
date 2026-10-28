@@ -610,6 +610,32 @@ export function motionReduced() {
   return false;
 }
 
+// Live traffic is accepted only while the dashboard is showing live
+// (booting or live) with an open stream. Anything else — a replay, an
+// idle lobby, a closed stream — drops the message so a live feed can
+// never rewrite a selected exercise.
+export function acceptLiveTraffic(mode, sourceOpen) {
+  if (!sourceOpen) return false;
+  return mode === "live" || mode === "booting";
+}
+
+// A slow live boot must not land on a newer selection: the boot is
+// stale when its token no longer matches the current generation.
+export function bootStale(token, current) {
+  return token !== current;
+}
+
+// Follow-live opens the server's running exercise only when the user
+// turned follow on, nothing is selected (idle), the server is running
+// something, and it is not the exercise already followed or finished.
+export function followOpensLive(followOn, mode, followedId, spend) {
+  if (!followOn || mode !== "idle") return false;
+  if (!spend || spend.running !== true) return false;
+  const id = spend.exercise_id;
+  if (!id || id === followedId) return false;
+  return true;
+}
+
 // Blue network held blocks, one per host: clean (blue holds it),
 // breached (red is in), isolated (cut off, drawn striped), patched
 // (sign-in rotated, drawn solid). Probed or restored hosts count as
