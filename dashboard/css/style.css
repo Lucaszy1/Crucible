@@ -161,7 +161,7 @@ select {
 .story-grid {
   display: grid; gap: 20px; padding: 16px 24px 28px;
   grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
-  align-items: start;
+  align-items: stretch;
   max-width: 1560px; margin: 0 auto;
 }
 .story-main { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
@@ -187,7 +187,10 @@ select {
 /* Map panel owns the Story column; the SVG letterboxes inside it via
    preserveAspectRatio="meet" and never exceeds the viewport budget:
    header + tabs + panel chrome + scrubber (~380). */
-.map-panel { display: flex; flex-direction: column; }
+/* The network map sticks while the long right column scrolls,
+   so the left column never sits empty. Static again once the
+   grid collapses to one column. */
+.map-panel { display: flex; flex-direction: column; position: sticky; top: 16px; }
 #mapSvg {
   width: 100%; height: auto; display: block; flex: 0 1 auto;
   min-height: 260px; max-height: calc(100vh - 380px);
@@ -455,6 +458,7 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
 }
 @media (max-width: 1050px) {
   .story-grid { grid-template-columns: 1fr; }
+  .map-panel { position: static; }
   #learnView { grid-template-columns: 1fr; }
   .score-strip { grid-template-columns: 1fr 1fr 1fr; }
   .status-line { white-space: normal; }
