@@ -67,17 +67,35 @@ def _runs_dir() -> Path:
 
 
 def _resolve_run(run_id: str) -> Path:
-    """Map a run id to its jsonl file, rejecting traversal attempts."""
+    """Map a run id to its jsonl file, rejecting traversal attempts.
+
+    Bench episodes live one level down (runs/<bench>/<id>.jsonl),
+    so a top-level miss falls through to a sorted one-level search.
+    Top level always wins a stem collision.
+    """
     if not _RUN_ID_RE.match(run_id or ""):
         raise HTTPException(status_code=404, detail=f"unknown run {run_id!r}")
-    target = (_runs_dir() / f"{run_id}.jsonl").resolve()
+    root = _runs_dir().resolve()
+    target = (root / f"{run_id}.jsonl").resolve()
     try:
-        target.relative_to(_runs_dir().resolve())
+        target.relative_to(root)
     except ValueError:
         raise HTTPException(status_code=404, detail=f"unknown run {run_id!r}")
-    if target.name in SKIP_FILES or not target.is_file():
-        raise HTTPException(status_code=404, detail=f"unknown run {run_id!r}")
-    return target
+    if target.name not in SKIP_FILES and target.is_file():
+        return target
+    try:
+        subdirs = sorted(path for path in root.iterdir() if path.is_dir())
+    except OSError:
+        subdirs = []
+    for subdir in subdirs:
+        candidate = (subdir / f"{run_id}.jsonl").resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            continue
+        if candidate.name not in SKIP_FILES and candidate.is_file():
+            return candidate
+    raise HTTPException(status_code=404, detail=f"unknown run {run_id!r}")
 
 
 def _read_run_events(run_id: str) -> list:

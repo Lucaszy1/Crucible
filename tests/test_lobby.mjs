@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   HELDOUT_MAX, HELDOUT_MIN, drawLiveScenario, formatDuration, hostNoun,
-  partitionLobby, storyLine,
+  partitionLobby, provText, storyLine,
 } from "../dashboard/js/lobby.js";
 
 function ev(id, actor, tool, args, result) {
@@ -128,5 +128,25 @@ describe("partitionLobby", () => {
     const { featured, archive } = partitionLobby(cards, ["fake-1", "x"]);
     assert.deepEqual(featured.map((c) => c.id), ["x"]);
     assert.deepEqual(archive.map((c) => c.id), ["z", "y"]);
+  });
+});
+
+describe("provText", () => {
+  it("names the bench, episode, and seed", () => {
+    assert.equal(
+      provText({ bench: "bench-stage3-heldout", episode: "gen-9018-hard", seed: 9018 }),
+      "bench-stage3-heldout / gen-9018-hard, seed 9018");
+  });
+
+  it("marks a missing seed instead of guessing", () => {
+    assert.equal(
+      provText({ bench: "sample", episode: "sample" }),
+      "sample / sample, seed ?");
+  });
+
+  it("stays empty without provenance", () => {
+    assert.equal(provText(null), "");
+    assert.equal(provText({}), "");
+    assert.equal(provText({ bench: "x" }), "");
   });
 });

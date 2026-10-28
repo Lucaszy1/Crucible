@@ -81,6 +81,43 @@ def _sse_messages(text):
     return messages
 
 
+def test_resolve_run_opens_bench_subdir(client, tmp_runs):
+    bench = tmp_runs / "bench-demo"
+    bench.mkdir()
+    shutil.copy(FIXTURE, bench / "deep-run.jsonl")
+    resp = client.get("/api/runs/deep-run")
+    assert resp.status_code == 200
+    assert resp.json()["id"] == "deep-run"
+
+
+def test_resolve_run_prefers_top_level(client, tmp_runs):
+    bench = tmp_runs / "bench-demo"
+    bench.mkdir()
+    (bench / "demo.jsonl").write_text(
+        '{"id": "evt-0001", "actor": "system", "tool": "x",'
+        ' "args": {}, "result": {},'
+        ' "reasoning_summary": "", "evidence_refs": []}\n')
+    body = client.get("/api/runs/demo").json()
+    assert len(body["events"]) > 1
+
+
+def test_resolve_run_still_rejects_traversal(client, tmp_runs):
+    assert client.get("/api/runs/..%2Fdemo").status_code == 404
+    assert client.get("/api/runs/nope").status_code == 404
+
+
+def test_featured_curation_is_complete():
+    featured = json.loads(
+        (api.DASHBOARD_DIR / "featured.json").read_text(encoding="utf-8"))
+    ids = featured["featured"]
+    assert 3 <= len(ids) <= 6
+    for run_id in ids:
+        assert featured["titles"][run_id].strip() != ""
+        prov = featured["provenance"][run_id]
+        assert prov["bench"] and prov["episode"]
+        assert prov["seed"] is not None
+
+
 def test_runs_list_reports_outcome_and_score(client):
     body = client.get("/api/runs").json()
     assert body["runs"] == [

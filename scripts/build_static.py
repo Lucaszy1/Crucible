@@ -556,47 +556,22 @@ APP_PATCHES = [
     ("  refreshRuns();\n  await pollStatus();\n  setInterval(pollStatus, 5000);",
      "  refreshRuns();\n  staticModeBoot();"),
     ("  if (livePath) {", "  if (livePath && !window.CRUCIBLE_STATIC) {"),
-    ("      id: run.id,\n      outcomeKey: out.key,",
-     "      id: run.id,\n      provenance: data.provenance || null,\n"
+    ("      id: run.id,\n"
+     "      title: (store.lobby.titles || {})[run.id] || null,\n"
+     "      provenance: (store.lobby.provenance || {})[run.id] || null,\n"
+     "      outcomeKey: out.key,",
+     "      id: run.id,\n"
+     "      title: (store.lobby.titles || {})[run.id] || null,\n"
+     "      provenance: data.provenance || null,\n"
      "      outcomeKey: out.key,"),
     ("  store.replayScore = data.score || null;",
      "  store.replayScore = data.score || null;\n"
      "  if (window.CRUCIBLE_STATIC) updateProvBadge(data.provenance);"),
 ]
 
-LOBBY_PROVENANCE = '''\
-// One provenance line per card in the static bundle: a Real run
-// chip plus the source bench, episode, and seed. Live cards carry
-// no provenance and render exactly as before.
-function provenanceLine(model) {
-  const prov = model && model.provenance;
-  if (!prov || !prov.bench || !prov.episode) return null;
-  const line = document.createElement("p");
-  line.className = "lobby-meta lobby-prov";
-  const chip = document.createElement("span");
-  chip.className = "lobby-badge";
-  chip.textContent = "Real run";
-  const text = `${prov.bench} / ${prov.episode}, seed ${prov.seed ?? "?"}`;
-  line.append(chip, document.createTextNode(` ${text}`));
-  line.title = `Real run: ${text}`;
-  return line;
-}
-
-'''
-
-LOBBY_PATCHES = [
-    ("// Large featured card: thumbnail, outcome badge, story, duration.",
-     LOBBY_PROVENANCE
-     + "// Large featured card: thumbnail, outcome badge, story, duration."),
-    ("  body.append(head, story, meta);",
-     "  body.append(head, story, meta);\n"
-     "  const provLine = provenanceLine(model);\n"
-     "  if (provLine) body.append(provLine);"),
-    ("  el.append(head, meta);",
-     "  el.append(head, meta);\n"
-     "  const provLine = provenanceLine(model);\n"
-     "  if (provLine) el.append(provLine);"),
-]
+# lobby.js needs no static patches: the live cards render the
+# provenance line from model.provenance, and the static bundle
+# only swaps where that field comes from (see APP_PATCHES).
 
 COMMANDBAR_STATIC_BAR = '''\
   function staticCommandBar() {
@@ -649,7 +624,6 @@ MODULE_PATCHES = {
     "app": APP_PATCHES,
     "commandbar": COMMANDBAR_PATCHES,
     "learn": LEARN_PATCHES,
-    "lobby": LOBBY_PATCHES,
 }
 
 
@@ -802,9 +776,6 @@ STATIC_CSS = """
   margin: 10px 0 0;
   color: var(--muted);
   font-size: 0.9rem;
-}
-.lobby-prov {
-  overflow-wrap: anywhere;
 }
 .prov-badge {
   font-size: 0.78rem;

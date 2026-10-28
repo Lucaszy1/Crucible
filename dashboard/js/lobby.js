@@ -181,6 +181,34 @@ function playButton(id, label, callbacks) {
   return play;
 }
 
+// Provenance line for real runs: "bench / episode, seed N".
+// Pure; provenanceLine renders it into a card.
+export function provText(prov) {
+  if (!prov || !prov.bench || !prov.episode) return "";
+  return `${prov.bench} / ${prov.episode}, seed ${prov.seed ?? "?"}`;
+}
+
+function provenanceLine(model) {
+  const text = provText(model && model.provenance);
+  if (!text) return null;
+  const line = document.createElement("p");
+  line.className = "lobby-meta lobby-prov";
+  const chip = document.createElement("span");
+  chip.className = "lobby-badge";
+  chip.textContent = "Real run";
+  line.append(chip, document.createTextNode(` ${text}`));
+  line.title = `Real run: ${text}`;
+  return line;
+}
+
+function cardTitle(model) {
+  return model.title || model.id;
+}
+
+function cardTitleAttr(model) {
+  return model.title ? `${model.title} (${model.id})` : model.id;
+}
+
 // Large featured card: thumbnail, outcome badge, story, duration.
 function featureCard(model, callbacks, env) {
   const el = document.createElement("article");
@@ -198,8 +226,8 @@ function featureCard(model, callbacks, env) {
   head.className = "feature-head";
   const id = document.createElement("h3");
   id.className = "lobby-id";
-  id.textContent = model.id;
-  id.title = model.id;
+  id.textContent = cardTitle(model);
+  id.title = cardTitleAttr(model);
   head.append(id, outcomeBadge(model.outcome));
   const story = document.createElement("p");
   story.className = "feature-story";
@@ -217,6 +245,8 @@ function featureCard(model, callbacks, env) {
   foot.className = "feature-foot";
   foot.append(playButton(model.id, "Watch", callbacks));
   body.append(head, story, meta);
+  const provLine = provenanceLine(model);
+  if (provLine) body.append(provLine);
   if (model.flags && model.flags.length > 0) body.append(badgesRow(model.flags));
   body.append(foot);
   el.append(thumb, body);
@@ -236,8 +266,8 @@ function archiveCard(model, callbacks, env) {
   head.className = "lobby-card-head";
   const id = document.createElement("h3");
   id.className = "lobby-id";
-  id.textContent = model.id;
-  id.title = model.id;
+  id.textContent = cardTitle(model);
+  id.title = cardTitleAttr(model);
   head.append(id, outcomeBadge(model.outcome));
   const meta = document.createElement("p");
   meta.className = "lobby-meta";
@@ -288,6 +318,8 @@ function archiveCard(model, callbacks, env) {
     upgrade();
   }
   el.append(head, meta);
+  const provLine = provenanceLine(model);
+  if (provLine) el.append(provLine);
   if (model.flags && model.flags.length > 0) el.append(badgesRow(model.flags));
   el.append(foot);
   return el;

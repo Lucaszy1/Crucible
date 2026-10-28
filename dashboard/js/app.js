@@ -214,7 +214,7 @@ const store = {
   presentLoop: false,
   classic: false,
   thoughtState: null,
-  lobby: { runs: [], cards: [], featuredIds: [], autoplay: false, armByEpisode: new Map(), loading: true },
+  lobby: { runs: [], cards: [], featuredIds: [], titles: {}, provenance: {}, autoplay: false, armByEpisode: new Map(), loading: true },
 };
 
 function thoughtPanels() {
@@ -1140,6 +1140,8 @@ async function classifyRun(run, armByEpisode) {
     for (const host of layout.hosts) roles[host.id] = host.role;
     return {
       id: run.id,
+      title: (store.lobby.titles || {})[run.id] || null,
+      provenance: (store.lobby.provenance || {})[run.id] || null,
       outcomeKey: out.key,
       outcome: { label: out.label, tone: out.tone },
       blueScore: typeof score.blue_score === "number" ? score.blue_score : null,
@@ -1195,8 +1197,12 @@ async function refreshRuns() {
   try {
     const feat = await fetchFeatured();
     store.lobby.featuredIds = Array.isArray(feat.featured) ? feat.featured : [];
+    store.lobby.titles = feat.titles && typeof feat.titles === "object" ? feat.titles : {};
+    store.lobby.provenance = feat.provenance && typeof feat.provenance === "object" ? feat.provenance : {};
   } catch {
     store.lobby.featuredIds = [];
+    store.lobby.titles = {};
+    store.lobby.provenance = {};
   }
   paintLobby();
   let runs = [];
@@ -1228,11 +1234,22 @@ async function refreshRuns() {
   }
   store.lobby.armByEpisode = armByEpisode;
   const queue = [...runs];
+  // Featured runs may live outside the top-level listing (bench
+  // episodes sit one level down): classify the missing ones so the
+  // curated set shows, skipping ids that resolve nowhere.
+  const seen = new Set(runs.map((run) => run.id));
+  for (const id of store.lobby.featuredIds) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      queue.push({ id, featuredExtra: true });
+    }
+  }
   const workers = [];
   const pump = async () => {
     while (queue.length > 0) {
       const run = queue.shift();
       const card = await classifyRun(run, armByEpisode);
+      if (run.featuredExtra && card.moves === 0) continue;
       store.lobby.cards.push(card);
       paintLobby();
     }

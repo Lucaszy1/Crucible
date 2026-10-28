@@ -843,6 +843,7 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
   .moment { flex-direction: column; }
 }
 .lobby-meta { margin: 0; font-size: 13px; color: var(--muted); }
+.lobby-prov { overflow-wrap: anywhere; }
 .lobby-arm { color: var(--text); }
 .lobby-badges { display: flex; gap: 6px; flex-wrap: wrap; }
 .lobby-badge {
