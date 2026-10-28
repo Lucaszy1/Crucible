@@ -505,10 +505,13 @@ export function initStage(canvas, opts) {
 
 export function fitStage(refs) {
   if (!refs || !refs.canvas) return;
+  // The inactive view never touches the shared canvas: resetting its
+  // size would wipe the other view's frame. Refit on reactivation.
+  if (!refs.active) return;
   const canvas = refs.canvas;
   const cw = canvas.clientWidth || 800;
   const ch = canvas.clientHeight || 450;
-  const dpr = Math.min(2, (typeof window !== "undefined" && window.devicePixelRatio) || 1);
+  const dpr = Math.min(1.5, (typeof window !== "undefined" && window.devicePixelRatio) || 1);
   refs.geom = { cw, ch, dpr };
   canvas.width = Math.round(cw * dpr);
   canvas.height = Math.round(ch * dpr);
@@ -1084,27 +1087,33 @@ export function firstAccessStage(refs, host) {
 }
 
 export function cancelStage(refs) {
+  // Scrub and replay clear transient effects only. The loop and the
+  // resize observer stay up: killing them here used to freeze idle
+  // animation and strand the canvas black after any resize cleared it.
   if (!refs) return;
-  refs.active = false;
-  if (refs.raf) {
-    if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(refs.raf);
-    else clearTimeout(refs.raf);
-    refs.raf = 0;
-  }
+  refs.fx = [];
+  refs.sparks = [];
+  refs.flash = null;
+  refs.surge = { red: 0, blue: 0 };
+  refs.knock = { red: 0, blue: 0 };
   if (refs.audTimer) {
     clearTimeout(refs.audTimer);
     refs.audTimer = 0;
-  }
-  if (refs.ro) {
-    refs.ro.disconnect();
-    refs.ro = null;
   }
 }
 
 export function setStageActive(refs, on) {
   if (!refs) return;
   refs.active = Boolean(on);
-  if (refs.active && !refs.reduced) startStageLoop(refs);
+  if (refs.active) {
+    // Refit first: resizes while deselected never touched the canvas.
+    fitStage(refs);
+    if (!refs.reduced) startStageLoop(refs);
+  } else if (refs.raf) {
+    if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(refs.raf);
+    else clearTimeout(refs.raf);
+    refs.raf = 0;
+  }
 }
 
 // p95 of recent frame times in ms, for the debug overlay.

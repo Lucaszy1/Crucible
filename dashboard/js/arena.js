@@ -245,6 +245,8 @@ export function setArenaActive(refs, on) {
   if (refs.active && !was) {
     refs.lastT = now();
     refs.firstFrame = true;
+    // Refit first: resizes while deselected never touched the canvas.
+    fitCanvas(refs);
     if (typeof requestAnimationFrame === "function" && !refs.raf) {
       const loop = () => {
         refs.raf = 0;
@@ -269,9 +271,12 @@ export function setArenaActive(refs, on) {
 function fitCanvas(refs) {
   const { canvas } = refs;
   if (!canvas) return;
+  // The inactive view never touches the shared canvas: resetting its
+  // size would wipe the other view's frame. Refit on reactivation.
+  if (!refs.active) return;
   const cw = Math.max(1, canvas.clientWidth || 640);
   const ch = Math.max(1, canvas.clientHeight || 360);
-  const dpr = Math.min(2, (typeof window !== "undefined" && window.devicePixelRatio) || 1);
+  const dpr = Math.min(1.5, (typeof window !== "undefined" && window.devicePixelRatio) || 1);
   // The scene lives between the HUD and the caption, like the target.
   const topPad = (refs.hud.hudEl ? refs.hud.hudEl.offsetHeight : 100) + 10;
   const botPad = refs.hud.cap ? refs.hud.cap.offsetHeight : 150;
