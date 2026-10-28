@@ -18,6 +18,10 @@ function figures(events, cursor, weights, finalScore) {
   const ended = Boolean(finalScore);
   const shown = ended ? finalScore : live;
   if (slice.length === 0) return { live, ended, shown, outcome: "--", tone: "" };
+  // A mid-run slice has no verdict yet: Stalemate at move 3 of a
+  // run that ends Contained reads as a final call. Show
+  // In progress until the exercise ends and the outcome is known.
+  if (!ended) return { live, ended, shown, outcome: "In progress", tone: "" };
   const display = displayOutcome(slice);
   return { live, ended, shown, outcome: display.label, tone: display.tone };
 }
