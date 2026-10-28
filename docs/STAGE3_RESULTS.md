@@ -1,6 +1,6 @@
 # Stage 3 results: frozen playbook on held-out networks
 
-Generated 2026-10-28T07:56:24.228298+00:00 from `heldout`, `sensors`, `noisyref`, `xcheck`, `briefed`.
+Generated 2026-10-28T16:58:33.133504+00:00 from `heldout`, `sensors`, `noisyref`, `xcheck`, `briefed`.
 Frozen playbook sha256: `76c925e82ddeb30bd592ffe3511bba067aca8dc32db1130185ed8c2422a2c0d8`.
 Corrected headline: sensors-on arms come from the rerun `runs/bench-stage3-heldout-sensors` (working sensors); sensors-off arms come from the valid half of `runs/bench-stage3-heldout`. The first run's sensors-on half is void (documented sensor bug, fixed in c9dd960) and appears only in the void section.
 Rates carry Wilson 95% intervals; paired p-values are exact two-sided (McNemar for binary outcomes, sign test for delays and downtime). p >= 0.05 is reported as within noise.
@@ -68,6 +68,7 @@ The first run's sensors-on arms ran with silently broken sensors (zero alerts in
 - With working sensors every intrusion was contained in both memory arms (20/20 without memory, 20/20 with memory; secret reads 0/20 and 0/20): a ceiling effect, so memory is not distinguishable on outcomes with working sensors.
 - Briefed model red against Open blue (n=6, descriptive only): intrusions 6/6, contained 6/6, secret reads 0/6, median relevant detection delay 11 events, median time to contain 15 events.
 - Void record only: the void run's B vs C secret-read gap was discordant pairs 6-0 over 20 pairs (p=0.0312); it is not evidence.
+- 14 auditor verdicts in the corrected held-out rerun were replayed from the voided original run on byte-identical prompts; no blue, red, or referee response was cached and outcomes are unaffected.
 
 ## Non-claims
 

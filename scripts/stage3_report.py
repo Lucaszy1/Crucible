@@ -495,6 +495,16 @@ def build_claims(comparisons: list, cells: dict, reference: dict,
     return claims
 
 
+# Verified by timestamp attribution of runs/spend.jsonl: 14 cached
+# entries, all muse-wonder-1.0 auditor calls during the rerun, zero
+# for blue, red, or referee.
+REPLAY_NOTE = (
+    "14 auditor verdicts in the corrected held-out rerun were replayed "
+    "from the voided original run on byte-identical prompts; no blue, "
+    "red, or referee response was cached and outcomes are unaffected."
+)
+
+
 NON_CLAIMS = [
     "No result here shows the playbook generalizes beyond these held-out "
     "seeds and difficulties; 20 scenarios are one pilot, not coverage.",
@@ -608,7 +618,8 @@ def main(argv=None) -> int:
         "comparisons": comparisons,
         "void": void,
         "reference": reference,
-        "claims": build_claims(comparisons, cells, reference, void),
+        "claims": build_claims(comparisons, cells, reference, void)
+        + [REPLAY_NOTE],
         "non_claims": list(NON_CLAIMS),
     }
     md_path = Path(args.out_md)

@@ -1,6 +1,6 @@
 {
   "stage": 3,
-  "generated": "2026-10-28T07:56:24.228298+00:00",
+  "generated": "2026-10-28T16:58:33.133504+00:00",
   "frozen_sha256": "76c925e82ddeb30bd592ffe3511bba067aca8dc32db1130185ed8c2422a2c0d8",
   "benches": {
     "heldout": "runs/bench-stage3-heldout",
@@ -633,7 +633,8 @@
     "B vs C on secret-read rate: discordant pairs 0-0 over 20 pairs, is within noise (p=1.0000).",
     "With working sensors every intrusion was contained in both memory arms (20/20 without memory, 20/20 with memory; secret reads 0/20 and 0/20): a ceiling effect, so memory is not distinguishable on outcomes with working sensors.",
     "Briefed model red against Open blue (n=6, descriptive only): intrusions 6/6, contained 6/6, secret reads 0/6, median relevant detection delay 11 events, median time to contain 15 events.",
-    "Void record only: the void run's B vs C secret-read gap was discordant pairs 6-0 over 20 pairs (p=0.0312); it is not evidence."
+    "Void record only: the void run's B vs C secret-read gap was discordant pairs 6-0 over 20 pairs (p=0.0312); it is not evidence.",
+    "14 auditor verdicts in the corrected held-out rerun were replayed from the voided original run on byte-identical prompts; no blue, red, or referee response was cached and outcomes are unaffected."
   ],
   "non_claims": [
     "No result here shows the playbook generalizes beyond these held-out seeds and difficulties; 20 scenarios are one pilot, not coverage.",
