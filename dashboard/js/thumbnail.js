@@ -345,13 +345,12 @@ export function clearThumbnailCache() {
 // only for visible cards, one card per idle slice, never more
 // than one render in flight. One shared offscreen canvas does
 // every render; snapshots live as small bitmaps in an LRU, and
-// featured frames persist in sessionStorage so a reload repaints
-// nothing.
+// frames persist in sessionStorage so a reload repaints nothing.
 export const THUMB_W = 320;
 export const THUMB_H = 180;
-const RENDER_W = 480;
-const RENDER_H = 270;
-export const BITMAP_CACHE_MAX = 24;
+const RENDER_W = 800;
+const RENDER_H = 450;
+export const BITMAP_CACHE_MAX = 60;
 const IDLE_SLICE_MS = 8;
 
 const bitmapCache = new Map();
@@ -543,13 +542,16 @@ function pumpThumbQueue() {
 }
 
 function renderCardFrame(target, card, env) {
-  renderStageThumb(target, (card && card.events) || [], posterCursor(card && card.events), {
+  const refs = renderStageThumb(target, (card && card.events) || [], posterCursor(card && card.events), {
     layout: card && card.layout,
     art: (env && env.art) || {},
     weights: (card && card.weights) || {},
     attackMap: env && env.attackMap,
     label: (card && card.id) || "thumbnail",
   });
+  const crop = refs && refs.thumbCrop;
+  if (crop && crop.sw > 0 && crop.sh > 0) return crop;
+  return { sx: 0, sy: 0, sw: RENDER_W, sh: RENDER_H };
 }
 
 function paintSchematicFrame(target, card) {
@@ -621,9 +623,10 @@ function startThumbJob(job) {
   const done = (bmp, url) => finishThumbJob(job, bmp, url);
   const shared = sharedCanvas("render");
   let painted = false;
+  let crop = { sx: 0, sy: 0, sw: RENDER_W, sh: RENDER_H };
   if (shared) {
     try {
-      renderCardFrame(shared, job.card, job.env);
+      crop = renderCardFrame(shared, job.card, job.env);
       painted = true;
     } catch {
       painted = false;
@@ -635,7 +638,7 @@ function startThumbJob(job) {
       const sctx = snap.getContext("2d");
       if (sctx) {
         sctx.clearRect(0, 0, THUMB_W, THUMB_H);
-        sctx.drawImage(shared, 0, 0, THUMB_W, THUMB_H);
+        sctx.drawImage(shared, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, THUMB_W, THUMB_H);
       }
     } catch {
       painted = false;
@@ -653,12 +656,10 @@ function startThumbJob(job) {
     return;
   }
   let url = null;
-  if (job.featured) {
-    try {
-      url = snap.toDataURL("image/jpeg", 0.82);
-    } catch {
-      url = null;
-    }
+  try {
+    url = snap.toDataURL("image/jpeg", 0.82);
+  } catch {
+    url = null;
   }
   if (typeof createImageBitmap === "function") {
     createImageBitmap(snap).then(
@@ -681,7 +682,7 @@ function finishThumbJob(job, bmp, url) {
   if (thumbInFlight === job) thumbInFlight = null;
   if (job.gen === bitmapGen && (bmp || url)) {
     cacheSet(job.key, { bmp: bmp || url, moves: job.moves });
-    if (job.featured && url) sessionSet(sessionKey(job.key, job.env), { moves: job.moves, url });
+    if (url) sessionSet(sessionKey(job.key, job.env), { moves: job.moves, url });
   }
   const entry = job.gen === bitmapGen ? cacheGet(job.key, job.moves) : null;
   for (const target of job.targets) {
@@ -746,8 +747,9 @@ export function mountArenaThumb(canvas, card, env, opts) {
 function forceThumbPaint(canvas, card, env) {
   const shared = sharedCanvas("render");
   if (!shared) return;
+  let crop = { sx: 0, sy: 0, sw: RENDER_W, sh: RENDER_H };
   try {
-    renderCardFrame(shared, card, env);
+    crop = renderCardFrame(shared, card, env);
   } catch {
     try {
       paintSchematicFrame(shared, card);
@@ -758,7 +760,7 @@ function forceThumbPaint(canvas, card, env) {
   const ctx = canvas.getContext && canvas.getContext("2d");
   if (!ctx) return;
   try {
-    ctx.drawImage(shared, 0, 0, THUMB_W, THUMB_H);
+    ctx.drawImage(shared, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, THUMB_W, THUMB_H);
   } catch {
     // A torn-down canvas never breaks the print path.
   }
