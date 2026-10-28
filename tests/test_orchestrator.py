@@ -199,6 +199,94 @@ def test_run_tool_maps_unknown_and_bad_calls():
     assert out["ok"] is False
 
 
+def _secret_read_event(ok, error=""):
+    return {
+        "id": "evt-0007",
+        "timestamp": "2026-01-01T00:00:00+00:00",
+        "actor": "red",
+        "tool": "read_file",
+        "args": {"host": "db", "path": "/secret/exercise_secret.txt"},
+        "result": {"ok": ok, "error": error} if not ok else {
+            "ok": True, "host": "db", "path": "/secret/exercise_secret.txt"},
+        "reasoning_summary": "Read the exercise secret after signing in.",
+        "evidence_refs": [],
+    }
+
+
+def _scripted_note(red, history):
+    """Advance one scripted red to its closing note and serve it."""
+    actions = []
+    while True:
+        action = red.next_action(len(actions) + 1, [])
+        if action is None:
+            break
+        actions.append(action)
+    fresh = ScriptedRed(spec=getattr(red, "_spec", None))
+    for turn in range(1, len(actions)):
+        fresh.next_action(turn, [])
+    return fresh.next_action(len(actions), history)
+
+
+def test_scripted_red_note_reports_unreachable_host():
+    red = ScriptedRed()
+    history = [_secret_read_event(
+        False, "host 'db' is unreachable (isolated from the range)")]
+    note = _scripted_note(red, history)
+    assert note["tool"] == "report_finding"
+    assert "obtained" not in note["args"]["text"]
+    assert "unreachable" in note["args"]["text"]
+
+
+def test_scripted_red_note_reports_blocked_read():
+    red = ScriptedRed()
+    history = [_secret_read_event(False, "access denied for this file")]
+    note = _scripted_note(red, history)
+    assert note["tool"] == "report_finding"
+    assert "obtained" not in note["args"]["text"]
+    assert "blocked" in note["args"]["text"]
+
+
+def test_scripted_red_note_keeps_obtained_on_success():
+    red = ScriptedRed()
+    note = _scripted_note(red, [_secret_read_event(True)])
+    assert note["tool"] == "report_finding"
+    assert "obtained" in note["args"]["text"]
+
+
+def test_scripted_red_note_neutral_without_secret_read():
+    red = ScriptedRed()
+    note = _scripted_note(red, [])
+    assert note["tool"] == "report_finding"
+    assert "obtained" not in note["args"]["text"]
+
+
+def test_scripted_red_spec_note_reports_unreachable_host():
+    spec = {"entry_host": "web", "path": [
+        {"kind": "jewel_read", "host": "db",
+         "dir": "/secret/", "path": "/secret/x"}]}
+    red = ScriptedRed(spec=spec)
+    history = [_secret_read_event(
+        False, "host 'db' is unreachable (isolated from the range)")]
+    note = _scripted_note(red, history)
+    assert note["tool"] == "report_finding"
+    assert "obtained" not in note["args"]["text"]
+    assert "unreachable" in note["args"]["text"]
+
+
+def test_red_report_text_does_not_change_score():
+    red_note = _event("red", "report_finding", {"ok": True, "id": "finding-1"})
+    red_note["args"] = {"text": "Protected file obtained from the data host."}
+    lane = [
+        _event("red", "scan_host", {"ok": True}),
+        _event("blue", "read_logs", {"ok": True}),
+        red_note,
+    ]
+    first = orchestrator.score_events(lane)
+    red_note["args"] = {"text": "Protected file not read: the read was blocked."}
+    second = orchestrator.score_events(lane)
+    assert first == second
+
+
 def test_turn_loop_alternates_and_writes_jsonl(tmp_path, monkeypatch):
     calls = []
 

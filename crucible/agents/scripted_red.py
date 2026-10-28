@@ -13,6 +13,45 @@ from crucible import sandbox
 ACTOR = "red"
 
 
+def _secret_read_result(history: list) -> dict | None:
+    """Return red's own latest protected-file read result, or None."""
+    for event in reversed(history or []):
+        if event.get("actor") != ACTOR or event.get("tool") != "read_file":
+            continue
+        args = event.get("args", {}) or {}
+        result = event.get("result", {}) or {}
+        path = str(args.get("path") or result.get("path") or "")
+        if path.startswith("/secret/"):
+            return result
+    return None
+
+
+def _honest_note(action: dict, history: list) -> dict:
+    """Rewrite the closing note to match the protected read result.
+
+    The note is served after the secret read, so "obtained" only
+    holds when that read succeeded. Otherwise the note says the
+    host was unreachable or the read was blocked, or stays neutral
+    when no protected read happened at all.
+    """
+    result = _secret_read_result(history)
+    if result is not None and result.get("ok") is True:
+        return {"tool": action["tool"], "args": dict(action["args"]),
+                "reasoning": action["reasoning"], "evidence_refs": []}
+    if result is None:
+        text = "Probe sequence finished without reading the protected file."
+        reasoning = "Record that the protected file was never read."
+    elif "unreachable" in str(result.get("error", "")) \
+            or "isolated" in str(result.get("error", "")):
+        text = "Protected file not read: the data host was unreachable."
+        reasoning = "Record that the data host was unreachable."
+    else:
+        text = "Protected file not read: the read was blocked."
+        reasoning = "Record that the protected read was blocked."
+    return {"tool": "report_finding", "args": {"text": text},
+            "reasoning": reasoning, "evidence_refs": []}
+
+
 def _scenario_defaults() -> dict:
     try:
         scenario = sandbox.load_scenario()
@@ -75,13 +114,16 @@ class ScriptedRed:
 
     def next_action(self, turn: int, history: list) -> dict | None:
         """Return the next planned tool call, or None when finished."""
-        del turn, history
+        del turn
         if self._spec is not None:
             plan = self._gen_plan()
             if self._step >= len(plan):
                 return None
             action = plan[self._step]
             self._step += 1
+            if action["tool"] == "report_finding" \
+                    and self._step >= len(plan):
+                return _honest_note(action, history)
             return {"tool": action["tool"], "args": dict(action["args"]),
                     "reasoning": action["reasoning"], "evidence_refs": []}
         plan = [
@@ -158,4 +200,7 @@ class ScriptedRed:
             return None
         action = plan[self._step]
         self._step += 1
+        if action["tool"] == "report_finding" \
+                and self._step >= len(plan):
+            return _honest_note(action, history)
         return action

@@ -195,6 +195,17 @@ describe("runFlags", () => {
     assert.deepEqual(runFlags("exercise-1", scripted), ["scripted"]);
   });
 
+  it("keeps honest scripted notes flagged as scripted", () => {
+    const scripted = [
+      ev("red", "scan_host", { host: "web" }, { ok: true, running: true },
+        { reasoning_summary: "Check whether the web host is reachable." }),
+      ev("red", "report_finding", { text: "Protected file not read: the data host was unreachable." },
+        { ok: true },
+        { reasoning_summary: "Record that the data host was unreachable." }),
+    ];
+    assert.deepEqual(runFlags("exercise-1", scripted), ["scripted"]);
+  });
+
   it("leaves varied model wording unflagged", () => {
     const model = [
       ev("red", "scan_host", { host: "web" }, { ok: true, running: true },
