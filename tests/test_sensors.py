@@ -477,6 +477,45 @@ def test_collect_warns_once_on_unreadable_host(monkeypatch, caplog):
     assert "db" in caplog.text
 
 
+def test_scripted_blue_records_alerts_on_generated_spec(tmp_path, monkeypatch):
+    from crucible import sandbox
+    from crucible.agents import ScriptedBlue
+    from crucible.scenarios import generate
+
+    spec = generate.generate(9001, "easy")
+    monkeypatch.setattr(sandbox, "_ACTIVE_SPEC", dict(spec))
+    jewel = spec["jewel"]["host"]
+    monkeypatch.setattr(tools, "begin_episode",
+                        lambda: {"ok": True, "attempts": 1, "checks": {}})
+    monkeypatch.setattr(orchestrator, "run_tool",
+                        lambda name, args: {"ok": True})
+
+    def fake_logs(host, tail=None):
+        sandbox.check_host(host)
+        if host == jewel:
+            return ["signin ok user=runner from=controller"]
+        return []
+
+    monkeypatch.setattr(sandbox, "container_logs", fake_logs)
+
+    class _QuietRed:
+        actor = "red"
+
+        def next_action(self, turn, history):
+            return {"tool": "scan_host", "args": {"host": jewel},
+                    "reasoning": "probe", "evidence_refs": []}
+
+    result = orchestrator.run_exercise(
+        _QuietRed(), ScriptedBlue(), max_turns=4,
+        run_path=tmp_path / "gen.jsonl", sensors="on")
+    blues = [event for event in result["events"]
+             if event.get("actor") == "blue"]
+    assert blues
+    rules = {alert["rule"] for event in blues
+             for alert in (event.get("sensor_alerts") or [])}
+    assert "success_first_try" in rules
+
+
 def test_score_sensors_defaults_off_without_first_event():
     history = [
         _event(1, "red", "scan_host", {"host": "web"}, {"ok": True}, "probe"),

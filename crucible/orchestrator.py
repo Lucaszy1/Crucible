@@ -68,15 +68,6 @@ def _next_action(agent, turn: int, history: list, capped_turns: int,
     return agent.next_action(turn, history)
 
 
-def _agent_accepts_alerts(agent) -> bool:
-    """Check whether an agent's next_action takes sensor alerts."""
-    try:
-        params = inspect.signature(agent.next_action).parameters
-    except (TypeError, ValueError):
-        return False
-    return "alerts" in params
-
-
 def _scenario_layout() -> dict:
     """Load the blue-visible range layout for the dashboard.
 
@@ -711,10 +702,12 @@ def run_exercise(
     and downtime but summarizes them as audit metrics. The result adds
     an audit_summary with the mode, the metrics, and the audit cost.
 
-    Sensors mode on (the default) shows blue the new sensor alerts each
-    turn; off leaves blue on logs alone. Blue agents that accept alerts
-    get only the alerts fired since their last move, and the shown
-    alerts are attached to that turn's blue event for the audit trail.
+    Sensors mode on (the default) collects the new sensor alerts on
+    every blue turn and attaches them to that turn's blue event for the
+    audit trail, whatever blue agent runs; off leaves blue on logs
+    alone. Blue agents whose next_action declares alerts also receive
+    the fresh alerts in their turn prompt, while baseline agents that
+    do not declare them decide on logs alone.
     """
     if audit not in AUDIT_MODES:
         raise ValueError(f"audit must be one of {', '.join(AUDIT_MODES)}: {audit!r}")
@@ -749,7 +742,12 @@ def run_exercise(
     )
     audit_weights = _business_weights()
     shown_alerts: dict = {}
-    blue_takes_alerts = sensors == "on" and _agent_accepts_alerts(blue)
+    # Collection is keyed on the sensors flag alone, never on the blue
+    # agent type: every sensors-on turn records what the rules saw, and
+    # _next_action passes the fresh alerts only to agents that declare
+    # them. Gating collection on agent capability once hid a fully
+    # silent sensor range behind scripted-blue runs.
+    collect_alerts = sensors == "on"
 
     turns_used = 0
     idle_rounds = 0
@@ -759,7 +757,7 @@ def run_exercise(
         visible = [event for event in writer.events
                    if event.get("actor") not in ("auditor", "system")]
         fresh_alerts = None
-        if agent is blue and blue_takes_alerts:
+        if agent is blue and collect_alerts:
             fresh_alerts = _new_sensor_alerts(shown_alerts)
         try:
             action = _next_action(agent, slot + 1, visible, capped_turns,

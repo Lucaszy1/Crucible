@@ -265,6 +265,29 @@ def _spec_hosts(seed: int, difficulty: str) -> set:
     return {host["name"] for host in spec.get("hosts", []) or []}
 
 
+def _owed_alerts(events: list) -> bool:
+    """Check whether a sensors-on episode owed the log an alert.
+
+    A successful sign-in always leaves a gated signin-ok line behind
+    (no-gate attempts never authenticate), so the first blue turn after
+    it must attach at least one alert when collection works. Episodes
+    with no intrusion, or with none followed by a blue turn, owe
+    nothing and stay silent without blame.
+    """
+    signin_at = None
+    for index, event in enumerate(events or []):
+        if event.get("actor") != "red" \
+                or event.get("tool") != "try_credential":
+            continue
+        if (event.get("result", {}) or {}).get("authenticated") is True:
+            signin_at = index
+            break
+    if signin_at is None:
+        return False
+    return any(event.get("actor") == "blue"
+               for event in events[signin_at + 1:])
+
+
 def check_episodes(report: Report, bench_dirs: list) -> None:
     """Scan every episode for replay, cost, hygiene, and audit gaps."""
     spend = _spend_index()
@@ -281,6 +304,7 @@ def check_episodes(report: Report, bench_dirs: list) -> None:
         unreached: dict = {}
         sensors_on_eps = 0
         alert_total = 0
+        silent_owed: list = []
         for row in rows:
             episode = row.get("episode", "")
             if episode in seen_ids:
@@ -317,6 +341,10 @@ def check_episodes(report: Report, bench_dirs: list) -> None:
             if mode == "on":
                 sensors_on_eps += 1
                 alert_total += shown
+                if not shown and _owed_alerts(events):
+                    silent_owed.append(episode)
+                    report.add(FAIL, f"{episode}: sensors-on intrusion "
+                                     f"showed zero sensor alerts")
             for event in events:
                 note = str(event.get("reasoning_summary", "") or "")
                 if "daily model spend cap reached" in note:
@@ -372,10 +400,11 @@ def check_episodes(report: Report, bench_dirs: list) -> None:
             report.add(WARN, f"{bench_dir.name} {label}: hosts never "
                              f"reached: {', '.join(names[:6])}"
                              + ("..." if len(names) > 6 else ""))
-        if sensors_on_eps and not alert_total:
-            report.add(FAIL, f"{bench_dir.name}: {sensors_on_eps} "
-                             f"sensors-on episodes with zero sensor "
-                             f"alerts: sensors never fired")
+        if silent_owed:
+            noun = "episode" if len(silent_owed) == 1 else "episodes"
+            report.add(FAIL, f"{bench_dir.name}: {len(silent_owed)} "
+                             f"sensors-on {noun} with intrusions showed "
+                             f"zero sensor alerts: sensors never fired")
         elif sensors_on_eps:
             report.add(OK, f"{bench_dir.name}: {alert_total} sensor "
                            f"alerts across {sensors_on_eps} sensors-on "
