@@ -1,0 +1,38 @@
+{
+  "episode": "gen-1009-hard-solver-sensors-on-memory-on-2",
+  "model_used": "muse-wonder-1.0",
+  "rules": [
+    {
+      "episode": "gen-1001-easy-solver-sensors-on-memory-on-1",
+      "rule": "If a protected-data host shows a successful sign-in followed by listing of restricted data, isolate it immediately before any file read or exfiltration can occur."
+    },
+    {
+      "episode": "gen-1001-easy-solver-sensors-on-memory-on-1",
+      "rule": "After isolating, confirm containment in logs and processes, report the evidence chain, and verify the actual service inventory before patching or restoring the host."
+    },
+    {
+      "episode": "gen-1001-easy-solver-sensors-on-memory-on-2",
+      "rule": "After restoring a contained host, monitor its logs for new sign-in or restricted-listing evidence and only re-isolate if compromise recurs, to limit downtime."
+    },
+    {
+      "episode": "gen-1003-easy-solver-sensors-on-memory-on-1",
+      "rule": "When isolation blocks a restricted read and subsequent logs show no new alerts, hold containment and wait rather than restoring, to prevent exfiltration despite downtime cost."
+    },
+    {
+      "episode": "gen-1006-medium-solver-sensors-on-memory-on-2",
+      "rule": "Do not divert containment to decoy scans on unrelated hosts when logs already link a successful sign-in and restricted listing on the protected host."
+    },
+    {
+      "episode": "gen-1006-medium-solver-sensors-on-memory-on-2",
+      "rule": "Report early perimeter-probe suspicion promptly, then continue log checks and isolate on confirmed sign-in and restricted-listing evidence without waiting for further reports."
+    },
+    {
+      "episode": "gen-1009-hard-solver-sensors-on-memory-on-2",
+      "rule": "When an intermediate host shows a successful sign-in and access to credential-bearing backups, isolate it promptly and assume harvested credentials will be reused against a downstream host."
+    },
+    {
+      "episode": "gen-1009-hard-solver-sensors-on-memory-on-2",
+      "rule": "Isolating an intermediate host does not block already-harvested credentials, so keep checking downstream hosts and isolate the protected host on sign-in before any restricted read succeeds."
+    }
+  ]
+}

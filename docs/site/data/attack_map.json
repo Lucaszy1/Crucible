@@ -1,0 +1,62 @@
+{
+  "blue": {
+    "block_ip": {
+      "label": "Evict"
+    },
+    "isolate_host": {
+      "label": "Contain"
+    },
+    "list_processes": {
+      "label": "Detect"
+    },
+    "patch_service": {
+      "label": "Contain"
+    },
+    "read_logs": {
+      "label": "Detect"
+    },
+    "report_finding": {
+      "label": "Detect"
+    },
+    "restore_host": {
+      "label": "Restore"
+    },
+    "wait": {
+      "label": "Monitor"
+    }
+  },
+  "red": {
+    "http_request": {
+      "name": "Exploit Public-Facing Application",
+      "stage": "Recon",
+      "technique": "T1190"
+    },
+    "list_files": {
+      "name": "File and Directory Discovery",
+      "stage": "Discovery",
+      "technique": "T1083"
+    },
+    "read_file": {
+      "name": "Data from Local System",
+      "stage": "Collection",
+      "technique": "T1005"
+    },
+    "scan_host": {
+      "name": "Network Service Discovery",
+      "stage": "Recon",
+      "technique": "T1046"
+    },
+    "try_credential": {
+      "name": "Brute Force",
+      "stage": "Access",
+      "technique": "T1110"
+    }
+  },
+  "stages": [
+    "Recon",
+    "Access",
+    "Discovery",
+    "Collection",
+    "Exfiltrated"
+  ]
+}

@@ -1,0 +1,648 @@
+{
+  "benches": {
+    "briefed": "runs/bench-stage3-briefed-vs-open",
+    "heldout": "runs/bench-stage3-heldout",
+    "noisyref": "runs/bench-stage3-noisyref",
+    "sensors": "runs/bench-stage3-heldout-sensors",
+    "xcheck": "runs/bench-stage3-xcheck"
+  },
+  "cells": {
+    "solver-sensors-off-memory-off": {
+      "audit_episodes": 0,
+      "audit_justified_rate": null,
+      "cell": "solver-sensors-off-memory-off",
+      "contained_after_intrusion": {
+        "hits": 4,
+        "n": 20,
+        "rate": 0.2,
+        "wilson": [
+          0.08065635327120005,
+          0.41602172202575993
+        ]
+      },
+      "intrusion": {
+        "hits": 20,
+        "n": 20,
+        "rate": 1.0,
+        "wilson": [
+          0.8388698745050669,
+          1.0
+        ]
+      },
+      "mean_downtime_pct": 0.753,
+      "median_detection_delay": 9.0,
+      "median_relevant_delay": 7.0,
+      "median_time_to_contain": 14.0,
+      "n": 20,
+      "secret_read": {
+        "hits": 18,
+        "n": 20,
+        "rate": 0.9,
+        "wilson": [
+          0.6989617935882066,
+          0.9721341060158468
+        ]
+      },
+      "total_cost_usd": 0.0
+    },
+    "solver-sensors-off-memory-on": {
+      "audit_episodes": 0,
+      "audit_justified_rate": null,
+      "cell": "solver-sensors-off-memory-on",
+      "contained_after_intrusion": {
+        "hits": 14,
+        "n": 20,
+        "rate": 0.7,
+        "wilson": [
+          0.4810232237710206,
+          0.854524726031006
+        ]
+      },
+      "intrusion": {
+        "hits": 20,
+        "n": 20,
+        "rate": 1.0,
+        "wilson": [
+          0.8388698745050669,
+          1.0
+        ]
+      },
+      "mean_downtime_pct": 3.8795,
+      "median_detection_delay": 11.0,
+      "median_relevant_delay": 12.0,
+      "median_time_to_contain": 12.0,
+      "n": 20,
+      "secret_read": {
+        "hits": 7,
+        "n": 20,
+        "rate": 0.35,
+        "wilson": [
+          0.1811895478679446,
+          0.5671494897805354
+        ]
+      },
+      "total_cost_usd": 0.0
+    },
+    "solver-sensors-on-memory-off": {
+      "audit_episodes": 20,
+      "audit_justified_rate": 0.6225,
+      "cell": "solver-sensors-on-memory-off",
+      "contained_after_intrusion": {
+        "hits": 20,
+        "n": 20,
+        "rate": 1.0,
+        "wilson": [
+          0.8388698745050669,
+          1.0
+        ]
+      },
+      "intrusion": {
+        "hits": 20,
+        "n": 20,
+        "rate": 1.0,
+        "wilson": [
+          0.8388698745050669,
+          1.0
+        ]
+      },
+      "mean_downtime_pct": 8.5015,
+      "median_detection_delay": 15.0,
+      "median_relevant_delay": 3.0,
+      "median_time_to_contain": 6.0,
+      "n": 20,
+      "secret_read": {
+        "hits": 0,
+        "n": 20,
+        "rate": 0.0,
+        "wilson": [
+          0.0,
+          0.16113012549493322
+        ]
+      },
+      "total_cost_usd": 6.1219
+    },
+    "solver-sensors-on-memory-on": {
+      "audit_episodes": 20,
+      "audit_justified_rate": 0.575,
+      "cell": "solver-sensors-on-memory-on",
+      "contained_after_intrusion": {
+        "hits": 20,
+        "n": 20,
+        "rate": 1.0,
+        "wilson": [
+          0.8388698745050669,
+          1.0
+        ]
+      },
+      "intrusion": {
+        "hits": 20,
+        "n": 20,
+        "rate": 1.0,
+        "wilson": [
+          0.8388698745050669,
+          1.0
+        ]
+      },
+      "mean_downtime_pct": 8.189499999999999,
+      "median_detection_delay": 11.0,
+      "median_relevant_delay": 3.0,
+      "median_time_to_contain": 6.0,
+      "n": 20,
+      "secret_read": {
+        "hits": 0,
+        "n": 20,
+        "rate": 0.0,
+        "wilson": [
+          0.0,
+          0.16113012549493322
+        ]
+      },
+      "total_cost_usd": 6.7343
+    }
+  },
+  "claims": [
+    "A vs B on intrusion rate: discordant pairs 0-0 over 20 pairs, is within noise (p=1.0000).",
+    "A vs B on secret-read rate: discordant pairs 18-0 over 20 pairs, differs (p=<0.0001).",
+    "B vs C on intrusion rate: discordant pairs 0-0 over 20 pairs, is within noise (p=1.0000).",
+    "B vs C on secret-read rate: discordant pairs 0-0 over 20 pairs, is within noise (p=1.0000).",
+    "With working sensors every intrusion was contained in both memory arms (20/20 without memory, 20/20 with memory; secret reads 0/20 and 0/20): a ceiling effect, so memory is not distinguishable on outcomes with working sensors.",
+    "Briefed model red against Open blue (n=6, descriptive only): intrusions 6/6, contained 6/6, secret reads 0/6, median relevant detection delay 11 events, median time to contain 15 events.",
+    "Void record only: the void run's B vs C secret-read gap was discordant pairs 6-0 over 20 pairs (p=0.0312); it is not evidence.",
+    "14 auditor verdicts in the corrected held-out rerun were replayed from the voided original run on byte-identical prompts; no blue, red, or referee response was cached and outcomes are unaffected."
+  ],
+  "comparisons": [
+    {
+      "arms": [
+        "A",
+        "B"
+      ],
+      "cells": [
+        "solver-sensors-off-memory-off",
+        "solver-sensors-on-memory-off"
+      ],
+      "metrics": {
+        "detection_delay": {
+          "discordant": [
+            2,
+            0
+          ],
+          "medians": [
+            9.0,
+            15.0
+          ],
+          "p": 0.5,
+          "paired_n": 2,
+          "verdict": "within noise"
+        },
+        "downtime_pct": {
+          "discordant": [
+            0,
+            20
+          ],
+          "medians": [
+            0.0,
+            8.805
+          ],
+          "p": 1.9073486328125e-06,
+          "paired_n": 20,
+          "verdict": "differs"
+        },
+        "intrusion": {
+          "discordant": [
+            0,
+            0
+          ],
+          "p": 1.0,
+          "verdict": "within noise"
+        },
+        "secret_read": {
+          "discordant": [
+            18,
+            0
+          ],
+          "p": 7.62939453125e-06,
+          "verdict": "differs"
+        }
+      },
+      "note": "cross-bench pairing by scenario; red re-rolled between benches, so this pairing is approximate",
+      "pairs": 20
+    },
+    {
+      "arms": [
+        "B",
+        "C"
+      ],
+      "cells": [
+        "solver-sensors-on-memory-off",
+        "solver-sensors-on-memory-on"
+      ],
+      "metrics": {
+        "detection_delay": {
+          "discordant": [
+            11,
+            4
+          ],
+          "medians": [
+            15.0,
+            11.0
+          ],
+          "p": 0.11846923828125,
+          "paired_n": 15,
+          "verdict": "within noise"
+        },
+        "downtime_pct": {
+          "discordant": [
+            4,
+            4
+          ],
+          "medians": [
+            8.805,
+            7.335
+          ],
+          "p": 1.0,
+          "paired_n": 8,
+          "verdict": "within noise"
+        },
+        "intrusion": {
+          "discordant": [
+            0,
+            0
+          ],
+          "p": 1.0,
+          "verdict": "within noise"
+        },
+        "secret_read": {
+          "discordant": [
+            0,
+            0
+          ],
+          "p": 1.0,
+          "verdict": "within noise"
+        }
+      },
+      "pairs": 20
+    }
+  ],
+  "frozen_sha256": "76c925e82ddeb30bd592ffe3511bba067aca8dc32db1130185ed8c2422a2c0d8",
+  "generated": "2026-10-28T16:58:33.133504+00:00",
+  "non_claims": [
+    "No result here shows the playbook generalizes beyond these held-out seeds and difficulties; 20 scenarios are one pilot, not coverage.",
+    "A comparison within noise is no conclusion, not proof of no effect: with 20 pairs only large asymmetries can reach p < 0.05.",
+    "Held episodes can still reflect red failing on its own rather than blue defending; read wins beside intrusion and containment rates.",
+    "B-vs-C pairs are exactly matched: the same scenario and rep index in one bench replays identical red moves across arms by design, so arm differences isolate blue, not red sampling. A-vs-B pairs across benches by scenario instead, which is approximate because red re-rolled between benches.",
+    "The main table uses a solver red with seeded imperfection, because unbriefed model red achieved no intrusion in 18 train episodes: results show blue contains a known-path intruder, not that blue stops an adaptive attacker. Briefed model red intruded in 6 of 6 probe episodes but that probe is descriptive only at n=6.",
+    "Audit justified rates cover the rerun B and C cells only; no other cell was audited.",
+    "The frozen playbook was learned on train episodes whose sensors were void too, so its rules were learned without sensor input; the rerun tests a deaf-learned playbook under working sensors."
+  ],
+  "reference": {
+    "briefed-red-vs-Spark-Open": {
+      "audit_episodes": 0,
+      "audit_justified_rate": null,
+      "cell": "model-briefed-sensors-on-memory-off",
+      "contained_after_intrusion": {
+        "hits": 6,
+        "n": 6,
+        "rate": 1.0,
+        "wilson": [
+          0.6096569663469356,
+          1.0
+        ]
+      },
+      "intrusion": {
+        "hits": 6,
+        "n": 6,
+        "rate": 1.0,
+        "wilson": [
+          0.6096569663469356,
+          1.0
+        ]
+      },
+      "mean_downtime_pct": 9.033333333333333,
+      "median_detection_delay": 17.0,
+      "median_relevant_delay": 11.0,
+      "median_time_to_contain": 15.0,
+      "n": 6,
+      "secret_read": {
+        "hits": 0,
+        "n": 6,
+        "rate": 0.0,
+        "wilson": [
+          0.0,
+          0.3903430336530645
+        ]
+      },
+      "total_cost_usd": 1.1534
+    },
+    "noisy-sensors-on-memory-off": {
+      "audit_episodes": 0,
+      "audit_justified_rate": null,
+      "cell": "noisy-sensors-on-memory-off",
+      "contained_after_intrusion": {
+        "hits": 20,
+        "n": 20,
+        "rate": 1.0,
+        "wilson": [
+          0.8388698745050669,
+          1.0
+        ]
+      },
+      "intrusion": {
+        "hits": 20,
+        "n": 20,
+        "rate": 1.0,
+        "wilson": [
+          0.8388698745050669,
+          1.0
+        ]
+      },
+      "mean_downtime_pct": 7.955,
+      "median_detection_delay": 14.5,
+      "median_relevant_delay": 5.0,
+      "median_time_to_contain": 8.0,
+      "n": 20,
+      "secret_read": {
+        "hits": 0,
+        "n": 20,
+        "rate": 0.0,
+        "wilson": [
+          0.0,
+          0.16113012549493322
+        ]
+      },
+      "total_cost_usd": 0.0
+    },
+    "noisy-sensors-on-memory-on": {
+      "audit_episodes": 0,
+      "audit_justified_rate": null,
+      "cell": "noisy-sensors-on-memory-on",
+      "contained_after_intrusion": {
+        "hits": 20,
+        "n": 20,
+        "rate": 1.0,
+        "wilson": [
+          0.8388698745050669,
+          1.0
+        ]
+      },
+      "intrusion": {
+        "hits": 20,
+        "n": 20,
+        "rate": 1.0,
+        "wilson": [
+          0.8388698745050669,
+          1.0
+        ]
+      },
+      "mean_downtime_pct": 7.6370000000000005,
+      "median_detection_delay": 10.0,
+      "median_relevant_delay": 5.0,
+      "median_time_to_contain": 8.0,
+      "n": 20,
+      "secret_read": {
+        "hits": 0,
+        "n": 20,
+        "rate": 0.0,
+        "wilson": [
+          0.0,
+          0.16113012549493322
+        ]
+      },
+      "total_cost_usd": 0.0
+    },
+    "spark-blue:solver-sensors-on-memory-off": {
+      "audit_episodes": 0,
+      "audit_justified_rate": null,
+      "cell": "solver-sensors-on-memory-off",
+      "contained_after_intrusion": {
+        "hits": 6,
+        "n": 6,
+        "rate": 1.0,
+        "wilson": [
+          0.6096569663469356,
+          1.0
+        ]
+      },
+      "intrusion": {
+        "hits": 6,
+        "n": 6,
+        "rate": 1.0,
+        "wilson": [
+          0.6096569663469356,
+          1.0
+        ]
+      },
+      "mean_downtime_pct": 11.378333333333332,
+      "median_detection_delay": 3.0,
+      "median_relevant_delay": 1.0,
+      "median_time_to_contain": 6.0,
+      "n": 6,
+      "secret_read": {
+        "hits": 0,
+        "n": 6,
+        "rate": 0.0,
+        "wilson": [
+          0.0,
+          0.3903430336530645
+        ]
+      },
+      "total_cost_usd": 0.8652
+    }
+  },
+  "stage": 3,
+  "void": {
+    "benches": [
+      "bench-stage3-train-solver",
+      "bench-stage3-heldout"
+    ],
+    "cells": {
+      "solver-sensors-on-memory-off": {
+        "audit_episodes": 20,
+        "audit_justified_rate": 0.9017341040462428,
+        "cell": "solver-sensors-on-memory-off",
+        "contained_after_intrusion": {
+          "hits": 4,
+          "n": 20,
+          "rate": 0.2,
+          "wilson": [
+            0.08065635327120005,
+            0.41602172202575993
+          ]
+        },
+        "intrusion": {
+          "hits": 20,
+          "n": 20,
+          "rate": 1.0,
+          "wilson": [
+            0.8388698745050669,
+            1.0
+          ]
+        },
+        "mean_downtime_pct": 0.5509999999999999,
+        "median_detection_delay": 20.0,
+        "median_relevant_delay": 19.0,
+        "median_time_to_contain": 18.0,
+        "n": 20,
+        "secret_read": {
+          "hits": 17,
+          "n": 20,
+          "rate": 0.85,
+          "wilson": [
+            0.6395767041130426,
+            0.9476322080405041
+          ]
+        },
+        "total_cost_usd": 2.5266
+      },
+      "solver-sensors-on-memory-on": {
+        "audit_episodes": 20,
+        "audit_justified_rate": 0.8346774193548387,
+        "cell": "solver-sensors-on-memory-on",
+        "contained_after_intrusion": {
+          "hits": 9,
+          "n": 20,
+          "rate": 0.45,
+          "wilson": [
+            0.25819502085709295,
+            0.6579179916924003
+          ]
+        },
+        "intrusion": {
+          "hits": 20,
+          "n": 20,
+          "rate": 1.0,
+          "wilson": [
+            0.8388698745050669,
+            1.0
+          ]
+        },
+        "mean_downtime_pct": 2.4735,
+        "median_detection_delay": 12.5,
+        "median_relevant_delay": 11.5,
+        "median_time_to_contain": 12.0,
+        "n": 20,
+        "secret_read": {
+          "hits": 11,
+          "n": 20,
+          "rate": 0.55,
+          "wilson": [
+            0.3420820083075996,
+            0.741804979142907
+          ]
+        },
+        "total_cost_usd": 3.9875
+      }
+    },
+    "comparisons": [
+      {
+        "arms": [
+          "A",
+          "B"
+        ],
+        "cells": [
+          "solver-sensors-off-memory-off",
+          "solver-sensors-on-memory-off"
+        ],
+        "metrics": {
+          "detection_delay": {
+            "discordant": [
+              1,
+              0
+            ],
+            "medians": [
+              9.0,
+              20.0
+            ],
+            "p": 1.0,
+            "paired_n": 1,
+            "verdict": "within noise"
+          },
+          "downtime_pct": {
+            "discordant": [
+              3,
+              2
+            ],
+            "medians": [
+              0.0,
+              0.0
+            ],
+            "p": 1.0,
+            "paired_n": 5,
+            "verdict": "within noise"
+          },
+          "intrusion": {
+            "discordant": [
+              0,
+              0
+            ],
+            "p": 1.0,
+            "verdict": "within noise"
+          },
+          "secret_read": {
+            "discordant": [
+              2,
+              1
+            ],
+            "p": 1.0,
+            "verdict": "within noise"
+          }
+        },
+        "pairs": 20
+      },
+      {
+        "arms": [
+          "B",
+          "C"
+        ],
+        "cells": [
+          "solver-sensors-on-memory-off",
+          "solver-sensors-on-memory-on"
+        ],
+        "metrics": {
+          "detection_delay": {
+            "discordant": [
+              1,
+              3
+            ],
+            "medians": [
+              20.0,
+              12.5
+            ],
+            "p": 0.625,
+            "paired_n": 4,
+            "verdict": "within noise"
+          },
+          "downtime_pct": {
+            "discordant": [
+              1,
+              7
+            ],
+            "medians": [
+              0.0,
+              0.0
+            ],
+            "p": 0.0703125,
+            "paired_n": 8,
+            "verdict": "within noise"
+          },
+          "intrusion": {
+            "discordant": [
+              0,
+              0
+            ],
+            "p": 1.0,
+            "verdict": "within noise"
+          },
+          "secret_read": {
+            "discordant": [
+              6,
+              0
+            ],
+            "p": 0.03125,
+            "verdict": "differs"
+          }
+        },
+        "pairs": 20
+      }
+    ]
+  }
+}

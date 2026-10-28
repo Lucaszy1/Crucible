@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crucible Operations Center</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <div>
+      <h1>Crucible <span class="brand-ops">Operations Center</span></h1>
+      <p id="statusLine" class="status-line">No exercise loaded.</p>
+    </div>
+  </div>
+  <div class="top-actions">
+    <span id="modeBadge" class="mode-word" data-mode="idle">Idle</span>
+    <span id="exerciseTitle" class="event-count">No exercise loaded</span>
+    <span id="eventCount" class="event-count">0 events</span>
+    <span id="provBadge" class="prov-badge" hidden></span>
+    <button id="themeBtn" class="btn ghost small" title="Toggle dark theme">Theme</button>
+    <button id="presentBtn" class="btn ghost small" title="Presentation mode (P)">Present</button>
+    <div class="pop-wrap">
+      <button id="settingsBtn" class="btn small" aria-expanded="false" aria-controls="settingsPop">Settings</button>
+      <div id="settingsPop" class="popover" hidden>
+        <div class="control-group">
+          <label for="agentsSelect">Agents</label>
+          <select id="agentsSelect">
+            <option value="scripted" selected>Scripted (no cost)</option>
+            <option value="model">Model (metered)</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <span class="group-label" id="speedLabel">Replay speed</span>
+          <div class="seg" role="group" aria-labelledby="speedLabel" id="speedSeg">
+            <button data-speed="0.5" aria-pressed="false">0.5x</button>
+            <button data-speed="1" aria-pressed="true" class="active">1x</button>
+            <button data-speed="2" aria-pressed="false">2x</button>
+            <button data-speed="4" aria-pressed="false">4x</button>
+          </div>
+        </div>
+        <div class="control-group">
+          <span class="group-label" id="paceLabel">Finish pace</span>
+          <div class="seg" role="group" aria-labelledby="paceLabel" id="paceSeg">
+            <button data-pace="quick" aria-pressed="false">Quick</button>
+            <button data-pace="standard" aria-pressed="true" class="active">Standard</button>
+            <button data-pace="slow" aria-pressed="false">Slow</button>
+          </div>
+        </div>
+        <div class="control-group">
+          <span class="group-label" id="motionLabel">Motion</span>
+          <div class="seg" role="group" aria-labelledby="motionLabel" id="motionSeg">
+            <button data-motion="auto" aria-pressed="true" class="active">Auto</button>
+            <button data-motion="full" aria-pressed="false">Full</button>
+            <button data-motion="reduced" aria-pressed="false">Reduced</button>
+          </div>
+        </div>
+        <div class="control-group">
+          <label class="check" title="Flat arena instead of the cinematic stage"><input type="checkbox" id="classicBox"> Classic view</label>
+        </div>
+        <div class="control-group">
+          <label class="check" title="Switch to a live exercise when one starts"><input type="checkbox" id="followBox"> Follow live</label>
+        </div>
+        <div class="control-group">
+          <div class="server-line">
+            <span id="serverLight" class="light" data-state="unknown" aria-hidden="true"></span>
+            <span id="serverLabel">Connecting…</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <button id="runBtn" class="btn primary" disabled title="Live exercises need a local server — run locally to try this.">Start exercise</button>
+  </div>
+</header>
+
+<div id="notice" class="notice" hidden></div>
+
+<nav class="tabs-main" aria-label="Views">
+  <button id="tabLobby" class="active" aria-selected="true" title="Lobby (L)">Lobby</button>
+  <button id="tabArena" aria-selected="false" title="Arena (A)">Arena</button>
+  <button id="tabStory" aria-selected="false" title="Story (S)">Story</button>
+  <button id="tabDetails" aria-selected="false">Details</button>
+  <button id="tabLearn" aria-selected="false">Learning</button>
+</nav>
+
+<div id="lobbyView">
+<main class="lobby-wrap">
+  <section class="hero" aria-label="Start here">
+    <p class="hero-eyebrow">Crucible</p>
+    <h2 class="hero-title"><span class="r">Red</span> attacks. <span class="b">Blue</span> defends. The auditor keeps score.</h2>
+    <p class="hero-line">An AI red team attacks a simulated company network while an AI blue team defends and an independent auditor checks every decision.</p>
+    <div class="hero-actions">
+      <button id="liveBtn" class="btn primary hero-cta" disabled title="Live exercises need a local server — run locally to try this.">Run a live exercise</button>
+      <button id="replayBtn" class="btn hero-secondary" title="Open a random featured replay">Watch a replay</button>
+    </div>
+    <details class="advanced">
+      <summary>Advanced</summary>
+      <div class="advanced-body">
+        <label class="seed-field">Seed
+          <input id="seedInput" inputmode="numeric" pattern="[0-9]*" placeholder="random" autocomplete="off">
+        </label>
+        <label class="seed-field">Difficulty
+          <select id="dealDifficulty">
+            <option value="random" selected>Random</option>
+            <option value="easy">Easy</option>
+            <option value="medium">Medium</option>
+            <option value="hard">Hard</option>
+          </select>
+        </label>
+        <p class="advanced-hint">Fix a held-out seed (9001 to 9020) to reproduce a network. Empty means a fresh random draw every click.</p>
+      </div>
+    </details>
+    <div id="dealSlot" hidden></div>
+  </section>
+  <section class="featured" aria-label="Featured replays">
+    <div class="featured-head">
+      <h2>Featured replays</h2>
+      <label class="check" title="Open the next featured exercise when one ends"><input type="checkbox" id="autoplayBox"> Autoplay next</label>
+    </div>
+    <div id="featuredGrid" class="featured-grid"></div>
+  </section>
+  <details class="archive" id="archiveWrap">
+    <summary><span id="archiveCount">Archive</span></summary>
+    <div id="archiveGrid" class="lobby-grid" aria-label="Past exercises"></div>
+  </details>
+</main>
+</div>
+
+<div id="arenaView" hidden>
+<main class="arena-wrap">
+  <section class="arena-stage" id="arenaStage" aria-label="Exercise arena">
+   <div class="arena-row3">
+    <aside id="thoughtRed" class="thought red" aria-label="Red thought stream">
+      <button id="thoughtRedHead" class="thought-head" aria-expanded="true">Red thought</button>
+      <p id="thoughtRedText" class="thought-text"></p>
+      <div id="thoughtRedChips" class="thought-chips"></div>
+    </aside>
+    <div class="arena-canvas-wrap" id="arenaWrap">
+      <canvas id="arenaCanvas" role="img" aria-label="Arena contest scene"></canvas>
+      <div id="arenaFrame" aria-hidden="true"></div>
+      <div id="arenaScan" aria-hidden="true"></div>
+      <div id="arenaHud">
+        <div class="arena-team red">
+          <h2>Red team</h2>
+          <small id="arenaRedLine">Red is waiting.</small>
+          <div class="arena-meter-l">Progress to the secret</div>
+          <div class="arena-meter" id="arenaRedMeter"><i></i><i></i><i></i><i></i></div>
+        </div>
+        <div class="arena-mid" id="arenaMid">
+          <div class="arena-row"><span id="arenaExercise">Exercise</span><span>Move <b id="arenaMove">00</b> / <b id="arenaTotal">0</b></span></div>
+          <div class="arena-tug" id="arenaTug" role="img" aria-label="Control bar. No exercise loaded." title="Control bar"><i class="r" id="arenaTugR"></i><i class="b"></i><em id="arenaTugM"></em></div>
+          <div class="arena-score"><span>Blue score</span><b id="arenaScore">100</b></div>
+        </div>
+        <div class="arena-team blue">
+          <h2>Blue team</h2>
+          <small id="arenaBlueLine">Blue is waiting.</small>
+          <div class="arena-meter-l">Network held</div>
+          <div class="arena-meter" id="arenaBlueMeter"><i></i><i></i><i></i><i></i></div>
+        </div>
+      </div>
+      <div id="arenaCap" data-side="system">
+        <div id="arenaCapTag" class="system">EXERCISE</div>
+        <div id="arenaCapBody"><div id="arenaCapText">Hosts guard one secret.</div><div id="arenaCapSub"></div></div>
+      </div>
+      <div id="slate" class="slate" hidden>
+        <div class="slate-art left" aria-hidden="true"></div>
+        <div class="slate-art right" aria-hidden="true"></div>
+        <div class="slate-eyebrow">Crucible Operations Center</div>
+        <h2 id="slateTitle">Exercise</h2>
+        <div class="slate-vs"><span class="r">RED</span><span class="vs">vs</span><span class="b">BLUE</span></div>
+        <div id="slateHosts" class="slate-hosts"></div>
+        <p class="slate-file">One protected file</p>
+        <div id="slateCount" class="slate-count">3</div>
+        <p class="slate-skip">Space or Enter skips</p>
+      </div>
+      <div id="endCard" class="end-veil" hidden>
+        <div class="end-art left" aria-hidden="true"></div>
+        <div class="end-art right" aria-hidden="true"></div>
+        <div class="end-eyebrow" id="endEyebrow">Exercise complete</div>
+        <h2 id="endTitle">Contained</h2>
+        <div class="end-score" id="endScore">Blue score --</div>
+        <div class="end-stats" id="endStats"></div>
+        <p class="end-line" id="endLine"></p>
+        <p class="end-next" id="endNext" hidden></p>
+        <div class="end-btns">
+          <button id="endReplay" class="btn pri" type="button">Replay</button>
+          <button id="endNextBtn" class="btn" type="button">Next exercise</button>
+          <button id="endLobbyBtn" class="btn" type="button">Back to lobby</button>
+        </div>
+        <p class="end-skip">Esc closes</p>
+      </div>
+    </div>
+    <div class="arena-rail">
+      <aside id="thoughtBlue" class="thought blue" aria-label="Blue thought stream">
+        <button id="thoughtBlueHead" class="thought-head" aria-expanded="true">Blue thought</button>
+        <p id="thoughtBlueText" class="thought-text"></p>
+        <div id="thoughtBlueChips" class="thought-chips"></div>
+      </aside>
+      <div id="arenaAud" role="status">
+        <div class="k"><span>Auditor</span><span>Verdict</span></div>
+        <div class="n"><span id="arenaAudNum">-/10</span><span class="w" id="arenaAudWord">--</span></div>
+        <div class="c" id="arenaAudCite"></div>
+        <div class="t" id="arenaAudNote"></div>
+      </div>
+    </div>
+   </div>
+    <div class="arena-bottom">
+      <div class="score-strip arena-scores" aria-label="Score summary">
+        <dl class="score-big"><dt>Outcome</dt><dd id="arenaOutcome">--</dd></dl>
+        <dl class="score-big"><dt>Blue score</dt><dd id="arenaBlue">--</dd></dl>
+        <dl class="score-big"><dt>Downtime</dt><dd id="arenaDowntime">--</dd></dl>
+      </div>
+      <div class="arena-transport">
+        <button id="arenaPlay" class="btn small" title="Play (Space)" disabled>Play</button>
+        <button id="arenaPause" class="btn small" title="Pause (Space)" disabled>Pause</button>
+        <input id="arenaScrubber" type="range" min="0" max="0" value="0" step="1" aria-label="Arena event scrubber" disabled>
+        <span id="arenaPosition" class="position">0 / 0</span>
+        <button id="soundBtn" class="btn ghost small" title="Toggle sound (M)" aria-pressed="false">Sound off</button>
+      </div>
+    </div>
+    <div id="moveStrip" class="move-strip" role="group" aria-label="Move timeline"></div>
+    <section id="cmdBar" class="cmd-bar" aria-label="Defender orders" hidden>
+      <div class="cmd-row">
+        <button id="cmdMic" class="btn small" type="button" aria-pressed="false" title="Speak an order">Speak</button>
+        <input id="cmdInput" class="cmd-input" type="text" maxlength="500" placeholder="Type a defender order, e.g. isolate the willow host" aria-label="Defender order text" autocomplete="off">
+        <button id="cmdSend" class="btn small pri" type="button">Preview</button>
+        <button id="cmdDemo" class="btn small" type="button" title="Fill a canned valid order">Demo command</button>
+        <button id="cmdTakeover" class="btn small" type="button">Take over blue</button>
+      </div>
+      <p id="cmdTranscript" class="cmd-transcript" hidden></p>
+      <div id="cmdPreview" class="cmd-preview" hidden>
+        <span id="cmdPreviewLine"></span>
+        <span id="cmdConfirm" class="cmd-confirm" hidden></span>
+      </div>
+      <div class="cmd-row cmd-meta">
+        <span id="cmdSpend" class="cmd-spend"></span>
+        <span id="cmdNote" class="cmd-note" role="status" hidden></span>
+      </div>
+    </section>
+  </section>
+</main>
+</div>
+
+<div id="storyView" hidden>
+<main class="story-grid">
+  <div class="story-main">
+    <section class="panel map-panel" aria-label="Network map">
+      <h2>Network</h2>
+      <svg id="mapSvg" viewBox="0 0 640 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Range network state"></svg>
+      <div class="legend">
+        <span><i class="sw" data-state="clean"></i>Clean</span>
+        <span><i class="sw" data-state="probed"></i>Probed</span>
+        <span><i class="sw" data-state="signed-in"></i>Signed in</span>
+        <span><i class="sw" data-state="compromised"></i>Compromised</span>
+        <span><i class="sw" data-state="isolated"></i>Isolated</span>
+        <span><i class="sw" data-state="restored"></i>Restored</span>
+      </div>
+      <ul id="presentLatest" aria-label="Latest activity"></ul>
+    </section>
+    <section class="panel scrub-panel" aria-label="Replay controls">
+      <div class="scrub-bar">
+        <div class="transport">
+          <button id="playBtn" class="btn small" title="Play (Space)" disabled>Play</button>
+          <button id="pauseBtn" class="btn small" title="Pause (Space)" disabled>Pause</button>
+          <span class="keys-hint" title="Left and right arrows step one event">Space plays or pauses, arrows step</span>
+        </div>
+        <input id="scrubber" type="range" min="0" max="0" value="0" step="1" aria-label="Event scrubber" disabled>
+        <span id="positionLabel" class="position">0 / 0</span>
+      </div>
+    </section>
+  </div>
+
+  <div class="story-side">
+    <div class="score-strip" aria-label="Score summary">
+      <dl class="score-big"><dt>Outcome</dt><dd id="sbOutcome">--</dd></dl>
+      <dl class="score-big"><dt>Blue score</dt><dd id="sbBlue">--</dd></dl>
+      <dl class="score-big"><dt>Downtime</dt><dd id="sbDowntime">--</dd></dl>
+    </div>
+    <section class="panel" aria-label="Outcome">
+      <h2>Outcome</h2>
+      <div id="storyOutcome" class="story-outcome">
+        <p class="empty">Open an exercise to see its outcome.</p>
+      </div>
+    </section>
+    <section class="panel" aria-label="Key moments">
+      <h2>Key moments</h2>
+      <ol id="momentList" class="moments">
+        <li class="empty">Key moments appear here once the exercise starts.</li>
+      </ol>
+    </section>
+    <section class="panel" aria-label="Activity">
+      <h2>What happened</h2>
+      <div id="feedList" class="feed">
+        <p class="empty">Moves appear here once the exercise starts.</p>
+      </div>
+    </section>
+  </div>
+</main>
+</div>
+
+<div id="detailsView" hidden>
+<main class="details-grid">
+  <section class="panel" aria-label="Score details">
+    <h2>Score</h2>
+    <div id="finalBanner" class="banner" hidden></div>
+    <dl class="score-list">
+      <div><dt>Detection delay</dt><dd id="sbDetect">--</dd></div>
+      <div><dt>Containment</dt><dd id="sbContain">--</dd></div>
+    </dl>
+    <div class="cost">
+      <div class="cost-head"><span>Cost today</span><span id="costLabel">$0.00</span></div>
+      <div class="meter"><div id="costBar" class="meter-fill" style="width:0%"></div></div>
+      <p id="exerciseCost" class="cost-sub">Exercise cost: --</p>
+    </div>
+  </section>
+
+  <section class="panel" aria-label="Auditor">
+    <h2>Auditor</h2>
+    <div id="auditChips" class="chips"><span class="empty">Verdict totals appear here.</span></div>
+    <p id="auditSummary" class="cost-sub">No verdicts yet.</p>
+    <p id="auditCost" class="cost-sub">Audit cost: --</p>
+    <div id="auditList" class="audit-list">
+      <p class="empty">Verdicts appear here once blue acts.</p>
+    </div>
+  </section>
+
+  <section class="panel" aria-label="Technique coverage">
+    <h2>Technique coverage</h2>
+    <h3 class="mini-head">Progress</h3>
+    <ol id="stageStrip" class="stages"></ol>
+    <h3 class="mini-head">Red techniques</h3>
+    <ul id="redTechList" class="tech-list"><li class="empty">No red activity yet.</li></ul>
+    <h3 class="mini-head">Blue responses</h3>
+    <ul id="blueLabelList" class="tech-list"><li class="empty">No blue activity yet.</li></ul>
+  </section>
+
+  <section class="panel" aria-label="Evidence">
+    <h2>Evidence</h2>
+    <div id="evidenceChips" class="chips"><span class="empty">Cited log lines appear here.</span></div>
+    <div id="logTabs" class="tabs" role="tablist"></div>
+    <div id="logViewer" class="logs" tabindex="0"><p class="empty">Host logs appear here.</p></div>
+  </section>
+</main>
+</div>
+
+<div id="learnView" hidden>
+  <section class="panel" aria-label="Memory experiment">
+    <h2>Memory experiment (Stage 3)</h2>
+    <p id="stage3Empty" class="empty">Loading Stage 3 numbers…</p>
+    <p id="stage3Void" class="void-note" hidden></p>
+    <div id="stage3On" class="stage3-section"></div>
+    <div id="stage3Off" class="stage3-section"></div>
+  </section>
+  <section class="panel" aria-label="Frozen playbook">
+    <h2>Frozen playbook</h2>
+    <p id="playSource" class="cost-sub"></p>
+    <p id="playEmpty" class="empty">No playbook on file.</p>
+    <ol id="playRules" class="play-rules"></ol>
+  </section>
+</div>
+
+<div id="confirmOverlay" class="overlay" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <h2 id="confirmTitle">Run a model exercise?</h2>
+    <p>Model turns call the metered API. Scripted runs are free.</p>
+    <dl class="score-grid">
+      <div><dt>Estimated cost</dt><dd id="confirmCost">--</dd></div>
+      <div><dt>Spent today</dt><dd id="confirmSpent">--</dd></div>
+      <div><dt>Daily limit</dt><dd id="confirmLimit">--</dd></div>
+    </dl>
+    <p id="confirmWarn" class="warn" hidden></p>
+    <div class="dialog-actions">
+      <button id="confirmCancel" class="btn">Cancel</button>
+      <button id="confirmOk" class="btn primary">Start exercise</button>
+    </div>
+  </div>
+</div>
+
+<script>window.CRUCIBLE_STATIC = true;</script>
+<script src="data.js"></script>
+<script src="app.bundle.js"></script>
+</body>
+</html>
