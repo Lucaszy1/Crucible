@@ -50,4 +50,11 @@ export function initControls(els, deps) {
       });
     });
   }
+  if (els.motionSeg) {
+    els.motionSeg.querySelectorAll("button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        deps.onMotion(btn.dataset.motion);
+      });
+    });
+  }
 }

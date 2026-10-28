@@ -3,7 +3,7 @@ import { fetchAttackMap, fetchCampaign, fetchCampaigns, fetchConfig, fetchFeatur
 import { fillCampaignSelects, renderLearn } from "./learn.js";
 import {
   acceptLiveTraffic, autoplayQueue, bootStale, displayOutcome, endCardStats, eventHost,
-  finishSide, followOpensLive, motionReduced, outcomeLine,
+  finishSide, followOpensLive, motionReduced, motionSetting, outcomeLine,
   rankFeatured, reduceHostStates, runFlags, scoreEvents,
 } from "./state.js";
 import { describeEvent, statusSentence } from "./story.js";
@@ -29,8 +29,8 @@ import {
 } from "./arena.js";
 import {
   cancelStage, firstAccessStage, flashStageHost, glitchStage, initStage,
-  loadStageArt, renderStageStatic, setStageActive, setStageArt, setStageLayout, stageFinish,
-  stageNotify,
+  loadStageArt, renderStageStatic, setStageActive, setStageArt, setStageLayout, setStageReduced,
+  stageFinish, stageNotify,
 } from "./stage.js";
 import {
   classicLayout, layoutFromEvents, layoutHosts, layoutWeights, scenarioMeta, scenarioText,
@@ -143,6 +143,7 @@ const controls = {
   run: document.getElementById("runBtn"),
   speedSeg: document.getElementById("speedSeg"),
   paceSeg: document.getElementById("paceSeg"),
+  motionSeg: document.getElementById("motionSeg"),
   light: document.getElementById("serverLight"),
   label: document.getElementById("serverLabel"),
 };
@@ -165,6 +166,7 @@ const store = {
   playing: false,
   speed: 1,
   pace: "standard",
+  motion: "auto",
   timer: null,
   weights: { web: 3, app: 3, db: 5, workstation: 1 },
   layout: null,
@@ -1199,6 +1201,32 @@ function applyPace(pace) {
   }
 }
 
+// Motion setting: Auto follows the OS, Full and Reduced pin the
+// path. Takes effect at once: transients clear and the stage
+// swaps between the full loop and the slow repaint beat.
+function applyMotionSetting(mode, swap) {
+  const valid = mode === "full" || mode === "reduced" ? mode : "auto";
+  store.motion = valid;
+  try {
+    window.localStorage.setItem("crucible-motion", valid);
+  } catch (err) {
+    // Private browsing: the motion choice simply does not persist.
+  }
+  if (controls.motionSeg) {
+    controls.motionSeg.querySelectorAll("button").forEach((btn) => {
+      const on = btn.dataset.motion === valid;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-pressed", String(on));
+    });
+  }
+  // Boot passes swap=false: the stage inits with the effective
+  // path already, so there is nothing to swap or re-render yet.
+  if (swap === false) return;
+  if (stageRefs) setStageReduced(stageRefs, reducedMotion());
+  cancelScene();
+  render(false);
+}
+
 async function boot() {
   let theme = "light";
   try {
@@ -1237,7 +1265,9 @@ async function boot() {
     onRun: onRunRequest,
     onSpeed: (speed) => applySpeed(speed),
     onPace: (pace) => applyPace(pace),
+    onMotion: (mode) => applyMotionSetting(mode),
   });
+  applyMotionSetting(motionSetting(), false);
   let savedPace = "standard";
   try {
     savedPace = window.localStorage.getItem("crucible-pace") || "standard";

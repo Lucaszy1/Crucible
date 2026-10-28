@@ -1247,11 +1247,65 @@ export function setStageActive(refs, on) {
   if (refs.active) {
     // Refit first: resizes while deselected never touched the canvas.
     fitStage(refs);
-    if (!refs.reduced) startStageLoop(refs);
-  } else if (refs.raf) {
-    if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(refs.raf);
-    else clearTimeout(refs.raf);
-    refs.raf = 0;
+    if (refs.reduced) startStageSlowLoop(refs);
+    else startStageLoop(refs);
+  } else {
+    if (refs.raf) {
+      if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(refs.raf);
+      else clearTimeout(refs.raf);
+      refs.raf = 0;
+    }
+    if (refs.slowTimer) {
+      clearTimeout(refs.slowTimer);
+      refs.slowTimer = 0;
+    }
+  }
+}
+
+// Reduced motion keeps a slow repaint beat (about 4fps) instead of
+// no loop at all: static means no animated effects, not no
+// repainting, and the blank-guard probe still runs so the stage
+// can never sit black. The clock stays frozen, so every paint is
+// the same still, rebuilt.
+export function setStageReduced(refs, reduced) {
+  if (!refs) return;
+  refs.reduced = Boolean(reduced);
+  if (refs.active) {
+    if (refs.raf) {
+      if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(refs.raf);
+      else clearTimeout(refs.raf);
+      refs.raf = 0;
+    }
+    if (refs.slowTimer) {
+      clearTimeout(refs.slowTimer);
+      refs.slowTimer = 0;
+    }
+    if (refs.reduced) startStageSlowLoop(refs);
+    else startStageLoop(refs);
+  }
+}
+
+function startStageSlowLoop(refs) {
+  if (!refs || refs.slowTimer || !refs.reduced || !refs.active) return;
+  const beat = () => {
+    refs.slowTimer = 0;
+    if (!refs.active || !refs.reduced) return;
+    drawStage(refs);
+    sampleFps(refs, Date.now());
+    refs.slowTimer = setTimeout(beat, 250);
+  };
+  refs.slowTimer = setTimeout(beat, 250);
+}
+
+// Rolling frames-per-second from repaint timestamps, shared by the
+// full loop and the reduced-motion beat.
+function sampleFps(refs, t) {
+  refs.fpsCount += 1;
+  if (!refs.fpsT) refs.fpsT = t;
+  if (t - refs.fpsT >= 500) {
+    refs.fps = Math.round((refs.fpsCount * 1000) / (t - refs.fpsT));
+    refs.fpsCount = 0;
+    refs.fpsT = t;
   }
 }
 
@@ -1533,13 +1587,7 @@ function startStageLoop(refs) {
     refs.lowDetail = budget.low;
     refs.samples.push(dt);
     if (refs.samples.length > 120) refs.samples.shift();
-    refs.fpsCount += 1;
-    if (!refs.fpsT) refs.fpsT = t;
-    if (t - refs.fpsT >= 500) {
-      refs.fps = Math.round((refs.fpsCount * 1000) / (t - refs.fpsT));
-      refs.fpsCount = 0;
-      refs.fpsT = t;
-    }
+    sampleFps(refs, t);
     if (refs.hitstopFrames > 0) {
       // Hit-stop: hold the frozen frame for a beat so heavy
       // impacts land. Counted in frames, immune to clock drift.

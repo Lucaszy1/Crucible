@@ -5,8 +5,9 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   applyCamera, blueLine, calloutForEvent, dollyTarget, FINISH_PACES, finishPlan, FLIGHT_MS,
-  flightLaneRect, frameBudget, frameP95, flightLane, fxForEvent, guardianPulse, intrusionLevel,
-  laneFeed, lanePoint, paintGuardian, paintIntrusion, redLine, stageLayout, stageWash, stepCamera,
+  flightLaneRect, frameBudget, frameP95, flightLane, fxForEvent, guardianPulse, initStage,
+  intrusionLevel, laneFeed, lanePoint, paintGuardian, paintIntrusion, redLine, setStageActive,
+  setStageReduced, stageLayout, stageWash, stepCamera,
 } from "../dashboard/js/stage.js";
 import { arenaGeometry, classicLayout, normalizeLayout } from "../dashboard/js/layout.js";
 
@@ -505,5 +506,71 @@ describe("entity levels", () => {
       low = next.low;
     }
     assert.equal(low, false);
+  });
+});
+
+describe("reduced-motion beat", () => {
+  function fakeCanvas() {
+    return {
+      clientWidth: 800, clientHeight: 450, width: 0, height: 0,
+      getContext: () => null,
+    };
+  }
+
+  it("repaints on a slow beat with the clock frozen", () => {
+    const realSetTimeout = globalThis.setTimeout;
+    const realClearTimeout = globalThis.clearTimeout;
+    const scheduled = [];
+    let timerId = 0;
+    globalThis.setTimeout = (fn, ms) => {
+      timerId += 1;
+      scheduled.push({ id: timerId, fn, ms });
+      return timerId;
+    };
+    globalThis.clearTimeout = (id) => {
+      const at = scheduled.findIndex((t) => t.id === id);
+      if (at >= 0) scheduled.splice(at, 1);
+    };
+    try {
+      const refs = initStage(fakeCanvas(), { reduced: true });
+      setStageActive(refs, true);
+      assert.equal(scheduled.length, 1, "one slow beat scheduled");
+      assert.equal(scheduled[0].ms, 250, "about 4fps");
+      const before = refs.fpsCount;
+      scheduled[0].fn();
+      assert.ok(refs.fpsCount > before, "the beat counts as a repaint");
+      assert.equal(refs.clock, 0, "static: the clock never advances");
+      setStageActive(refs, false);
+      assert.equal(refs.slowTimer, 0, "deactivating clears the beat");
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+      globalThis.clearTimeout = realClearTimeout;
+    }
+  });
+
+  it("swaps between the full loop and the slow beat", () => {
+    const realSetTimeout = globalThis.setTimeout;
+    const scheduled = [];
+    let timerId = 0;
+    globalThis.setTimeout = (fn, ms) => {
+      timerId += 1;
+      scheduled.push({ id: timerId, fn, ms });
+      return timerId;
+    };
+    try {
+      const refs = initStage(fakeCanvas(), { reduced: false });
+      setStageActive(refs, true);
+      // No rAF in Node: the full loop falls back to 16ms timeouts.
+      assert.equal(scheduled.length, 1, "full loop scheduled");
+      assert.equal(scheduled[0].ms, 16);
+      setStageReduced(refs, true);
+      assert.equal(refs.reduced, true);
+      assert.ok(refs.slowTimer, "slow beat scheduled after the swap");
+      setStageReduced(refs, false);
+      assert.equal(refs.reduced, false);
+      assert.equal(refs.slowTimer, 0, "slow beat cleared after the swap back");
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+    }
   });
 });

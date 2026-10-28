@@ -15,6 +15,7 @@ import {
   finishSide,
   followOpensLive,
   motionReduced,
+  motionSetting,
   outcomeLine,
   rankFeatured,
   runFlags,
@@ -253,6 +254,39 @@ describe("endCardStats", () => {
 describe("motionReduced", () => {
   it("reads full motion where there is no window", () => {
     assert.equal(motionReduced(), false);
+  });
+
+  it("prefers the URL override, then the setting, then the OS", () => {
+    const realWindow = globalThis.window;
+    const fake = (search, stored, osReduced) => {
+      globalThis.window = {
+        location: { search },
+        localStorage: { getItem: () => stored },
+        matchMedia: () => ({ matches: osReduced }),
+      };
+    };
+    try {
+      fake("?motion=full", "reduced", true);
+      assert.equal(motionReduced(), false, "URL full wins over everything");
+      fake("?motion=reduced", "full", false);
+      assert.equal(motionReduced(), true, "URL reduced wins over everything");
+      fake("", "full", true);
+      assert.equal(motionReduced(), false, "stored full beats the OS");
+      fake("", "reduced", false);
+      assert.equal(motionReduced(), true, "stored reduced beats the OS");
+      fake("", "auto", true);
+      assert.equal(motionReduced(), true, "auto follows the OS");
+      fake("", "auto", false);
+      assert.equal(motionReduced(), false, "auto follows the OS");
+      fake("", "bogus", true);
+      assert.equal(motionReduced(), true, "bad stored value falls back to auto");
+      assert.equal(motionSetting(), "auto");
+      fake("", "reduced", false);
+      assert.equal(motionSetting(), "reduced");
+    } finally {
+      if (realWindow === undefined) delete globalThis.window;
+      else globalThis.window = realWindow;
+    }
   });
 });
 

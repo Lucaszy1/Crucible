@@ -661,16 +661,33 @@ export function endCardStats(eventList, score, weights) {
   };
 }
 
-// Motion path for the show layer. The ?motion= preview override wins
-// when present (full forces full motion, reduced forces the reduced
-// path); otherwise the media query decides. Node has no window and
-// reads full motion.
+// Stored motion setting: auto follows the OS, full and reduced pin
+// the path. Anything unreadable falls back to auto.
+export function motionSetting() {
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const value = window.localStorage.getItem("crucible-motion");
+      if (value === "full" || value === "reduced" || value === "auto") return value;
+    }
+  } catch {
+    return "auto";
+  }
+  return "auto";
+}
+
+// Motion path for the show layer. Precedence: the ?motion= preview
+// override first (so a recording never depends on a machine
+// setting), then the stored setting, then the OS media query.
+// Node has no window and reads full motion.
 export function motionReduced() {
   try {
     if (typeof window !== "undefined" && window.location) {
       const override = new URLSearchParams(window.location.search).get("motion");
       if (override === "full") return false;
       if (override === "reduced") return true;
+      const setting = motionSetting();
+      if (setting === "full") return false;
+      if (setting === "reduced") return true;
       if (typeof window.matchMedia === "function" &&
         window.matchMedia("(prefers-reduced-motion: reduce)").matches) return true;
     }
