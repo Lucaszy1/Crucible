@@ -8,8 +8,8 @@ import {
   flashHold, FLIGHT_MS, flightLaneRect, frameBudget, frameP95, flightLane, fxForEvent,
   guardianPulse, hitstopFor, initStage, intrusionLevel, laneFeed, lanePoint, LOW_STREAK,
   moveSpanMs, paintGuardian,
-  paintIntrusion, projBody, redLine, renderStageStatic, renderStageThumb, setStageActive, setStageReduced,
-  stageLayout, stageNotify, stageWash, stepCamera, trailSpan,
+  paintIntrusion, projBody, redLine, renderStageStatic, renderStageThumb, sampleMeltMask,
+  setStageActive, setStageReduced, stageLayout, stageNotify, stageWash, stepCamera, trailSpan,
 } from "../dashboard/js/stage.js";
 import { arenaGeometry, classicLayout, normalizeLayout } from "../dashboard/js/layout.js";
 
@@ -768,5 +768,62 @@ describe("renderStageThumb", () => {
     const refs = renderStageThumb(fakeCanvas(), lane, 1, { layout: classicLayout() });
     assert.equal(refs.fx.length, 0);
     assert.ok(refs.thumbCrop.sw > 0 && refs.thumbCrop.sh > 0);
+  });
+});
+
+describe("sampleMeltMask", () => {
+  // 4x4 sprite: opaque red corners and core, transparent elsewhere.
+  function sprite() {
+    const px = new Uint8ClampedArray(4 * 4 * 4);
+    const dot = (x, y, r, g, b, a) => {
+      const i = (y * 4 + x) * 4;
+      px[i] = r; px[i + 1] = g; px[i + 2] = b; px[i + 3] = a;
+    };
+    dot(0, 0, 200, 20, 20, 255);
+    dot(3, 0, 200, 20, 20, 255);
+    dot(0, 3, 200, 20, 20, 255);
+    dot(3, 3, 200, 20, 20, 255);
+    dot(1, 1, 20, 20, 200, 255);
+    dot(2, 2, 20, 20, 200, 10);
+    return px;
+  }
+
+  it("keeps opaque pixels and drops transparent ones", () => {
+    const slots = sampleMeltMask(sprite(), 4, [255, 110, 90], 90);
+    assert.equal(slots.length, 5);
+  });
+
+  it("orders outer pixels first so the rim peels first", () => {
+    const slots = sampleMeltMask(sprite(), 4, [255, 110, 90], 90);
+    const rads = slots.map((s) => Math.hypot(s.x, s.y));
+    for (let i = 1; i < rads.length; i += 1) {
+      assert.ok(rads[i] <= rads[i - 1] + 1e-9, `slot ${i} inside slot ${i - 1}`);
+    }
+    assert.ok(rads[0] > rads[rads.length - 1], "rim leads the core");
+  });
+
+  it("tints from the pixel blended toward the accent", () => {
+    const slots = sampleMeltMask(sprite(), 4, [0, 0, 0], 90);
+    // 200 * 0.55 blended toward black, then floored to peak 150.
+    assert.ok(slots[0].fill.startsWith("rgb(150,15,15)"), slots[0].fill);
+  });
+
+  it("keeps bright pixels below the ceiling", () => {
+    const slots = sampleMeltMask(sprite(), 4, [255, 255, 255], 90);
+    for (const s of slots) {
+      for (const v of s.fill.match(/\d+/g).map(Number)) {
+        assert.ok(v >= 0 && v <= 255, s.fill);
+      }
+    }
+  });
+
+  it("caps the slot count", () => {
+    const slots = sampleMeltMask(sprite(), 4, [255, 110, 90], 2);
+    assert.equal(slots.length, 2);
+  });
+
+  it("survives empty input", () => {
+    assert.deepEqual(sampleMeltMask(null, 4, [0, 0, 0], 90), []);
+    assert.deepEqual(sampleMeltMask(new Uint8ClampedArray(0), 4, [0, 0, 0], 90), []);
   });
 });

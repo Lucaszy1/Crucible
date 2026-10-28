@@ -821,6 +821,82 @@ function maskSplash(tex) {
   return layer;
 }
 
+// Melt sampler: glyph slots from an entity sprite's own pixels.
+// data is RGBA bytes of a w-wide square; accent is [r,g,b]. Keeps
+// opaque pixels only, sorts outer-first so the peel starts at the
+// rim, stride-picks down to max, and tints each slot from its own
+// pixel blended toward the accent. Pure, for tests.
+export function sampleMeltMask(data, w, accent, max) {
+  const out = [];
+  const n = Math.floor((data ? data.length : 0) / 4);
+  const width = Math.max(1, Math.floor(Number(w) || 1));
+  const acc = Array.isArray(accent) ? accent : [255, 255, 255];
+  const cap = Math.max(1, Math.floor(Number(max) || 1));
+  for (let i = 0; i < n; i += 1) {
+    const a = data[i * 4 + 3];
+    if (a < 48) continue;
+    const x = (i % width + 0.5) / width - 0.5;
+    const y = (Math.floor(i / width) + 0.5) / width - 0.5;
+    out.push({
+      x, y,
+      rad: Math.hypot(x, y),
+      r: data[i * 4], g: data[i * 4 + 1], b: data[i * 4 + 2],
+    });
+  }
+  out.sort((p, q) => q.rad - p.rad);
+  const step = Math.max(1, Math.ceil(out.length / cap));
+  const picked = [];
+  for (let i = 0; i < out.length && picked.length < cap; i += step) {
+    const s = out[i];
+    let r = s.r * 0.55 + (Number(acc[0]) || 0) * 0.45;
+    let g = s.g * 0.55 + (Number(acc[1]) || 0) * 0.45;
+    let b = s.b * 0.55 + (Number(acc[2]) || 0) * 0.45;
+    // Brightness floor: the splash rim runs near-black, and a dark
+    // glyph on a dark stage is invisible. Lift toward white along
+    // the same hue so the art's colors survive, legibly.
+    const peak = Math.max(r, g, b, 1);
+    if (peak < 150) {
+      const k = 150 / peak;
+      r *= k; g *= k; b *= k;
+    }
+    picked.push({
+      x: s.x, y: s.y,
+      fill: `rgb(${Math.min(255, Math.round(r))},${Math.min(255, Math.round(g))},${Math.min(255, Math.round(b))})`,
+    });
+  }
+  return picked;
+}
+
+// Melt masks, built once per sprite set: each hero splash is read
+// back from its own baked body canvas, so the dissolve carries the
+// art's shapes and colors. Cached on refs; the paint path only reads.
+function buildMeltMasks(refs) {
+  const key = refs.bodyKey || "";
+  if (refs.meltKey === key && refs.meltMasks) return refs.meltMasks;
+  refs.meltKey = key;
+  refs.meltMasks = {
+    red: sampleBodyMask(refs, "intrusion", MELT_ACCENTS.red),
+    blue: sampleBodyMask(refs, "guardian", MELT_ACCENTS.blue),
+  };
+  return refs.meltMasks;
+}
+
+function sampleBodyMask(refs, which, accent) {
+  try {
+    const body = (refs.bodies || {})[which];
+    if (!body || !body.width) return [];
+    const S = 96;
+    const probe = makeLayer(S, S);
+    const g = probe ? probe.getContext("2d") : null;
+    if (!g) return [];
+    g.drawImage(body, 0, 0, S, S);
+    const px = g.getImageData(0, 0, S, S).data;
+    return sampleMeltMask(px, S, accent, 90);
+  } catch {
+    return [];
+  }
+}
+
 function relayoutStage(refs) {
   if (!refs) return;
   const { cw, ch } = refs.geom;
@@ -1795,6 +1871,9 @@ const CYAN = "#7fd4ff";
 const GOLD = "#ffc83d";
 const MONO = "'JetBrains Mono',ui-monospace,Menlo,monospace";
 const DISP = "'Big Shoulders Display',Impact,'Arial Narrow',sans-serif";
+const CODE_GLYPHS = "01<>/\\{}=+*#$";
+// Loser accents for the melt: pixel color blended toward these.
+const MELT_ACCENTS = { red: [255, 110, 90], blue: [140, 210, 255] };
 
 function roundRectPath(ctx, x, y, w, h, r) {
   const rr = Math.min(r, w / 2, h / 2);
@@ -2465,13 +2544,15 @@ function paintEntities(refs, ctx) {
       blueAlpha = 1 - k;
     }
   }
+  const redR = red.r * (0.68 + 0.42 * refs.intrusion) * (chargeRed ? 1 + 0.35 * chargeK : 1);
+  const blueR = blue.r * (chargeBlue ? 1 + 0.35 * chargeK : 1);
   if (redAlpha > 0) {
     ctx.save();
     ctx.globalAlpha = redAlpha;
     paintIntrusion(ctx, {
       sprites: refs.sprites || {}, bodies: refs.bodies || {},
       swayX: sway, flare: redFlare, recoil: redKnock, burst: redFlare,
-    }, red.x, redY, red.r * (0.68 + 0.42 * refs.intrusion) * (chargeRed ? 1 + 0.35 * chargeK : 1), level, t);
+    }, red.x, redY, redR, level, t);
     ctx.restore();
   }
   if (blueAlpha > 0) {
@@ -2480,13 +2561,22 @@ function paintEntities(refs, ctx) {
     paintGuardian(ctx, {
       sprites: refs.sprites || {}, bodies: refs.bodies || {},
       swayX: sway, flare: blueFlare, recoil: blueKnock, burst: 0,
-    }, blue.x, blue.y, blue.r * (chargeBlue ? 1 + 0.35 * chargeK : 1), energy, t);
+    }, blue.x, blue.y, blueR, energy, t);
     ctx.restore();
   }
-  if (dead && dead.side === "blue" && refs.clock > dead.at) {
-    // Shattered: opaque plate debris tumbles while the body fades
-    // and keeps going after it is gone.
-    paintShatterDebris(ctx, blue.x, blue.y, blue.r, refs.clock - dead.at);
+  if (dead && refs.clock > dead.at) {
+    // The loser turns into code: its own sprite pixels peel off as
+    // glyphs while the body fades beneath. Masks build once.
+    buildMeltMasks(refs);
+    const age = refs.clock - dead.at;
+    if (dead.side === "red") {
+      paintMeltGlyphs(refs, ctx, "red", red.x, redY, redR, age, 1500);
+    } else {
+      paintMeltGlyphs(refs, ctx, "blue", blue.x, blue.y, blueR, age, 1200);
+      // Shattered: opaque plate debris tumbles while the body fades
+      // and keeps going after it is gone.
+      paintShatterDebris(ctx, blue.x, blue.y, blue.r, age);
+    }
   }
 }
 
@@ -2515,6 +2605,45 @@ function paintShatterDebris(ctx, x, y, r, age) {
     ctx.closePath();
     ctx.fill();
     ctx.restore();
+  }
+  ctx.restore();
+}
+
+// Loser melt: the dead sprite's own sampled pixels peel off as code
+// glyphs, outer pixels first, while the sprite fades beneath. Slots
+// sit where the body drew (bs matches the splash draw size), drift
+// outward and up, and die across the same span as the fade. LOW
+// detail strides the same cached mask for fewer, larger glyphs.
+function paintMeltGlyphs(refs, ctx, side, x, y, r, age, span) {
+  const pts = (refs.meltMasks || {})[side] || [];
+  if (pts.length === 0 || age < 0) return;
+  const p = Math.max(0, Math.min(1, age / Math.max(1, span)));
+  if (p <= 0) return;
+  const low = Boolean(refs.lowDetail);
+  const stride = low ? 3 : 1;
+  const count = Math.ceil(pts.length / stride);
+  // Overlapping lives: each glyph starts in outer-first order but
+  // lives 45% of the span, so the peel is a cloud, not a trickle.
+  const LIFE = 0.45;
+  const rr = Math.max(8, r);
+  const bs = rr * 2.5;
+  const tick = refs.clock >> 8;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.font = `${low ? Math.max(10, Math.round(rr * 0.3)) : Math.max(8, Math.round(rr * 0.2))}px ${MONO}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (let j = 0; j < count; j += 1) {
+    const s = pts[j * stride];
+    const lp = (p - (j / count) * (1 - LIFE)) / LIFE;
+    if (lp <= 0 || lp >= 1) continue;
+    const len = Math.hypot(s.x, s.y) || 1;
+    const drift = lp * lp;
+    const px = x + s.x * bs + (s.x / len) * drift * rr * 1.1;
+    const py = y + s.y * bs + (s.y / len) * drift * rr * 0.7 - drift * rr * 0.6;
+    ctx.globalAlpha = Math.min(1, lp * 5) * (1 - lp) * 0.95;
+    ctx.fillStyle = s.fill;
+    ctx.fillText(CODE_GLYPHS[(j * stride + tick) % CODE_GLYPHS.length], px, py);
   }
   ctx.restore();
 }
@@ -2632,7 +2761,7 @@ export function paintIntrusion(ctx, env, x, y, r, level, t) {
     ctx.fillRect(-rr * 1.5 + off * 0.5, gy + gh, rr * 3, 1);
   }
   // Orbiting code glyphs.
-  const glyphs = "01<>/\\{}=+*#$";
+  const glyphs = CODE_GLYPHS;
   const count = 5 + Math.round(lvl * 4);
   ctx.save();
   ctx.font = `${Math.max(8, Math.round(rr * 0.2))}px ${MONO}`;
