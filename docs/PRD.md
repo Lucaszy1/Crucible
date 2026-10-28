@@ -1,5 +1,7 @@
 # Crucible: Product Requirements
 
+> Original plan from day one, kept for reference. It is superseded by the README, docs/SPEC.md, and the current docs. Key differences: the range grew to 4 hosts plus generated 6 to 10 host networks, blue gained sensors and an asset inventory, an open-weights blue variant was added, a scenario generator replaced the fixed network, and a voice takeover mode lets a judge direct blue live.
+
 ## What it is
 An autonomous security validation range. AI agents probe and protect a small, deliberately vulnerable simulated network running in isolated Docker containers. Every match plays out live on a web dashboard, and every defender action is traceable to the exact log evidence behind it.
 
