@@ -816,8 +816,9 @@ function showEndCardFor() {
   const audits = reduceAudits(store.events, store.events.length);
   const nextId = nextFeaturedId();
   // Decisive endings on the cinematic stage play the finish first:
-  // three rays, the loser's explosion, then the card. Quiet endings,
-  // the classic view, reduced motion, and a hidden arena skip it.
+  // charge, one giant projectile, three beams, the loser's
+  // explosion, then the card. Quiet endings, the classic view,
+  // reduced motion, and a hidden arena skip it.
   const side = finishSide(stats.key);
   if (side && !store.classic && stageRefs && !els.arenaView.hidden && !reducedMotion()) {
     const started = stageFinish(stageRefs, side, {

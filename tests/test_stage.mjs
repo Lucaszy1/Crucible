@@ -472,16 +472,18 @@ describe("entity levels", () => {
     }
   });
 
-  it("spaces finish rays two seconds apart at standard pace", () => {
+  it("orders the finish as charge, titan, then beams two seconds apart", () => {
     const plan = finishPlan("standard");
     assert.equal(plan.mult, 1);
+    assert.equal(plan.charge, 600);
     assert.equal(plan.gap, 2000);
-    assert.ok(plan.total >= 8000 && plan.total <= 10000, `standard total ${plan.total}`);
+    assert.ok(plan.titanFlight > 0, `titan flight ${plan.titanFlight}`);
+    assert.ok(plan.total >= 9000 && plan.total <= 10000, `standard total ${plan.total}`);
     const quick = finishPlan("quick");
-    assert.ok(quick.total >= 5000 && quick.total <= 6500, `quick total ${quick.total}`);
+    assert.ok(quick.total >= 5500 && quick.total <= 6500, `quick total ${quick.total}`);
     assert.ok(quick.gap < plan.gap, "quick gaps shrink");
     const slow = finishPlan("slow");
-    assert.ok(slow.total >= 14000 && slow.total <= 17000, `slow total ${slow.total}`);
+    assert.ok(slow.total >= 16500 && slow.total <= 18000, `slow total ${slow.total}`);
     assert.ok(slow.gap > plan.gap, "slow gaps stretch");
     assert.deepEqual(finishPlan("bogus"), plan, "unknown pace falls back to standard");
     assert.equal(FINISH_PACES.standard, 1);
@@ -617,6 +619,14 @@ describe("projectile bodies", () => {
     assert.ok(large.orbD > small.orbD * 1.5, String(large.orbD));
   });
 
+  it("scales the titan to at least three heavy bodies", () => {
+    const heavy = projBody("heavy", 1);
+    const large = projBody("large", 1);
+    const titan = projBody("titan", 1);
+    assert.ok(titan.lanceLen >= 3 * heavy.lanceLen, String(titan.lanceLen));
+    assert.ok(titan.orbD >= 3 * large.orbD, String(titan.orbD));
+  });
+
   it("spans at least three body lengths of trail", () => {
     const laneLen = 600;
     for (const size of ["small", "standard", "heavy"]) {
@@ -677,6 +687,7 @@ describe("smoothness", () => {
     assert.equal(hitstopFor("standard"), 3);
     assert.equal(hitstopFor("heavy"), 5);
     assert.equal(hitstopFor("large"), 5);
+    assert.equal(hitstopFor("titan"), 6);
     assert.equal(hitstopFor("unknown"), 3);
   });
 
