@@ -8,7 +8,8 @@ Checks that a finished run is evidence, not artifact:
   frozen playbook byte for byte (rules)
 - leak-grep: the frozen playbook contains no held-out scenario content
 - episodes: per-episode artifact scan (zero-cost model episodes, cached
-  replays under --no-cache, degraded or dirty episodes, audit gaps)
+  replays under --no-cache, degraded or dirty episodes, audit gaps,
+  sensors-on benches with zero alerts across all episodes)
 
 Exit 0 when every FAIL check passes (warnings allowed); exit 1 on any
 FAIL, or on warnings with --strict. Reads runs/, spend.jsonl, and the
@@ -278,6 +279,8 @@ def check_episodes(report: Report, bench_dirs: list) -> None:
         audit_cells = summary.get("audit_cells")
         audit_mode = summary.get("audit")
         unreached: dict = {}
+        sensors_on_eps = 0
+        alert_total = 0
         for row in rows:
             episode = row.get("episode", "")
             if episode in seen_ids:
@@ -302,6 +305,18 @@ def check_episodes(report: Report, bench_dirs: list) -> None:
             first = events[0].get("result", {}) or {}
             if first.get("ok") is not True:
                 report.add(FAIL, f"{episode}: clean-start check not ok")
+            mode = "off"
+            for event in events:
+                if event.get("actor") == "system" \
+                        and event.get("tool") == "clean_start_check":
+                    mode = (event.get("args", {}) or {}).get(
+                        "sensors", "off")
+                    break
+            shown = sum(len(event.get("sensor_alerts", []) or [])
+                        for event in events)
+            if mode == "on":
+                sensors_on_eps += 1
+                alert_total += shown
             for event in events:
                 note = str(event.get("reasoning_summary", "") or "")
                 if "daily model spend cap reached" in note:
@@ -357,6 +372,14 @@ def check_episodes(report: Report, bench_dirs: list) -> None:
             report.add(WARN, f"{bench_dir.name} {label}: hosts never "
                              f"reached: {', '.join(names[:6])}"
                              + ("..." if len(names) > 6 else ""))
+        if sensors_on_eps and not alert_total:
+            report.add(FAIL, f"{bench_dir.name}: {sensors_on_eps} "
+                             f"sensors-on episodes with zero sensor "
+                             f"alerts: sensors never fired")
+        elif sensors_on_eps:
+            report.add(OK, f"{bench_dir.name}: {alert_total} sensor "
+                           f"alerts across {sensors_on_eps} sensors-on "
+                           f"episodes")
         report.add(OK, f"{bench_dir.name}: scanned {len(rows)} episodes")
 
 

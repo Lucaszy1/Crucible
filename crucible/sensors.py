@@ -11,7 +11,10 @@ appear here.
 
 from __future__ import annotations
 
+import logging
 import re
+
+_log = logging.getLogger(__name__)
 
 SEVERITIES = ("low", "medium", "high", "critical")
 
@@ -60,23 +63,35 @@ def collect_episode_logs(hosts=None) -> dict:
 
     Each host maps to a list of (line id, line text) with the same ids
     read_logs hands out, so alert evidence refs match what blue reads.
-    Never raises for sandbox trouble: an unreadable host simply yields
-    no lines, and the rules run on whatever remains.
+    With no explicit host list, reads the episode's actual hosts from
+    the active scenario (spec hosts on generated nets, the classic
+    hosts otherwise). Never raises for sandbox trouble: an unreadable
+    host yields no lines and the rules run on whatever remains, but
+    every failed host is named in one warning so a silent range can
+    never again pass as a quiet one.
     """
     from crucible import sandbox
 
     try:
-        targets = list(hosts) if hosts else list(sandbox.ALLOWED_HOSTS)
+        targets = list(hosts) if hosts else list(sandbox.active_hosts())
     except Exception:
         return {}
     logs: dict = {}
+    failed: list = []
     for host in targets:
         try:
             lines = sandbox.container_logs(host, tail=None)
-        except Exception:
+        except Exception as exc:
+            failed.append((host, exc))
             continue
         logs[host] = [(f"{host}:{index}", str(line))
                       for index, line in enumerate(lines or [])]
+    if failed:
+        names = ", ".join(host for host, _ in failed)
+        _log.warning("sensor log collection failed for %s "
+                     "(%d of %d hosts unreadable, alerts run on %d): %s",
+                     names, len(failed), len(targets), len(logs),
+                     failed[0][1])
     return logs
 
 

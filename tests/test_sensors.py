@@ -5,6 +5,7 @@ sandbox scripts emit, and the orchestrator stays stubbed where the range
 would be touched.
 """
 
+import logging
 from pathlib import Path
 
 from crucible import orchestrator, sensors, tools
@@ -403,6 +404,77 @@ def test_orchestrator_shows_only_new_alerts(tmp_path, monkeypatch):
         "alert-1", "alert-2"]
     assert [alert["id"] for alert in blues[2]["sensor_alerts"]] == [
         "alert-3", "alert-4"]
+
+
+def test_collect_uses_spec_hosts_for_generated_episode(monkeypatch):
+    from crucible import sandbox
+    from crucible.scenarios import chain, generate
+
+    spec = generate.generate(9001, "easy")
+    monkeypatch.setattr(sandbox, "_ACTIVE_SPEC", dict(spec))
+    jewel = spec["jewel"]["host"]
+    first_cred = next(move for move in chain.chain_plan(spec)
+                      if move["tool"] == "try_credential")
+    assert first_cred["args"]["host"] == jewel
+    user = first_cred["args"]["user"]
+    called = []
+
+    def fake_logs(host, tail=None):
+        called.append(host)
+        sandbox.check_host(host)
+        if host == jewel:
+            return [f"signin ok user={user} from=controller",
+                    "dir list path=/secret entries=1 from=controller"]
+        return []
+
+    monkeypatch.setattr(sandbox, "container_logs", fake_logs)
+    logs = sensors.collect_episode_logs()
+    want = {host["name"] for host in spec["hosts"]}
+    assert set(called) == want
+    assert set(logs) == want
+    rules = {alert["rule"] for alert in sensors.build_alerts(
+        logs, crown_jewel_host=jewel)}
+    assert "success_first_try" in rules
+    assert "crown_jewel_read" in rules
+
+
+def test_collect_classic_hosts_unchanged(monkeypatch):
+    from crucible import sandbox
+
+    monkeypatch.setattr(sandbox, "_ACTIVE_SPEC", None)
+    called = []
+
+    def fake_logs(host, tail=None):
+        called.append(host)
+        sandbox.check_host(host)
+        if host == "app":
+            return ["signin ok user=svc-report from=controller"]
+        return []
+
+    monkeypatch.setattr(sandbox, "container_logs", fake_logs)
+    logs = sensors.collect_episode_logs()
+    assert called == list(sandbox.ALLOWED_HOSTS)
+    assert set(logs) == set(sandbox.ALLOWED_HOSTS)
+    rules = {alert["rule"] for alert in sensors.build_alerts(logs)}
+    assert rules == {"success_first_try"}
+
+
+def test_collect_warns_once_on_unreadable_host(monkeypatch, caplog):
+    from crucible import sandbox
+
+    monkeypatch.setattr(sandbox, "_ACTIVE_SPEC", None)
+
+    def fake_logs(host, tail=None):
+        if host == "db":
+            raise sandbox.SandboxError("down")
+        return []
+
+    monkeypatch.setattr(sandbox, "container_logs", fake_logs)
+    with caplog.at_level(logging.WARNING, logger="crucible.sensors"):
+        logs = sensors.collect_episode_logs()
+    assert set(logs) == {"web", "app", "workstation"}
+    assert len(caplog.records) == 1
+    assert "db" in caplog.text
 
 
 def test_score_sensors_defaults_off_without_first_event():
