@@ -381,6 +381,18 @@ describe("lazy lobby thumbnails", () => {
     assert.equal(thumbCacheSize(), 1);
   });
 
+  it("keys cursor frames separately from the poster", () => {
+    const model = card(0);
+    mountArenaThumb(makeEl("canvas"), model, {}, {});
+    mountArenaThumb(makeEl("canvas"), model, {}, { cursor: 2 });
+    mountArenaThumb(makeEl("canvas"), model, {}, { cursor: 2 });
+    mountArenaThumb(makeEl("canvas"), model, {}, { cursor: 4 });
+    assert.equal(thumbPendingCount(), 3, "poster plus one job per cursor");
+    drainAll(scheduled);
+    assert.equal(thumbPendingCount(), 0);
+    assert.equal(thumbCacheSize(), 3);
+  });
+
   it("paints detached cards on memory hits", () => {
     globalThis.Image = class {
       set src(value) {

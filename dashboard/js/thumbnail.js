@@ -541,8 +541,9 @@ function pumpThumbQueue() {
   }
 }
 
-function renderCardFrame(target, card, env) {
-  const refs = renderStageThumb(target, (card && card.events) || [], posterCursor(card && card.events), {
+function renderCardFrame(target, card, env, cursor) {
+  const at = cursor === undefined || cursor === null ? posterCursor(card && card.events) : cursor;
+  const refs = renderStageThumb(target, (card && card.events) || [], at, {
     layout: card && card.layout,
     art: (env && env.art) || {},
     weights: (card && card.weights) || {},
@@ -577,8 +578,7 @@ function attachThumbTarget(job, canvas) {
   canvas._thumbKey = job.key;
 }
 
-function queueArenaThumb(canvas, card, env, featured) {
-  const key = (card && card.id) || "";
+function queueArenaThumb(canvas, card, env, featured, cursor, key) {
   if (!key) return;
   if (thumbInFlight && thumbInFlight.key === key) {
     attachThumbTarget(thumbInFlight, canvas);
@@ -592,6 +592,7 @@ function queueArenaThumb(canvas, card, env, featured) {
       env: env || {},
       moves: card ? card.moves : 0,
       featured: Boolean(featured),
+      cursor: cursor === undefined ? null : cursor,
       visible: false,
       gen: bitmapGen,
       targets: new Set(),
@@ -626,7 +627,7 @@ function startThumbJob(job) {
   let crop = { sx: 0, sy: 0, sw: RENDER_W, sh: RENDER_H };
   if (shared) {
     try {
-      crop = renderCardFrame(shared, job.card, job.env);
+      crop = renderCardFrame(shared, job.card, job.env, job.cursor);
       painted = true;
     } catch {
       painted = false;
@@ -693,19 +694,18 @@ function finishThumbJob(job, bmp, url) {
   if (thumbJobs.size > 0) requestThumbIdle();
 }
 
-function decodeSessionThumb(canvas, card, env, featured, url) {
+function decodeSessionThumb(canvas, card, env, featured, cursor, key, url) {
   if (typeof Image === "undefined") {
-    queueArenaThumb(canvas, card, env, featured);
+    queueArenaThumb(canvas, card, env, featured, cursor, key);
     return;
   }
-  const key = (card && card.id) || "";
   const moves = card ? card.moves : 0;
   const img = new Image();
   img.onload = () => {
     cacheSet(key, { bmp: img, moves });
     blitThumb(canvas, { bmp: img, moves });
   };
-  img.onerror = () => queueArenaThumb(canvas, card, env, featured);
+  img.onerror = () => queueArenaThumb(canvas, card, env, featured, cursor, key);
   img.src = url;
 }
 
@@ -714,7 +714,9 @@ function decodeSessionThumb(canvas, card, env, featured, url) {
 // session snapshot. Never renders synchronously: lobby load
 // mounts dozens of cards and must not paint any of them.
 // Falls back to the schematic miniature if the arena render
-// throws. opts: { w, h, featured }.
+// throws. opts: { w, h, featured, cursor }. A cursor freezes the
+// frame at that move instead of the poster event (story moments);
+// the cache key carries it so moments never collide.
 export function mountArenaThumb(canvas, card, env, opts) {
   const options = opts || {};
   canvas.width = THUMB_W;
@@ -722,10 +724,12 @@ export function mountArenaThumb(canvas, card, env, opts) {
   if (options.w) canvas.style.width = `${options.w}px`;
   if (options.h) canvas.style.height = `${options.h}px`;
   canvas.dataset.thumb = "1";
-  const key = (card && card.id) || "";
+  const id = (card && card.id) || "";
   const moves = card ? card.moves : 0;
   const featured = Boolean(options.featured);
-  canvas._thumbPaint = () => forceThumbPaint(canvas, card, env);
+  const cursor = options.cursor === undefined || options.cursor === null ? null : options.cursor;
+  const key = cursor === null ? id : `${id}#${cursor}`;
+  canvas._thumbPaint = () => forceThumbPaint(canvas, card, env, cursor);
   if (!key) return canvas;
   const hit = cacheGet(key, moves);
   if (hit) {
@@ -734,22 +738,22 @@ export function mountArenaThumb(canvas, card, env, opts) {
   }
   const stored = sessionGet(sessionKey(key, env));
   if (stored && stored.moves === moves && typeof stored.url === "string") {
-    decodeSessionThumb(canvas, card, env, featured, stored.url);
+    decodeSessionThumb(canvas, card, env, featured, cursor, key, stored.url);
     return canvas;
   }
-  queueArenaThumb(canvas, card, env, featured);
+  queueArenaThumb(canvas, card, env, featured, cursor, key);
   return canvas;
 }
 
 // Synchronous force-paint for print and tests: renders now,
 // bypassing the idle queue, and blits straight from the shared
 // render canvas. Never used during lobby load.
-function forceThumbPaint(canvas, card, env) {
+function forceThumbPaint(canvas, card, env, cursor) {
   const shared = sharedCanvas("render");
   if (!shared) return;
   let crop = { sx: 0, sy: 0, sw: RENDER_W, sh: RENDER_H };
   try {
-    crop = renderCardFrame(shared, card, env);
+    crop = renderCardFrame(shared, card, env, cursor);
   } catch {
     try {
       paintSchematicFrame(shared, card);

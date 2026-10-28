@@ -2,7 +2,7 @@
 // all, with no jargon, no war wording, and no credentials.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { actorName, describeEvent, groupRounds, statusSentence } from "../dashboard/js/story.js";
+import { actorName, describeEvent, groupRounds, keyMoments, statusSentence } from "../dashboard/js/story.js";
 
 function ev(actor, tool, args, result) {
   return { id: "evt-0001", actor, tool, args: args || {}, result: result || { ok: true } };
@@ -169,5 +169,56 @@ describe("groupRounds", () => {
 
   it("handles an empty feed", () => {
     assert.deepEqual(groupRounds([]), []);
+  });
+});
+
+describe("keyMoments", () => {
+  const lane = [
+    ev("red", "scan_host", { host: "web" }, { ok: true, running: true }),
+    ev("red", "try_credential", { host: "web", user: "op" }, { ok: true, authenticated: true }),
+    ev("blue", "read_logs", { host: "web" }, { ok: true }),
+    ev("blue", "isolate_host", { host: "web" }, { ok: true }),
+  ];
+
+  it("lists sign-in, detection, and containment in move order", () => {
+    const moments = keyMoments(lane);
+    assert.deepEqual(moments.map((m) => m.key), ["signin", "detection", "containment"]);
+    assert.deepEqual(moments.map((m) => m.index), [1, 2, 3]);
+    assert.equal(moments[0].title, "First sign-in");
+    assert.ok(moments[0].caption.includes("signed in"), moments[0].caption);
+  });
+
+  it("finds the secret read instead of containment", () => {
+    const red = [
+      ev("red", "try_credential", { host: "db", user: "op" }, { ok: true, authenticated: true }),
+      ev("red", "read_file", { host: "db", path: "/secret/x" }, { ok: true, path: "/secret/x" }),
+    ];
+    const moments = keyMoments(red);
+    assert.deepEqual(moments.map((m) => m.key), ["signin", "secret"]);
+    assert.ok(moments[1].caption.includes("protected file"), moments[1].caption);
+  });
+
+  it("folds detection into containment on the same move", () => {
+    const quick = [
+      ev("red", "try_credential", { host: "web", user: "op" }, { ok: true, authenticated: true }),
+      ev("blue", "isolate_host", { host: "web" }, { ok: true }),
+    ];
+    assert.deepEqual(keyMoments(quick).map((m) => m.key), ["signin", "containment"]);
+  });
+
+  it("ignores waits, failed sign-ins, and empty lanes", () => {
+    assert.deepEqual(keyMoments([]), []);
+    const idle = [
+      ev("blue", "wait", {}, { ok: true }),
+      ev("red", "try_credential", { host: "web", user: "op" }, { ok: true, authenticated: false }),
+    ];
+    assert.deepEqual(keyMoments(idle), []);
+  });
+
+  it("counts a failed containment as detection, not containment", () => {
+    const failed = [
+      ev("blue", "isolate_host", { host: "web" }, { ok: false, error: "down" }),
+    ];
+    assert.deepEqual(keyMoments(failed).map((m) => m.key), ["detection"]);
   });
 });

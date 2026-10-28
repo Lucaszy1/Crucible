@@ -142,6 +142,41 @@ export function statusSentence({ latest, ended, outcome, mode, display }) {
   return describeEvent(latest);
 }
 
+// Blue moves that show blue noticed something: looks, reports,
+// and every containment action. A plain wait is not detection.
+const BLUE_LOOKS = [
+  "read_logs", "report_finding", "list_processes",
+  "isolate_host", "patch_service", "restore_host", "block_ip",
+];
+
+// Key moments for the Story timeline: first sign-in, first sign
+// blue noticed, first containment, first secret read. Each carries
+// its move index so the timeline can frame it, in move order.
+// Detection folds into containment when blue's first noticing move
+// is the containment itself. Pure.
+export function keyMoments(events) {
+  const list = events || [];
+  const find = (pred) => list.findIndex((ev) => ev && pred(ev));
+  const signin = find((ev) => ev.actor === "red" && ev.tool === "try_credential" &&
+    (ev.result || {}).authenticated === true);
+  const detection = find((ev) => ev.actor === "blue" && BLUE_LOOKS.includes(ev.tool));
+  const containment = find((ev) => ev.actor === "blue" &&
+    (ev.tool === "isolate_host" || ev.tool === "patch_service") && (ev.result || {}).ok === true);
+  const secret = find((ev) => ev.actor === "red" && ev.tool === "read_file" &&
+    (ev.result || {}).ok === true &&
+    String((ev.result || {}).path || "").startsWith("/secret/"));
+  const out = [];
+  const push = (key, index, title) => {
+    if (index < 0) return;
+    out.push({ key, index, title, caption: describeEvent(list[index]) });
+  };
+  push("signin", signin, "First sign-in");
+  if (detection >= 0 && detection !== containment) push("detection", detection, "Detection");
+  push("containment", containment, "Containment");
+  push("secret", secret, "Secret read");
+  return out.sort((a, b) => a.index - b.index);
+}
+
 // Group red/blue items into rounds (one red move plus one blue move),
 // newest round first. Auditor items are skipped; the feed shows them
 // as icons on the blue items they judge instead.
