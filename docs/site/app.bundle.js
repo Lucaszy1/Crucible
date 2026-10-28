@@ -699,6 +699,12 @@ function stepSpeed(current, dir) {
   return SPEEDS[next];
 }
 
+// The stage speed strip shows once a replay or live run is
+// loaded, and stays hidden in the lobby and while booting.
+function speedStripHidden(mode) {
+  return mode !== "replay" && mode !== "live";
+}
+
 function motionSetting() {
   try {
     if (typeof window !== "undefined" && window.localStorage) {
@@ -811,7 +817,7 @@ function hostBlocks(eventList, hosts) {
   return blocks;
 }
 
-return { isBlueTeam, normalizeActor, reduceHostStates, eventHost, secretRead, scoreEvents, shortResult, formatArgs, pressureValue, redNotches, displayOutcome, finishSide, outcomeLine, controlBar, controlBarTip, rankFeatured, runFlags, autoplayQueue, endCardStats, stepSpeed, motionSetting, motionReduced, acceptLiveTraffic, bootStale, followOpensLive, phaseLabel, bootTimedOut, streamDead, errorRetryTarget, hostBlocks, HOSTS, CONTAINMENT_TOOLS, DEFAULT_WEIGHTS, RECON_TOOLS, DISPLAY_OUTCOMES, DISPLAY_CONTAINMENT, BAR_SETTLE_MIN, SPEEDS };
+return { isBlueTeam, normalizeActor, reduceHostStates, eventHost, secretRead, scoreEvents, shortResult, formatArgs, pressureValue, redNotches, displayOutcome, finishSide, outcomeLine, controlBar, controlBarTip, rankFeatured, runFlags, autoplayQueue, endCardStats, stepSpeed, speedStripHidden, motionSetting, motionReduced, acceptLiveTraffic, bootStale, followOpensLive, phaseLabel, bootTimedOut, streamDead, errorRetryTarget, hostBlocks, HOSTS, CONTAINMENT_TOOLS, DEFAULT_WEIGHTS, RECON_TOOLS, DISPLAY_OUTCOMES, DISPLAY_CONTAINMENT, BAR_SETTLE_MIN, SPEEDS };
 })();
 const __mod_api__ = (() => {
 "use strict";
@@ -4494,7 +4500,7 @@ function updateStageHud(refs) {
     if (hud.capTag) {
       hud.capTag.textContent = snap.tag;
       hud.capTag.className = snap.tagTone || "system";
-      hud.capTag.style.fontSize = snap.tag.length > 5 ? "clamp(14px,2.6cqw,40px)" : "";
+      hud.capTag.style.fontSize = capTagFontSize(snap.tag);
     }
     if (hud.capText) hud.capText.textContent = snap.caption;
     if (hud.capSub) hud.capSub.textContent = snap.sub;
@@ -4828,6 +4834,13 @@ function fxForEvent(ev, ctx) {
 
 // Kinetic callout content for one move: the technique name from the
 // data over the plain-English line. Null for non-move events.
+// Caption tag size: short tags (RED, BLUE) use the chip's full
+// size; longer tags (EXERCISE) step down so the whole word fits
+// the chip at any canvas width instead of clipping. Pure.
+function capTagFontSize(tag) {
+  return String(tag || "").length > 5 ? "clamp(12px,2.2cqw,34px)" : "";
+}
+
 function calloutForEvent(ev, attackMap) {
   if (!ev || (ev.actor !== "red" && ev.actor !== "blue")) return null;
   const map = attackMap || {};
@@ -4957,10 +4970,9 @@ function moveSpanMs(size) {
 
 // Finish pace scales every beat of the ending: a short charge,
 // one giant projectile, then three beams two seconds apart at
-// standard pace; the card lands about a second after the blast
-// (the dissolve keeps its own timing and finishes behind it),
-// so the whole finish runs eight seconds, quick near five,
-// slow near fourteen for narration.
+// standard pace; the card lands past the middle of the long
+// dissolve, and the trimmed seal hold keeps the whole finish
+// near eight seconds (quick near five, slow near fourteen).
 const FINISH_PACES = { quick: 0.65, standard: 1, slow: 1.8 };
 
 function finishPlan(pace) {
@@ -4969,8 +4981,8 @@ function finishPlan(pace) {
   const titanFlight = Math.round(900 * m);
   const gap = Math.round(2000 * m);
   const beamDur = Math.round(1400 * m);
-  const postBeam = Math.round(1500 * m);
-  const explodeDur = Math.round(600 * m);
+  const postBeam = Math.round(500 * m);
+  const explodeDur = Math.round(1800 * m);
   const cardDelay = Math.round(400 * m);
   return {
     mult: m, charge, titanFlight, gap, beamDur, postBeam, explodeDur, cardDelay,
@@ -5102,12 +5114,14 @@ const MONO = "'JetBrains Mono',ui-monospace,Menlo,monospace";
 const DISP = "'Big Shoulders Display',Impact,'Arial Narrow',sans-serif";
 const CODE_GLYPHS = "01<>/\\{}=+*#$";
 // Melt tuning: the flare and shockwave peak and fade for 400ms
-// before the peel starts, glyphs peel across 1600ms, and the last
-// of the sprite fades over 400ms after. Desktop samples 450
+// before the peel starts, glyphs peel across 3200ms, and the last
+// of the sprite fades over 800ms after. The whole dissolve runs
+// about twice as long as the first cut, with a softer falloff so
+// glyphs stay readable for most of it. Desktop samples 450
 // slots; LOW strides the same mask down to about 180.
 const MELT_DELAY_MS = 400;
-const MELT_SPAN_MS = 1600;
-const MELT_FADE_MS = 400;
+const MELT_SPAN_MS = 3200;
+const MELT_FADE_MS = 800;
 const MELT_SLOTS = 450;
 const MELT_SLOTS_LOW = 180;
 const MELT_GLYPHS = "01";
@@ -5152,13 +5166,13 @@ function meltGlyphPx(rr) {
 // still has room to run.
 function meltGlyphAlpha(lp) {
   const t = Math.max(0, Math.min(1, Number(lp) || 0));
-  return Math.min(1, t * 4) * Math.pow(1 - t, 0.6) * 0.95;
+  return Math.min(1, t * 4) * Math.pow(1 - t, 0.35) * 0.95;
 }
 
 function meltHaloAlpha(lp) {
   const t = Math.max(0, Math.min(1, Number(lp) || 0));
   // Dark enough to ring each glyph even over the white-hot core.
-  return Math.pow(1 - t, 0.6) * 0.8;
+  return Math.pow(1 - t, 0.35) * 0.8;
 }
 
 // Melt drift at life lp: mostly radial with a mild upward bias
@@ -5886,7 +5900,7 @@ function paintEntities(refs, ctx) {
 // Guardian wreckage: pale plates tumbling outward, fading over
 // about two seconds. Deterministic scatter, opaque fills.
 function paintShatterDebris(ctx, x, y, r, age) {
-  const k = Math.max(0, Math.min(1, age / 2000));
+  const k = Math.max(0, Math.min(1, age / (MELT_DELAY_MS + MELT_SPAN_MS)));
   if (k >= 1) return;
   ctx.save();
   for (let i = 0; i < 12; i += 1) {
@@ -7296,7 +7310,7 @@ function paintOverlays(refs, ctx) {
   }
 }
 
-return { stageLayout, applyCamera, dollyTarget, winnerBeatTarget, stepCamera, redLine, blueLine, laneFeed, intrusionLevel, guardianPulse, stageWash, loadStageArt, auditorChrome, measureChrome, initStage, fitStage, setStageLayout, setStageArt, sampleMeltMask, renderStageStatic, renderStageThumb, stageNotify, showStageAuditor, hideStageAuditor, flashStageHost, glitchStage, firstAccessStage, cancelStage, setStageActive, setStageReduced, frameP95, fxForEvent, calloutForEvent, flightLane, lanePoint, flightLaneRect, clashCrop, moveSpanMs, finishPlan, hitstopFor, frameBudget, meltSpriteAlpha, meltChar, meltStride, meltGlyphPx, meltGlyphAlpha, meltHaloAlpha, meltDrift, stageFinish, probeStageContent, paintIntrusion, paintGuardian, projBody, trailSpan, flashHold, STAGE_WORLD, FLIGHT_MS, IMPACT_MS, AFTERMATH_MS, VOLLEY_STAGGER_MS, FINISH_PACES, LOW_STREAK, MELT_DELAY_MS, MELT_SPAN_MS, MELT_FADE_MS, MELT_SLOTS, MELT_SLOTS_LOW, PROJ_SCALE, LANCE_LEN, LANCE_WID, ORB_R };
+return { stageLayout, applyCamera, dollyTarget, winnerBeatTarget, stepCamera, redLine, blueLine, laneFeed, intrusionLevel, guardianPulse, stageWash, loadStageArt, auditorChrome, measureChrome, initStage, fitStage, setStageLayout, setStageArt, sampleMeltMask, renderStageStatic, renderStageThumb, stageNotify, showStageAuditor, hideStageAuditor, flashStageHost, glitchStage, firstAccessStage, cancelStage, setStageActive, setStageReduced, frameP95, fxForEvent, capTagFontSize, calloutForEvent, flightLane, lanePoint, flightLaneRect, clashCrop, moveSpanMs, finishPlan, hitstopFor, frameBudget, meltSpriteAlpha, meltChar, meltStride, meltGlyphPx, meltGlyphAlpha, meltHaloAlpha, meltDrift, stageFinish, probeStageContent, paintIntrusion, paintGuardian, projBody, trailSpan, flashHold, STAGE_WORLD, FLIGHT_MS, IMPACT_MS, AFTERMATH_MS, VOLLEY_STAGGER_MS, FINISH_PACES, LOW_STREAK, MELT_DELAY_MS, MELT_SPAN_MS, MELT_FADE_MS, MELT_SLOTS, MELT_SLOTS_LOW, PROJ_SCALE, LANCE_LEN, LANCE_WID, ORB_R };
 })();
 const __mod_thumbnail__ = (() => {
 "use strict";
@@ -11611,7 +11625,7 @@ function updateProvBadge(prov) {
 // Operations Center bootstrap: lobby, arena show flow, tabs, themes.
 const { fetchAttackMap, fetchCampaign, fetchCampaigns, fetchConfig, fetchDebrief, fetchFeatured, fetchPreview, fetchRun, fetchRuns, fetchStage3, fetchStatus, openLive, startExercise } = __mod_api__;
 const { renderLearning } = __mod_learn__;
-const { acceptLiveTraffic, autoplayQueue, bootStale, bootTimedOut, displayOutcome, endCardStats, eventHost, errorRetryTarget, finishSide, followOpensLive, motionReduced, motionSetting, normalizeActor, outcomeLine, phaseLabel, rankFeatured, reduceHostStates, runFlags, scoreEvents, SPEEDS, stepSpeed, streamDead } = __mod_state__;
+const { acceptLiveTraffic, autoplayQueue, bootStale, bootTimedOut, displayOutcome, endCardStats, eventHost, errorRetryTarget, finishSide, followOpensLive, motionReduced, motionSetting, normalizeActor, outcomeLine, phaseLabel, rankFeatured, reduceHostStates, runFlags, scoreEvents, SPEEDS, speedStripHidden, stepSpeed, streamDead } = __mod_state__;
 const { describeEvent, keyMoments, statusSentence } = __mod_story__;
 const { jumpTarget, renderDebrief } = __mod_debrief__;
 const { initMap, updateMap } = __mod_network__;
@@ -11700,6 +11714,7 @@ const els = {
   slate: document.getElementById("slate"),
   slateTitle: document.getElementById("slateTitle"),
   slateCount: document.getElementById("slateCount"),
+  speedStrip: document.getElementById("speedStrip"),
   thoughtRed: document.getElementById("thoughtRed"),
   thoughtRedHead: document.getElementById("thoughtRedHead"),
   thoughtRedText: document.getElementById("thoughtRedText"),
@@ -11752,7 +11767,6 @@ const controls = {
   agents: document.getElementById("agentsSelect"),
   run: document.getElementById("runBtn"),
   speedSeg: document.getElementById("speedSeg"),
-  speedStrip: document.getElementById("speedStrip"),
   paceSeg: document.getElementById("paceSeg"),
   motionSeg: document.getElementById("motionSeg"),
   light: document.getElementById("serverLight"),
@@ -11924,7 +11938,7 @@ function setMode(mode, label) {
   els.mode.textContent = mode === "live" ? "Live" : mode === "replay" ? "Replay" : mode === "booting" ? "Starting" : "Idle";
   if (label) store.label = label;
   els.title.textContent = store.label;
-  if (els.speedStrip) els.speedStrip.hidden = mode !== "replay" && mode !== "live";
+  if (els.speedStrip) els.speedStrip.hidden = speedStripHidden(mode);
 }
 
 function latestLaneEvent(slice) {

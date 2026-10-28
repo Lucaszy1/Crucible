@@ -140,11 +140,19 @@
 <main class="arena-wrap">
   <section class="arena-stage" id="arenaStage" aria-label="Exercise arena">
    <div class="arena-row3">
+    <div class="arena-side">
     <aside id="thoughtRed" class="thought red" aria-label="Red thought stream">
       <button id="thoughtRedHead" class="thought-head" aria-expanded="true">Red thought</button>
       <p id="thoughtRedText" class="thought-text"></p>
       <div id="thoughtRedChips" class="thought-chips"></div>
     </aside>
+    <div id="speedStrip" class="speed-strip" role="group" aria-label="Playback speed" hidden>
+      <button data-speed="0.5" aria-pressed="false" title="Half speed ([)">0.5x</button>
+      <button data-speed="1" aria-pressed="true" class="active" title="Normal speed">1x</button>
+      <button data-speed="2" aria-pressed="false" title="Double speed (])">2x</button>
+      <button data-speed="4" aria-pressed="false" title="Quadruple speed">4x</button>
+    </div>
+    </div>
     <div class="arena-canvas-wrap" id="arenaWrap">
       <canvas id="arenaCanvas" role="img" aria-label="Arena contest scene"></canvas>
       <div id="arenaFrame" aria-hidden="true"></div>
@@ -171,12 +179,6 @@
       <div id="arenaCap" data-side="system">
         <div id="arenaCapTag" class="system">EXERCISE</div>
         <div id="arenaCapBody"><div id="arenaCapText">Hosts guard one secret.</div><div id="arenaCapSub"></div></div>
-      </div>
-      <div id="speedStrip" class="speed-strip" role="group" aria-label="Playback speed" hidden>
-        <button data-speed="0.5" aria-pressed="false" title="Half speed ([)">0.5x</button>
-        <button data-speed="1" aria-pressed="true" class="active" title="Normal speed">1x</button>
-        <button data-speed="2" aria-pressed="false" title="Double speed (])">2x</button>
-        <button data-speed="4" aria-pressed="false" title="Quadruple speed">4x</button>
       </div>
       <div id="slate" class="slate" hidden>
         <div class="slate-art left" aria-hidden="true"></div>

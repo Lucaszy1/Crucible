@@ -495,20 +495,18 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
   position: absolute; inset: 0;
   width: 100%; height: 100%; display: block;
 }
-/* Stage speed strip: a compact group docked on the left edge of
-   the arena, beside the red thought margin. Above the slate and
-   end card so it stays usable through the whole exercise. */
+/* Stage speed strip: a compact row under the red thought card.
+   Never inside the canvas, so it cannot cover the consoles. */
 .speed-strip {
-  position: absolute; left: 8px; top: 50%; transform: translateY(-50%);
-  z-index: 7; display: flex; flex-direction: column; gap: 2px;
-  background: rgba(9, 11, 16, 0.72); border: 1px solid var(--border);
+  display: flex; flex-direction: row; gap: 2px;
+  background: rgba(9, 11, 16, 0.92); border: 1px solid #2a3140;
   border-radius: 8px; padding: 4px;
 }
 .speed-strip[hidden] { display: none; }
 .speed-strip button {
-  font: inherit; font-size: 11px; font-weight: 700; color: var(--muted);
+  flex: 1; font: inherit; font-size: 11px; font-weight: 700; color: var(--muted);
   background: transparent; border: 0; border-radius: 5px;
-  padding: 5px 7px; cursor: pointer; min-width: 42px;
+  padding: 5px 4px; cursor: pointer;
 }
 .speed-strip button:hover { color: var(--text); }
 .speed-strip button.active { background: var(--accent); color: var(--accent-ink); }
@@ -601,11 +599,12 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
 }
 #arenaCapTag {
   flex: none; display: flex; align-items: center; justify-content: center;
-  width: clamp(76px, 13cqw, 200px);
+  width: auto; min-width: clamp(76px, 13cqw, 200px);
+  padding: 0 clamp(10px, 2cqw, 28px); white-space: nowrap;
   font-family: Impact, 'Arial Narrow', sans-serif;
   font-size: clamp(20px, 4.4cqw, 60px); font-weight: 900; line-height: 1; letter-spacing: .04em;
   background: #8791a3; color: #0a0c10;
-  clip-path: polygon(0 0,100% 0,calc(100% - 28px) 100%,0 100%);
+  clip-path: polygon(0 0,100% 0,calc(100% - 12px) 100%,0 100%);
 }
 #arenaCapTag.red { background: #ff3b2f; }
 #arenaCapTag.blue { background: #2f7bff; }
@@ -952,6 +951,10 @@ canvas.lobby-thumb:focus-visible { outline: 2px solid #8fb8ff; outline-offset: 2
   display: flex; gap: 16px; align-items: flex-start; justify-content: center;
 }
 .arena-row3 > .arena-canvas-wrap { flex: 1 1 auto; min-width: 0; margin: 0; }
+/* Left margin column: the red thought card with the speed
+   strip docked directly under it. */
+.arena-side { display: flex; flex-direction: column; gap: 8px; flex: 0 0 248px; width: 248px; }
+.arena-side > .thought { flex: none; width: 100%; }
 .thought {
   position: relative;
   flex: 0 0 248px; width: 248px; max-height: 70vh; overflow-y: auto;
@@ -979,7 +982,8 @@ canvas.lobby-thumb:focus-visible { outline: 2px solid #8fb8ff; outline-offset: 2
 @media (max-width: 900px) {
   .arena-row3 { flex-direction: column; align-items: stretch; }
   .arena-row3 > .arena-canvas-wrap { order: 0; width: 100%; }
-  .arena-row3 > .thought { order: 1; flex: none; width: 100%; max-height: 30vh; }
+  .arena-row3 > .arena-side { order: 1; flex: none; width: 100%; }
+  .arena-row3 > .arena-side > .thought { max-height: 30vh; }
   .arena-row3 > .arena-rail { order: 2; flex: none; width: 100%; }
   .arena-row3 > .arena-rail > .thought { max-height: 30vh; }
 }
