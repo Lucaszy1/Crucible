@@ -954,6 +954,7 @@ export function renderStageStatic(refs, events, cursor, opts, instant) {
     refs.flash = null;
     refs.surge = { red: 0, blue: 0 };
     refs.knock = { red: 0, blue: 0 };
+    refs.charge = null;
     refs.cam = { dx: 0, dy: 0, z: 1 };
     refs.camTarget = { dx: 0, dy: 0, z: 1 };
     refs.trauma = 0;
@@ -1272,6 +1273,7 @@ export function cancelStage(refs) {
   refs.desatTarget = 0;
   refs.surge = { red: 0, blue: 0 };
   refs.knock = { red: 0, blue: 0 };
+  refs.charge = null;
   if (refs.audTimer) {
     clearTimeout(refs.audTimer);
     refs.audTimer = 0;
@@ -1579,22 +1581,24 @@ export function moveSpanMs(size) {
   return (FLIGHT_MS[size] || FLIGHT_MS.standard) + IMPACT_MS + AFTERMATH_MS;
 }
 
-// Finish pace scales every beat of the ending: rays two seconds
-// apart at standard pace, the whole finish about nine seconds;
-// quick lands near six, slow near sixteen for narration.
+// Finish pace scales every beat of the ending: a short charge,
+// one giant projectile, then three beams two seconds apart at
+// standard pace; the whole finish runs under ten seconds, quick
+// lands near six, slow near seventeen for narration.
 export const FINISH_PACES = { quick: 0.65, standard: 1, slow: 1.8 };
 
 export function finishPlan(pace) {
   const m = FINISH_PACES[pace] || FINISH_PACES.standard;
+  const charge = Math.round(600 * m);
+  const titanFlight = Math.round(900 * m);
   const gap = Math.round(2000 * m);
-  const rayFlight = Math.round(350 * m);
-  const rayDur = Math.round(1100 * m);
-  const postRay = Math.round(1500 * m);
+  const beamDur = Math.round(1400 * m);
+  const postBeam = Math.round(1500 * m);
   const explodeDur = Math.round(1800 * m);
   const cardDelay = Math.round(800 * m);
   return {
-    mult: m, gap, rayFlight, rayDur, postRay, explodeDur, cardDelay,
-    total: 2 * gap + rayFlight + postRay + explodeDur + cardDelay,
+    mult: m, charge, titanFlight, gap, beamDur, postBeam, explodeDur, cardDelay,
+    total: charge + titanFlight + 2 * gap + postBeam + explodeDur + cardDelay,
   };
 }
 
@@ -1608,9 +1612,10 @@ function projectileEntry(kind, side, size, fail) {
 }
 
 // Hit-stop freeze in frames by move size: small volleys land
-// without freezing, standard hits hold 3 frames, heavy ones 5.
-// The finish sequence keeps its own longer beats. Pure.
+// without freezing, standard hits hold 3 frames, heavy ones 5,
+// and the finish's titan projectile holds 6. Pure.
 export function hitstopFor(size) {
+  if (size === "titan") return 6;
   if (size === "heavy" || size === "large") return 5;
   if (size === "small") return 0;
   return 3;
@@ -1766,12 +1771,13 @@ function projEnds(refs, side) {
   };
 }
 
-// Finish sequence: when a decisive exercise ends, the winner fires
-// three rays of light at the loser, each striking harder, then the
-// loser explodes. Blue wins seal the Intrusion first and it
-// dissolves; red wins shatter the Guardian and desaturate the
-// stage. Rays reuse the fx and impact ledgers with future stamps;
-// completion fires from the tick so stills and live play agree.
+// Finish sequence: when a decisive exercise ends, the winner
+// charges, fires one giant projectile, and three beams burst
+// outward from the loser before it explodes. Blue wins seal the
+// Intrusion first and it dissolves; red wins shatter the Guardian
+// and desaturate the stage. The titan and beams reuse the fx and
+// impact ledgers with future stamps; completion fires from the
+// tick so stills and live play agree.
 export function stageFinish(refs, side, opts) {
   const o = opts || {};
   const done = typeof o.onDone === "function" ? o.onDone : () => {};
@@ -1785,23 +1791,39 @@ export function stageFinish(refs, side, opts) {
   const plan = finishPlan(o.pace);
   const t0 = refs.clock;
   if (!refs.impacts) refs.impacts = [];
+  // Charge: the winner swells and brightens while the camera
+  // pushes in slow, then the titan crosses the full stage.
+  refs.charge = { side: winner, from: t0, until: t0 + plan.charge };
+  refs.camTarget = { dx: 0, dy: 0, z: 1.18 };
+  const kind = winner === "red" ? "lance" : "orb";
+  const tat = t0 + plan.charge;
+  const titan = {
+    kind, side: winner, size: "titan", fail: false,
+    flight: plan.titanFlight, t0: tat,
+    dur: plan.titanFlight + IMPACT_MS + AFTERMATH_MS,
+  };
+  refs.fx.push(titan);
+  scheduleImpacts(refs, titan);
+  // Three beams burst outward from the loser, two seconds apart,
+  // each wider and brighter; the first lands with the impact.
+  const impactAt = tat + plan.titanFlight;
   for (let i = 0; i < 3; i += 1) {
-    const at = t0 + i * plan.gap;
-    refs.fx.push({ kind: "ray", side: winner, power: i + 1, t0: at, dur: plan.rayDur, flight: plan.rayFlight });
-    refs.impacts.push({ at: at + plan.rayFlight, kind: "raystrike", side: loser, power: i + 1 });
+    const at = impactAt + i * plan.gap;
+    refs.fx.push({ kind: "beam", side: loser, power: i + 1, t0: at, dur: plan.beamDur });
+    refs.impacts.push({ at, kind: "beamburst", side: loser, power: i + 1 });
   }
-  const thirdAt = t0 + 2 * plan.gap + plan.rayFlight;
+  const thirdAt = impactAt + 2 * plan.gap;
   if (winner === "blue") {
-    refs.fx.push({ kind: "seal", t0: thirdAt, dur: plan.postRay });
+    refs.fx.push({ kind: "seal", t0: thirdAt, dur: plan.postBeam });
   }
-  const explodeAt = thirdAt + plan.postRay;
+  const explodeAt = thirdAt + plan.postBeam;
   refs.impacts.push({ at: explodeAt, kind: "explode", side: loser });
   refs.finish = { doneAt: explodeAt + plan.explodeDur + plan.cardDelay, onDone: done, fired: false };
   return true;
 }
 
 // Impact ledger: one record per projectile strike, shatter,
-// mid-flight fizzle, ray strike, or final explosion. Fired from
+// mid-flight fizzle, beam burst, or final explosion. Fired from
 // drawStage so stills and live play agree, and cleared on scrub
 // like every transient effect.
 function scheduleImpacts(refs, fx) {
@@ -1857,14 +1879,16 @@ function fireImpacts(refs) {
       spawnSparks(refs, ends.to.x, ends.to.y, "gray", 7);
       continue;
     }
-    if (hit.kind === "raystrike") {
-      // Finish rays strike with growing impact: more sparks,
-      // harder shake, longer freeze with each ray.
+    if (hit.kind === "beamburst") {
+      // Finish beams burst outward from the loser with escalating
+      // shake and sparks. The first arrives with the titan impact
+      // and hands the camera back to the wide shot.
       const power = Math.max(1, Math.min(3, Number(hit.power) || 1));
-      spawnSparks(refs, ends.to.x, ends.to.y, hit.side === "red" ? "blue" : "red", 6 + power * 10);
-      refs.trauma = Math.min(1, refs.trauma + 0.2 + power * 0.15);
+      spawnSparks(refs, ends.to.x, ends.to.y, hit.side === "red" ? "red" : "blue", 8 + power * 12);
+      spawnSparks(refs, ends.to.x, ends.to.y, "white", power * 6);
+      refs.trauma = Math.min(1, refs.trauma + 0.15 + power * 0.15);
       refs.knock[hit.side] = refs.clock + (KNOCK_MS[hit.side] || 500);
-      if (power > 1) refs.hitstopFrames = Math.max(refs.hitstopFrames || 0, power === 2 ? 4 : 8);
+      if (power === 1) refs.camTarget = { dx: 0, dy: 0, z: 1 };
       continue;
     }
     if (hit.kind === "explode") {
@@ -1886,12 +1910,15 @@ function fireImpacts(refs) {
         mode: hit.side === "red" ? "dissolve" : "shatter",
       };
       if (hit.side === "blue") refs.desatTarget = 0.85;
+      refs.camTarget = { dx: 0, dy: 0, z: 1 };
       continue;
     }
     const size = hit.size || "standard";
     const heavy = size === "heavy" || size === "large";
-    spawnSparks(refs, ends.to.x, ends.to.y, hit.side === "red" ? "blue" : "red", heavy ? 26 : size === "small" ? 10 : 16);
-    refs.trauma = Math.min(1, refs.trauma + (heavy ? 0.5 : size === "small" ? 0.15 : 0.3));
+    const titan = size === "titan";
+    if (titan) spawnSparks(refs, ends.to.x, ends.to.y, "white", 16);
+    spawnSparks(refs, ends.to.x, ends.to.y, hit.side === "red" ? "blue" : "red", titan ? 40 : heavy ? 26 : size === "small" ? 10 : 16);
+    refs.trauma = Math.min(1, refs.trauma + (titan ? 0.65 : heavy ? 0.5 : size === "small" ? 0.15 : 0.3));
     refs.knock[hit.side] = refs.clock + (KNOCK_MS[hit.side] || 500);
     refs.hitstopFrames = Math.max(refs.hitstopFrames || 0, hitstopFor(size));
   }
@@ -2341,6 +2368,14 @@ function paintEntities(refs, ctx) {
   const blueHot = refs.clock < refs.surge.blue ? (refs.surge.blue - refs.clock) / 900 : 0;
   const redKnock = refs.clock < refs.knock.red ? (refs.knock.red - refs.clock) / 450 : 0;
   const blueKnock = refs.clock < refs.knock.blue ? (refs.knock.blue - refs.clock) / 600 : 0;
+  // Finish charge: the winner swells and brightens before firing.
+  const ch = refs.charge;
+  const chargeK = ch && refs.clock >= ch.from && refs.clock < ch.until
+    ? (refs.clock - ch.from) / Math.max(1, ch.until - ch.from) : 0;
+  const chargeRed = chargeK > 0 && ch.side === "red";
+  const chargeBlue = chargeK > 0 && ch.side === "blue";
+  const redFlare = chargeRed ? Math.max(redHot, chargeK) : redHot;
+  const blueFlare = chargeBlue ? Math.max(blueHot, chargeK) : blueHot;
   const level = Math.min(1, refs.intrusion + redHot * 0.25);
   const energy = Math.min(1.15, refs.guardian + blueHot * 0.35);
   const sway = refs.cam.dx * 0.12;
@@ -2364,8 +2399,8 @@ function paintEntities(refs, ctx) {
     ctx.globalAlpha = redAlpha;
     paintIntrusion(ctx, {
       sprites: refs.sprites || {}, bodies: refs.bodies || {},
-      swayX: sway, flare: redHot, recoil: redKnock, burst: redHot,
-    }, red.x, redY, red.r * (0.68 + 0.42 * refs.intrusion), level, t);
+      swayX: sway, flare: redFlare, recoil: redKnock, burst: redFlare,
+    }, red.x, redY, red.r * (0.68 + 0.42 * refs.intrusion) * (chargeRed ? 1 + 0.35 * chargeK : 1), level, t);
     ctx.restore();
   }
   if (blueAlpha > 0) {
@@ -2373,8 +2408,8 @@ function paintEntities(refs, ctx) {
     ctx.globalAlpha = blueAlpha;
     paintGuardian(ctx, {
       sprites: refs.sprites || {}, bodies: refs.bodies || {},
-      swayX: sway, flare: blueHot, recoil: blueKnock, burst: 0,
-    }, blue.x, blue.y, blue.r, energy, t);
+      swayX: sway, flare: blueFlare, recoil: blueKnock, burst: 0,
+    }, blue.x, blue.y, blue.r * (chargeBlue ? 1 + 0.35 * chargeK : 1), energy, t);
     ctx.restore();
   }
   if (dead && dead.side === "blue" && refs.clock > dead.at) {
@@ -2662,9 +2697,9 @@ export function paintGuardian(ctx, env, x, y, r, energy, t) {
 // the kinetic callout plate sits on the lane apex and used to
 // cover single lances mid-flight, leaving only their glow and
 // embers visible. Host marks, plates, and seals paint first,
-// then projectiles and finish rays over them, each pass keeping
+// then projectiles and finish beams over them, each pass keeping
 // its push order.
-const TOP_FX = new Set(["lance", "volley", "orb", "ray"]);
+const TOP_FX = new Set(["lance", "volley", "orb", "beam"]);
 
 function paintFx(refs, ctx) {
   paintFxPass(refs, ctx, false);
@@ -2729,8 +2764,8 @@ function paintFxPass(refs, ctx, top) {
       case "orb":
         paintProjectile(refs, ctx, fx, age);
         break;
-      case "ray":
-        paintRay(refs, ctx, fx, age);
+      case "beam":
+        paintBeam(refs, ctx, fx, age);
         break;
       case "seal":
         paintSeal(refs, ctx, fx, age);
@@ -3102,7 +3137,7 @@ function paintFxCallout(refs, ctx, fx, p) {
 
 // Body scale by move significance: even the small volley shards
 // read at full size, heavy lances and large orbs fly much bigger.
-export const PROJ_SCALE = { small: 1, standard: 1.3, heavy: 1.8, large: 1.8 };
+export const PROJ_SCALE = { small: 1, standard: 1.3, heavy: 1.8, large: 1.8, titan: 5.5 };
 export const LANCE_LEN = 46;
 export const LANCE_WID = 13;
 export const ORB_R = 15;
@@ -3133,50 +3168,49 @@ export function flashHold(iq) {
   return Math.max(0, 1 - (q - 0.72) / 0.28);
 }
 
-// Finish ray: a shaft of light along the flight lane, white core
-// with the winner's tint, widening with each ray's power. After
-// arrival the impact blooms on the loser's rim.
-function paintRay(refs, ctx, fx, age) {
-  const side = fx.side === "blue" ? "blue" : "red";
+// Finish beam: shafts of light burst outward from the loser in
+// all directions. Each of the three is wider and brighter than
+// the last, over a white-hot core flash and an expanding ring.
+function paintBeam(refs, ctx, fx, age) {
+  const red = fx.side !== "blue";
   const slots = refs.stage.entities;
+  const core = red ? slots.intrusion : slots.guardian;
   const stage = projStageScale(slots.intrusion.r, slots.guardian.r);
-  const ends = projEnds(refs, side);
-  const lane = flightLane(ends.from, ends.to);
-  const flight = Number(fx.flight) || 350;
   const power = Math.max(1, Math.min(3, Number(fx.power) || 1));
-  const width = (7 + power * 5) * stage;
-  const tint = side === "blue" ? "140,210,255" : "255,110,90";
+  const p = Math.max(0, Math.min(1, age / Math.max(1, fx.dur)));
+  const fade = 1 - p;
+  const s = stage * (0.9 + power * 0.45);
+  const tint = red ? "255,110,90" : "140,210,255";
   const sprites = refs.sprites || {};
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
   ctx.lineCap = "round";
-  if (age < flight) {
-    const q = Math.max(0, age / flight);
-    const head = lanePoint(lane, q);
-    ctx.strokeStyle = `rgba(${tint},0.45)`;
-    ctx.lineWidth = width * 2.4;
+  drawGlow(ctx, sprites.white, core.x, core.y, 90 * s * (1 - p * 0.5), 0.9 * fade);
+  drawGlow(ctx, red ? sprites.red : sprites.cyan, core.x, core.y, 130 * s, 0.6 * fade);
+  const shafts = 5 + power * 2;
+  const len = core.r * (2.6 + power * 0.7);
+  const spin = age / 900;
+  const w = (3 + power * 2.5) * stage * fade + 1;
+  for (let i = 0; i < shafts; i += 1) {
+    const a = spin + (i / shafts) * 6.283;
+    const x0 = core.x + Math.cos(a) * core.r * 0.5;
+    const y0 = core.y + Math.sin(a) * core.r * 0.5;
+    const x1 = core.x + Math.cos(a) * len;
+    const y1 = core.y + Math.sin(a) * len;
+    ctx.strokeStyle = `rgba(${tint},${(0.7 * fade).toFixed(2)})`;
+    ctx.lineWidth = w * 2.2;
     ctx.beginPath();
-    ctx.moveTo(ends.from.x, ends.from.y);
-    ctx.lineTo(head.x, head.y);
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
     ctx.stroke();
-    ctx.strokeStyle = "rgba(255,255,255,0.9)";
-    ctx.lineWidth = Math.max(2, width * 0.7);
+    ctx.strokeStyle = `rgba(255,255,255,${(0.8 * fade).toFixed(2)})`;
+    ctx.lineWidth = w;
     ctx.beginPath();
-    ctx.moveTo(ends.from.x, ends.from.y);
-    ctx.lineTo(head.x, head.y);
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
     ctx.stroke();
-    drawGlow(ctx, sprites.white, head.x, head.y, width * 2.2, 0.85);
-    drawGlow(ctx, side === "blue" ? sprites.cyan : sprites.red,
-      ends.from.x, ends.from.y, width * (2 + q * 2), 0.5 + q * 0.4);
-  } else {
-    const iq = Math.min(1, (age - flight) / Math.max(1, fx.dur - flight));
-    const s = stage * (0.8 + power * 0.35);
-    paintFxRing(refs, ctx, { r0: 12 * s, r1: (50 + power * 26) * s, color: tint, dur: fx.dur - flight },
-      iq * (fx.dur - flight), ends.to);
-    drawGlow(ctx, sprites.white, ends.to.x, ends.to.y, 70 * s * (1 - iq * 0.6), 0.9 * (1 - iq));
-    drawGlow(ctx, side === "blue" ? sprites.cyan : sprites.red,
-      ends.to.x, ends.to.y, 46 * s * (1 - iq * 0.5), 0.7 * (1 - iq));
   }
+  paintFxRing(refs, ctx, { r0: 10 * s, r1: (60 + power * 30) * s, color: tint, dur: fx.dur }, age, core);
   ctx.restore();
 }
 
@@ -3324,6 +3358,36 @@ function paintAftermath(refs, ctx, at, aq, s, red) {
   ctx.restore();
 }
 
+// Tapered ribbon trail for giant bodies: at titan scale the
+// five trail dots read as separate beads, so the tail becomes
+// one ribbon narrowing to the tail with a hot inner thread.
+function paintTrailRibbon(ctx, lane, q, span, halfWid, color, inner) {
+  const passes = [
+    { mul: 1, color },
+    { mul: 0.45, color: inner },
+  ];
+  for (const pass of passes) {
+    const left = [];
+    const right = [];
+    const N = 16;
+    for (let j = 0; j < N; j += 1) {
+      const qq = Math.max(0, q - (span * j) / (N - 1));
+      const p = lanePoint(lane, qq);
+      const a = laneTangent(lane, qq) + Math.PI / 2;
+      const w = halfWid * pass.mul * Math.pow(1 - j / (N - 1), 0.7);
+      left.push([p.x + Math.cos(a) * w, p.y + Math.sin(a) * w]);
+      right.push([p.x - Math.cos(a) * w, p.y - Math.sin(a) * w]);
+    }
+    ctx.fillStyle = pass.color;
+    ctx.beginPath();
+    ctx.moveTo(left[0][0], left[0][1]);
+    for (const pt of left) ctx.lineTo(pt[0], pt[1]);
+    for (let j = N - 1; j >= 0; j -= 1) ctx.lineTo(right[j][0], right[j][1]);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
 // Crimson code-lance: a shard body along the flight tangent with
 // a streak trail. Abstract splinter, no handle anywhere.
 function paintLance(refs, ctx, lane, q, s, index) {
@@ -3392,12 +3456,16 @@ function paintLance(refs, ctx, lane, q, s, index) {
   ctx.fill();
   ctx.restore();
   ctx.save();
-  ctx.fillStyle = "#f52d1e";
-  for (let i = 1; i <= 5; i += 1) {
-    const dot = lanePoint(lane, Math.max(0, q - (i * span) / 5));
-    ctx.beginPath();
-    ctx.arc(dot.x, dot.y, Math.max(1.2, (6 - i) * s), 0, 6.283);
-    ctx.fill();
+  if (s >= 3) {
+    paintTrailRibbon(ctx, lane, q, span, wid * 0.9, "#f52d1e", "#ffb3a0");
+  } else {
+    ctx.fillStyle = "#f52d1e";
+    for (let i = 1; i <= 5; i += 1) {
+      const dot = lanePoint(lane, Math.max(0, q - (i * span) / 5));
+      ctx.beginPath();
+      ctx.arc(dot.x, dot.y, Math.max(1.2, (6 - i) * s), 0, 6.283);
+      ctx.fill();
+    }
   }
   ctx.restore();
 }
@@ -3431,12 +3499,16 @@ function paintOrb(refs, ctx, lane, q, s) {
   ctx.beginPath();
   ctx.arc(head.x, head.y, r * 0.5, 0, 6.283);
   ctx.fill();
-  ctx.fillStyle = "#5ac8ff";
-  for (let i = 1; i <= 5; i += 1) {
-    const dot = lanePoint(lane, Math.max(0, q - (i * span) / 5));
-    ctx.beginPath();
-    ctx.arc(dot.x, dot.y, Math.max(1, r * (1 - i * 0.14)), 0, 6.283);
-    ctx.fill();
+  if (s >= 3) {
+    paintTrailRibbon(ctx, lane, q, span, r * 0.8, "#5ac8ff", "#d8f1ff");
+  } else {
+    ctx.fillStyle = "#5ac8ff";
+    for (let i = 1; i <= 5; i += 1) {
+      const dot = lanePoint(lane, Math.max(0, q - (i * span) / 5));
+      ctx.beginPath();
+      ctx.arc(dot.x, dot.y, Math.max(1, r * (1 - i * 0.14)), 0, 6.283);
+      ctx.fill();
+    }
   }
   ctx.restore();
 }
