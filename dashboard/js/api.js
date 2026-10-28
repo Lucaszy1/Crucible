@@ -3,7 +3,11 @@ import { normalizeActor } from "./state.js";
 
 async function getJson(path) {
   const res = await fetch(path);
-  if (!res.ok) throw new Error(`${path} returned ${res.status}`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    const detail = typeof data.detail === "string" ? data.detail : null;
+    throw new Error(detail || `${path} returned ${res.status}`);
+  }
   return res.json();
 }
 
@@ -11,8 +15,9 @@ export function fetchRuns() {
   return getJson("/api/runs");
 }
 
-export async function fetchRun(runId) {
-  const data = await getJson(`/api/runs/${encodeURIComponent(runId)}`);
+export async function fetchRun(runId, bench) {
+  const qs = bench ? `?bench=${encodeURIComponent(bench)}` : "";
+  const data = await getJson(`/api/runs/${encodeURIComponent(runId)}${qs}`);
   // Human defender turns ride the blue lane in every view.
   if (data && Array.isArray(data.events)) {
     data.events = data.events.map((ev) => normalizeActor(ev));
@@ -105,8 +110,9 @@ export function fetchStage3() {
   return getJson("/api/bench/stage3");
 }
 
-export function fetchDebrief(runId) {
-  return getJson(`/api/runs/${encodeURIComponent(runId)}/debrief`);
+export function fetchDebrief(runId, bench) {
+  const qs = bench ? `?bench=${encodeURIComponent(bench)}` : "";
+  return getJson(`/api/runs/${encodeURIComponent(runId)}/debrief${qs}`);
 }
 
 export async function startExercise(agents, exerciseId, scenario) {

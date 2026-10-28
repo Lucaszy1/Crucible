@@ -568,10 +568,10 @@ async function copyDebrief(text, btn) {
 
 // Fetch one replay's debrief after its events load. Stale
 // responses (user moved on) are dropped by run id.
-function loadDebrief(runId) {
+function loadDebrief(runId, bench) {
   store.debriefRun = runId;
   store.debrief = null;
-  fetchDebrief(runId).then((data) => {
+  fetchDebrief(runId, bench).then((data) => {
     if (store.debriefRun !== runId) return;
     store.debrief = (data && data.debrief) || { error: true };
     render(false);
@@ -715,7 +715,7 @@ async function openExercise(runId, opts) {
   render(false);
   let data;
   try {
-    data = await fetchRun(runId);
+    data = await fetchRun(runId, o.bench);
   } catch (err) {
     notice(`Could not load run ${runId}: ${err.message}`, true);
     setMode("idle", "No exercise loaded");
@@ -729,7 +729,8 @@ async function openExercise(runId, opts) {
   // System events are harness notes, not moves: skip them everywhere.
   store.events = (data.events || []).filter((ev) => ev && ev.actor !== "system");
   store.replayScore = data.score || null;
-  loadDebrief(runId);
+  store.runBench = data.bench || o.bench || null;
+  loadDebrief(runId, store.runBench);
   store.cursor = 0;
   store.firstAuthIndex = store.events.findIndex(
     (ev) => ev.actor === "red" && ev.tool === "try_credential" && (ev.result || {}).authenticated === true,
@@ -1078,6 +1079,16 @@ function nextFeaturedId() {
   return queue.length > 0 ? queue[0] : null;
 }
 
+// Exact bench for one run id: featured provenance first, then the
+// classified card's resolved bench. Featured replays always open
+// from their curated (bench, episode), never a bare-id guess.
+function benchFor(id) {
+  const prov = (store.lobby.provenance || {})[id];
+  if (prov && prov.bench) return prov.bench;
+  const card = (store.lobby.cards || []).find((entry) => entry && entry.id === id);
+  return (card && card.bench) || null;
+}
+
 function showEndCardFor() {
   const stats = endCardStats(store.events, store.finalScore, store.weights);
   const audits = reduceAudits(store.events, store.events.length);
@@ -1118,7 +1129,7 @@ function scheduleAdvance(nextId) {
   const ticker = setInterval(tick, 1000);
   const timer = setTimeout(() => {
     cancelAdvance();
-    openExercise(nextId);
+    openExercise(nextId, { bench: benchFor(nextId) });
   }, ADVANCE_SECONDS * 1000);
   store.advance = { timer, ticker };
 }
@@ -1131,7 +1142,7 @@ function armLabel(memory) {
 
 async function classifyRun(run, armByEpisode) {
   try {
-    const data = await fetchRun(run.id);
+    const data = await fetchRun(run.id, run.bench);
     const full = data.events || [];
     const layout = layoutFromEvents(full);
     const hosts = layoutHosts(layout);
@@ -1147,6 +1158,7 @@ async function classifyRun(run, armByEpisode) {
       title: (store.lobby.titles || {})[run.id] || null,
       provenance: (store.lobby.provenance || {})[run.id] || null,
       outcomeKey: out.key,
+      bench: data.bench || run.bench || null,
       outcome: { label: out.label, tone: out.tone },
       blueScore: typeof score.blue_score === "number" ? score.blue_score : null,
       moves: lane.length,
@@ -1186,7 +1198,7 @@ function paintLobby() {
     cards: store.lobby.cards,
     featuredIds: effectiveFeaturedIds(),
     loading: store.lobby.loading,
-  }, { onPlay: (id) => openExercise(id) },
+  }, { onPlay: (id) => openExercise(id, { bench: benchFor(id) }) },
   { art: store.stageArt || {}, attackMap: store.attackMap });
   // A live run ends while the shelf reloads, so the end card can
   // open with no Next yet; re-arm it as the ranks fill in.
@@ -1245,7 +1257,8 @@ async function refreshRuns() {
   for (const id of store.lobby.featuredIds) {
     if (!seen.has(id)) {
       seen.add(id);
-      queue.push({ id, featuredExtra: true });
+      const prov = (store.lobby.provenance || {})[id] || {};
+      queue.push({ id, featuredExtra: true, bench: prov.bench || null });
     }
   }
   const workers = [];
@@ -1274,7 +1287,7 @@ function watchReplay() {
     return;
   }
   const pick = pool[Math.floor(Math.random() * pool.length)];
-  openExercise(pick.id);
+  openExercise(pick.id, { bench: pick.bench || benchFor(pick.id) });
 }
 
 async function pollStatus() {
@@ -1361,7 +1374,9 @@ function setPresent(on) {
     // Presentation mode loops the featured lobby from the top.
     if (store.mode === "idle" || (store.mode === "replay" && store.cursor >= store.events.length)) {
       const cards = visibleCards();
-      if (cards.length > 0 && store.runId !== cards[0].id) openExercise(cards[0].id);
+      if (cards.length > 0 && store.runId !== cards[0].id) {
+        openExercise(cards[0].id, { bench: cards[0].bench || benchFor(cards[0].id) });
+      }
       else if (cards.length > 0 && store.cursor >= store.events.length) playReplay();
     }
   } else {
@@ -1634,7 +1649,7 @@ async function boot() {
     },
     onNext: () => {
       const next = nextFeaturedId();
-      if (next) openExercise(next);
+      if (next) openExercise(next, { bench: benchFor(next) });
     },
     onLobby: () => switchTab("lobby"),
   });
@@ -1708,7 +1723,11 @@ async function boot() {
   if (wanted) {
     // Deep links open at once; the lobby keeps classifying behind.
     // Unknown ids fall back to the lobby with a notice inside open.
-    openExercise(wanted, at === null ? {} : { at });
+    // ?bench= pins the exact copy for ambiguous episode ids.
+    openExercise(wanted, {
+      ...(at === null ? {} : { at }),
+      bench: params.get("bench") || benchFor(wanted),
+    });
     return;
   }
   if (view && TABS[view]) switchTab(view);

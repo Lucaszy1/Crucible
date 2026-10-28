@@ -44,6 +44,11 @@ _EXERCISE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 # Non-run jsonl files under runs/ that must stay out of listings.
 SKIP_FILES = {"spend.jsonl"}
 
+# Shelved copies under runs/archive/ are never canonical, so bare-id
+# lookup never searches there; pass ?bench=archive to open one on
+# purpose.
+ARCHIVE_DIR = "archive"
+
 # Replay pacing: one event per 1.2 seconds at speed 1.
 REPLAY_INTERVAL_S = 1.2
 
@@ -66,16 +71,31 @@ def _runs_dir() -> Path:
     return events.RUNS_DIR
 
 
-def _resolve_run(run_id: str) -> Path:
+def _resolve_run(run_id: str, bench: str | None = None) -> Path:
     """Map a run id to its jsonl file, rejecting traversal attempts.
 
-    Bench episodes live one level down (runs/<bench>/<id>.jsonl),
-    so a top-level miss falls through to a sorted one-level search.
-    Top level always wins a stem collision.
+    With bench, resolve runs/<bench>/<id>.jsonl exactly. Without it,
+    a top-level file wins outright; otherwise the one level of bench
+    folders is searched in sorted order, skipping runs/archive/.
+    Exactly one match resolves; several raise 409 naming the
+    benches, so the caller passes ?bench= instead of silently
+    opening the wrong copy.
     """
     if not _RUN_ID_RE.match(run_id or ""):
         raise HTTPException(status_code=404, detail=f"unknown run {run_id!r}")
     root = _runs_dir().resolve()
+    if bench is not None:
+        if not _RUN_ID_RE.match(bench):
+            raise HTTPException(status_code=404, detail=f"unknown bench {bench!r}")
+        target = (root / bench / f"{run_id}.jsonl").resolve()
+        try:
+            target.relative_to(root)
+        except ValueError:
+            raise HTTPException(status_code=404, detail=f"unknown run {run_id!r}")
+        if target.name not in SKIP_FILES and target.is_file():
+            return target
+        raise HTTPException(
+            status_code=404, detail=f"unknown run {run_id!r} in bench {bench!r}")
     target = (root / f"{run_id}.jsonl").resolve()
     try:
         target.relative_to(root)
@@ -87,28 +107,51 @@ def _resolve_run(run_id: str) -> Path:
         subdirs = sorted(path for path in root.iterdir() if path.is_dir())
     except OSError:
         subdirs = []
+    matches = []
     for subdir in subdirs:
+        if subdir.name == ARCHIVE_DIR:
+            continue
         candidate = (subdir / f"{run_id}.jsonl").resolve()
         try:
             candidate.relative_to(root)
         except ValueError:
             continue
         if candidate.name not in SKIP_FILES and candidate.is_file():
-            return candidate
+            matches.append(candidate)
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        benches = sorted(match.parent.name for match in matches)
+        raise HTTPException(
+            status_code=409,
+            detail=(f"run {run_id!r} is in several benches "
+                    f"({', '.join(benches)}); pass ?bench= to pick one"),
+        )
     raise HTTPException(status_code=404, detail=f"unknown run {run_id!r}")
 
 
-def _read_run_events(run_id: str) -> list:
-    """Read one run's events, raising 404/422 on missing or broken logs."""
+def _resolved_bench(path: Path) -> str | None:
+    """Return the bench folder holding a resolved run, if any."""
+    root = _runs_dir().resolve()
     try:
-        found = events.read_events(_resolve_run(run_id))
+        rel = path.resolve().relative_to(root)
+    except ValueError:
+        return None
+    return rel.parts[0] if len(rel.parts) > 1 else None
+
+
+def _read_run_events(run_id: str, bench: str | None = None) -> tuple[list, str | None]:
+    """Read one run's events plus its bench, raising 404/409/422."""
+    try:
+        path = _resolve_run(run_id, bench)
+        found = events.read_events(path)
     except HTTPException:
         raise
     except (OSError, ValueError) as exc:
         raise HTTPException(
             status_code=422, detail=f"run {run_id!r} is unreadable: {exc}"
         )
-    return found
+    return found, _resolved_bench(path)
 
 
 def _score_or_none(event_list: list) -> dict | None:
@@ -468,15 +511,24 @@ def list_runs() -> dict:
 
 
 @app.get("/api/runs/{run_id}")
-def get_run(run_id: str) -> dict:
-    """Return one run's events plus its score when computable."""
-    found = _read_run_events(run_id)
-    return {"id": run_id, "events": found, "score": _score_or_none(found)}
+def get_run(
+    run_id: str, bench: str | None = Query(default=None)
+) -> dict:
+    """Return one run's events plus its score when computable.
+
+    bench pins the exact bench folder; without it a bare id must
+    resolve to exactly one copy. The reply names the bench the
+    episode was read from (null for top-level runs).
+    """
+    found, resolved = _read_run_events(run_id, bench)
+    return {"id": run_id, "events": found, "score": _score_or_none(found),
+            "bench": resolved}
 
 
 @app.get("/api/runs/{run_id}/debrief")
 def get_debrief(
-    run_id: str, rewrite: int = Query(default=0)
+    run_id: str, rewrite: int = Query(default=0),
+    bench: str | None = Query(default=None),
 ) -> dict:
     """Return one run's exercise debrief report.
 
@@ -484,7 +536,7 @@ def get_debrief(
     Wonder for a plain-language rewrite, falling back to Layer 1 on
     any mismatch or error, including a missing model key.
     """
-    found = _read_run_events(run_id)
+    found, _ = _read_run_events(run_id, bench)
     try:
         report = debrief.build_debrief(found, run_id=run_id)
     except ValueError as exc:
@@ -498,13 +550,15 @@ def get_debrief(
 
 @app.get("/api/stream/{run_id}")
 def stream_run(
-    run_id: str, speed: float = Query(default=1.0)
+    run_id: str, speed: float = Query(default=1.0),
+    bench: str | None = Query(default=None),
 ) -> StreamingResponse:
     """Replay a finished run over server-sent events.
 
     Speed 1 sends one event per 1.2 seconds; higher values go faster.
+    bench pins the exact bench folder for ambiguous episode ids.
     """
-    found = _read_run_events(run_id)
+    found, _ = _read_run_events(run_id, bench)
     score = _score_or_none(found)
     try:
         pace = float(speed)
