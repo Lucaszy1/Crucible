@@ -255,7 +255,10 @@ function featureCard(model, callbacks, env) {
   head.className = "feature-head";
   const id = document.createElement("h3");
   id.className = "lobby-id";
-  id.textContent = cardTitle(model);
+  const words = document.createElement("span");
+  words.className = "lobby-id-text";
+  words.textContent = cardTitle(model);
+  id.append(words);
   id.title = cardTitleAttr(model);
   head.append(id, outcomeBadge(model.outcome));
   const story = document.createElement("p");
@@ -298,7 +301,10 @@ function archiveCard(model, callbacks, env) {
   head.className = "lobby-card-head";
   const id = document.createElement("h3");
   id.className = "lobby-id";
-  id.textContent = cardTitle(model);
+  const words = document.createElement("span");
+  words.className = "lobby-id-text";
+  words.textContent = cardTitle(model);
+  id.append(words);
   id.title = cardTitleAttr(model);
   head.append(id, outcomeBadge(model.outcome));
   const meta = document.createElement("p");
