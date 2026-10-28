@@ -1187,9 +1187,10 @@ function updateStageDebug(refs, force) {
     (refs.recoveryNote ? `\n! recovered: ${refs.recoveryNote}` : "");
 }
 
-// Event-to-effects map, pure: each real event names the beams it
-// fires. ctx carries { jewel, lastRedHost }. Lateral moves draw a
-// tendril from the previous red foothold to the new host.
+// Event-to-effects map, pure: each real event names the marks it
+// leaves on the target host itself. ctx carries { jewel,
+// lastRedHost }. Lateral moves draw a tendril along the link from
+// the previous red foothold to the new host.
 export function fxForEvent(ev, ctx) {
   if (!ev) return [];
   const c = ctx || {};
@@ -2214,22 +2215,6 @@ function entityCore(refs, side) {
   return { x: slot.x, y: slot.y, r: slot.r };
 }
 
-function beamStroke(ctx, x0, y0, x1, y1, color, width, alpha) {
-  ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-  ctx.lineCap = "round";
-  ctx.strokeStyle = `rgba(${color},${(alpha * 0.35).toFixed(2)})`;
-  ctx.lineWidth = width * 3;
-  ctx.beginPath();
-  ctx.moveTo(x0, y0);
-  ctx.lineTo(x1, y1);
-  ctx.stroke();
-  ctx.strokeStyle = `rgba(${color},${alpha.toFixed(2)})`;
-  ctx.lineWidth = width;
-  ctx.stroke();
-  ctx.restore();
-}
-
 function fxTex(refs, key) {
   const tex = refs.art && refs.art[key];
   return tex && tex.width ? tex : null;
@@ -2256,82 +2241,62 @@ function paintFxRing(refs, ctx, fx, age, pt) {
   ctx.restore();
 }
 
-// Scan: a fan of rays sweeps from the Intrusion across the target.
+// Scan: a sweep ring crosses the target host itself. Nothing is
+// drawn from the entities to the hosts; the exchange between the
+// entities travels as projectiles instead.
 function paintFxFan(refs, ctx, fx, p) {
   const at = fxPoint(refs, fx);
   if (!at) return;
-  const from = entityCore(refs, "red");
-  const base = Math.atan2(at.y - from.y, at.x - from.x);
-  const dist = Math.hypot(at.x - from.x, at.y - from.y);
-  const sweep = Math.sin(p * Math.PI) * 0.5;
+  paintFxRing(refs, ctx, { ...fx, r0: at.r + 4, r1: at.r + 34, color: "255,90,80" },
+    p * fx.dur, at);
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
-  for (let i = -2; i <= 2; i += 1) {
-    const a = base + i * 0.12 + sweep * 0.4;
-    const len = dist * Math.min(1, p * 1.6);
-    ctx.strokeStyle = `rgba(255,90,80,${(0.5 * (1 - p) * (1 - Math.abs(i) / 3)).toFixed(2)})`;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(from.x + Math.cos(a) * len, from.y + Math.sin(a) * len);
-    ctx.stroke();
-  }
+  ctx.strokeStyle = `rgba(255,150,130,${(0.8 * (1 - p)).toFixed(2)})`;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(at.x, at.y, at.r + 12, p * 10, p * 10 + 2.1);
+  ctx.stroke();
   ctx.restore();
-  if (p > 0.65) {
-    paintFxRing(refs, ctx, { ...fx, r0: at.r + 4, r1: at.r + 34, color: "255,90,80" },
-      (p - 0.65) * fx.dur, at);
-  }
 }
 
-// Probe: thin flickering needle beams.
+// Probe: a flickering touch flares on the target host itself.
 function paintFxNeedle(refs, ctx, fx, p) {
   const at = fxPoint(refs, fx);
   if (!at) return;
-  const from = entityCore(refs, "red");
   const flick = 0.6 + 0.4 * Math.sin(p * 40);
-  for (const off of [-5, 0, 5]) {
-    const dx = at.x - from.x;
-    const dy = at.y - from.y;
-    const len = Math.hypot(dx, dy) || 1;
-    beamStroke(ctx, from.x - (dy / len) * off, from.y + (dx / len) * off,
-      from.x + dx * Math.min(1, p * 1.4) - (dy / len) * off,
-      from.y + dy * Math.min(1, p * 1.4) + (dx / len) * off,
-      "255,120,100", 1.5, flick * (1 - p * 0.5));
-  }
-  if (p > 0.5) {
+  if (p > 0.2) {
+    const q = (p - 0.2) / 0.8;
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-    ctx.fillStyle = `rgba(255,160,140,${((p - 0.5) * 1.6).toFixed(2)})`;
+    ctx.fillStyle = `rgba(255,160,140,${(q * 1.2 * flick).toFixed(2)})`;
     ctx.beginPath();
-    ctx.arc(at.x, at.y, 4 + (p - 0.5) * 10, 0, 6.283);
+    ctx.arc(at.x, at.y, 4 + q * 10, 0, 6.283);
     ctx.fill();
     ctx.restore();
   }
 }
 
-// Credential guess: key shards fly out and bounce off.
+// Credential guess: the attempt breaks on the host itself.
 function paintFxKeys(refs, ctx, fx, p) {
   const at = fxPoint(refs, fx);
   if (!at) return;
-  const from = entityCore(refs, "red");
   const tex = fxTex(refs, "shard");
-  const leg = p < 0.5 ? p * 2 : (1 - p) * 2;
+  // Shard chips scatter off the host's edge and fall away.
   for (let i = 0; i < 3; i += 1) {
-    const lag = i * 0.12;
-    const q = Math.max(0, Math.min(1, leg - lag));
-    const x = from.x + (at.x - from.x) * q;
-    const y = from.y + (at.y - from.y) * q - Math.sin(q * Math.PI) * 26;
-    const s = 7;
-    const a = q * 9 + i;
+    const a = -Math.PI / 2 + (i - 1) * 0.7;
+    const d = at.r * 0.6 + p * at.r * 1.1;
+    const x = at.x + Math.cos(a) * d;
+    const y = at.y + Math.sin(a) * d + p * p * 26;
+    const s = 6 * (1 - p * 0.5);
     ctx.save();
     ctx.translate(x, y);
-    ctx.rotate(a);
+    ctx.rotate(p * 9 + i);
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = 0.9 * (1 - p);
     if (tex) {
-      ctx.globalCompositeOperation = "lighter";
-      ctx.globalAlpha = 0.9 * (1 - p * 0.4);
       ctx.drawImage(tex, -s * 1.6, -s * 1.6, s * 3.2, s * 3.2);
     } else {
-      ctx.fillStyle = `rgba(255,150,130,${(0.9 * (1 - p * 0.4)).toFixed(2)})`;
+      ctx.fillStyle = "rgba(255,150,130,0.9)";
       ctx.beginPath();
       ctx.moveTo(0, -s);
       ctx.lineTo(s * 0.7, s * 0.6);
@@ -2341,9 +2306,9 @@ function paintFxKeys(refs, ctx, fx, p) {
     }
     ctx.restore();
   }
-  if (p > 0.35 && p < 0.8) {
+  if (p > 0.15 && p < 0.85) {
     ctx.save();
-    ctx.globalAlpha = (0.9 * (1 - (p - 0.35) / 0.45)).toFixed(2);
+    ctx.globalAlpha = (0.9 * (1 - (p - 0.15) / 0.7)).toFixed(2);
     ctx.strokeStyle = "#ff5a4a";
     ctx.lineWidth = 3;
     const r = at.r * 0.4;
@@ -2357,32 +2322,13 @@ function paintFxKeys(refs, ctx, fx, p) {
   }
 }
 
-// Sign-in: pierce the host with a flare. Grab: the jewel snatch,
-// brighter and wider.
+// Sign-in: the host itself flares where the session lands. Grab:
+// the jewel snatch, brighter and wider, still on the host alone.
 function paintFxPierce(refs, ctx, fx, p, grab) {
   const at = fxPoint(refs, fx);
   if (!at) return;
-  const from = entityCore(refs, "red");
-  const grow = Math.min(1, p * 3);
-  const tipX = from.x + (at.x - from.x) * grow;
-  const tipY = from.y + (at.y - from.y) * grow;
-  beamStroke(ctx, from.x, from.y, tipX, tipY,
-    grab ? "255,220,200" : "255,90,80", grab ? 7 : 4, 0.9 * (1 - p * 0.6));
-  // White-hot streak core along the beam.
-  const streak = fxTex(refs, "streak");
-  if (streak && grow > 0.05) {
-    const len = Math.hypot(tipX - from.x, tipY - from.y);
-    const ang = Math.atan2(tipY - from.y, tipX - from.x);
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    ctx.globalAlpha = (grab ? 0.75 : 0.5) * (1 - p * 0.6);
-    ctx.translate((from.x + tipX) / 2, (from.y + tipY) / 2);
-    ctx.rotate(ang);
-    ctx.drawImage(streak, -len / 2, grab ? -14 : -9, len, grab ? 28 : 18);
-    ctx.restore();
-  }
-  if (p > 0.3) {
-    const q = (p - 0.3) / 0.7;
+  if (p > 0.15) {
+    const q = (p - 0.15) / 0.85;
     const sprites = refs.sprites || {};
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
@@ -2428,31 +2374,29 @@ function paintFxTendril(refs, ctx, fx, p) {
   ctx.restore();
 }
 
-// File read: a stream of data pulls back toward the Intrusion.
+// File read: data motes lift off the host and dissolve in place.
 function paintFxSiphon(refs, ctx, fx, p) {
   const at = fxPoint(refs, fx);
   if (!at) return;
-  const from = entityCore(refs, "red");
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
   for (let i = 0; i < 6; i += 1) {
     const q = ((p * 1.4 - i / 6) % 1 + 1) % 1;
-    const x = at.x + (from.x - at.x) * q;
-    const y = at.y + (from.y - at.y) * q;
+    const x = at.x + Math.sin(i * 2.4) * at.r * 0.7 * q;
+    const y = at.y - q * at.r * 1.6;
     ctx.fillStyle = `rgba(255,150,130,${(0.85 * Math.sin(q * Math.PI)).toFixed(2)})`;
     ctx.beginPath();
     ctx.arc(x, y, 3, 0, 6.283);
     ctx.fill();
   }
   ctx.restore();
+  paintFxRing(refs, ctx, { ...fx, r0: at.r + 2, r1: at.r + 30, color: "255,150,130" }, p * fx.dur, at);
 }
 
-// Log review: a scanning ring sweeps the host from the Guardian.
+// Log review: scanning rings sweep the host itself.
 function paintFxScanring(refs, ctx, fx, p) {
   const at = fxPoint(refs, fx);
   if (!at) return;
-  const from = entityCore(refs, "blue");
-  beamStroke(ctx, from.x, from.y, at.x, at.y, "120,190,255", 2, 0.35 * (1 - p));
   paintFxRing(refs, ctx, { ...fx, r0: at.r + 4, r1: at.r + 70, color: "127,212,255" }, p * fx.dur, at);
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
@@ -2591,37 +2535,32 @@ function paintFxCallout(refs, ctx, fx, p) {
   ctx.restore();
 }
 
-// Failed actions sputter and die short of the target.
+// Failed actions sputter and die on the target host itself.
 function paintFxFizzle(refs, ctx, fx, p) {
   const at = fxPoint(refs, fx);
   if (!at) return;
   const red = fx.color !== "blue";
-  const core = entityCore(refs, red ? "red" : "blue");
-  const aim = Math.atan2(at.y - core.y, at.x - core.x);
-  // Start at the entity's edge so the sputter reads outside its glow.
-  const from = { x: core.x + Math.cos(aim) * core.r * 0.7, y: core.y + Math.sin(aim) * core.r * 0.7 };
   const color = red ? "255,120,100" : "140,200,255";
-  const reach = 0.35 + 0.1 * Math.sin(p * 30);
-  const hx = from.x + (at.x - from.x) * reach;
-  const hy = from.y + (at.y - from.y) * reach;
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
   ctx.lineCap = "round";
-  for (let i = 0; i < 4; i += 1) {
-    const t0 = i / 4;
-    const t1 = t0 + 0.2;
+  // Short gray sparks spit off the host's rim and fall back.
+  for (let i = 0; i < 5; i += 1) {
     if (Math.sin(p * 47 + i * 9) > 0.35) continue;
+    const a = (i / 5) * Math.PI * 2 + 0.6;
+    const r0 = at.r * (0.7 + p * 0.5);
+    const r1 = r0 + 10 + (i % 3) * 5;
     ctx.strokeStyle = `rgba(${color},${(0.8 * (1 - p)).toFixed(2)})`;
     ctx.lineWidth = 2.5;
     ctx.beginPath();
-    ctx.moveTo(from.x + (hx - from.x) * t0, from.y + (hy - from.y) * t0);
-    ctx.lineTo(from.x + (hx - from.x) * t1, from.y + (hy - from.y) * t1);
+    ctx.moveTo(at.x + Math.cos(a) * r0, at.y + Math.sin(a) * r0);
+    ctx.lineTo(at.x + Math.cos(a) * r1, at.y + Math.sin(a) * r1 + p * 10);
     ctx.stroke();
   }
   ctx.fillStyle = `rgba(150,150,160,${(p * (1 - p) * 4 * 0.45).toFixed(2)})`;
   for (let i = 0; i < 3; i += 1) {
     ctx.beginPath();
-    ctx.arc(hx + (i - 1) * 8, hy - p * 20, 4 + p * 8, 0, 6.283);
+    ctx.arc(at.x + (i - 1) * 8, at.y - at.r - p * 20, 4 + p * 8, 0, 6.283);
     ctx.fill();
   }
   ctx.restore();
