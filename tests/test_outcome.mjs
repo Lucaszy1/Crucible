@@ -25,6 +25,7 @@ import {
   rankFeatured,
   runFlags,
   SPEEDS,
+  speedStripHidden,
   stepSpeed,
   streamDead,
 } from "../dashboard/js/state.js";
@@ -239,6 +240,19 @@ describe("stepSpeed", () => {
   it("treats an unknown speed as normal first", () => {
     assert.equal(stepSpeed(3, 1), 2);
     assert.equal(stepSpeed(3, -1), 0.5);
+  });
+});
+
+describe("speedStripHidden", () => {
+  it("shows the strip once a replay or live run is loaded", () => {
+    assert.equal(speedStripHidden("replay"), false);
+    assert.equal(speedStripHidden("live"), false);
+  });
+
+  it("hides the strip in the lobby and while booting", () => {
+    assert.equal(speedStripHidden("idle"), true);
+    assert.equal(speedStripHidden("booting"), true);
+    assert.equal(speedStripHidden(""), true);
   });
 });
 

@@ -4,7 +4,8 @@ import { renderLearning } from "./learn.js";
 import {
   acceptLiveTraffic, autoplayQueue, bootStale, bootTimedOut, displayOutcome, endCardStats, eventHost,
   errorRetryTarget, finishSide, followOpensLive, motionReduced, motionSetting, normalizeActor, outcomeLine,
-  phaseLabel, rankFeatured, reduceHostStates, runFlags, scoreEvents, SPEEDS, stepSpeed, streamDead,
+  phaseLabel, rankFeatured, reduceHostStates, runFlags, scoreEvents, SPEEDS, speedStripHidden,
+  stepSpeed, streamDead,
 } from "./state.js";
 import { describeEvent, keyMoments, statusSentence } from "./story.js";
 import { jumpTarget, renderDebrief } from "./debrief.js";
@@ -106,6 +107,7 @@ const els = {
   slate: document.getElementById("slate"),
   slateTitle: document.getElementById("slateTitle"),
   slateCount: document.getElementById("slateCount"),
+  speedStrip: document.getElementById("speedStrip"),
   thoughtRed: document.getElementById("thoughtRed"),
   thoughtRedHead: document.getElementById("thoughtRedHead"),
   thoughtRedText: document.getElementById("thoughtRedText"),
@@ -158,7 +160,6 @@ const controls = {
   agents: document.getElementById("agentsSelect"),
   run: document.getElementById("runBtn"),
   speedSeg: document.getElementById("speedSeg"),
-  speedStrip: document.getElementById("speedStrip"),
   paceSeg: document.getElementById("paceSeg"),
   motionSeg: document.getElementById("motionSeg"),
   light: document.getElementById("serverLight"),
@@ -330,7 +331,7 @@ function setMode(mode, label) {
   els.mode.textContent = mode === "live" ? "Live" : mode === "replay" ? "Replay" : mode === "booting" ? "Starting" : "Idle";
   if (label) store.label = label;
   els.title.textContent = store.label;
-  if (els.speedStrip) els.speedStrip.hidden = mode !== "replay" && mode !== "live";
+  if (els.speedStrip) els.speedStrip.hidden = speedStripHidden(mode);
 }
 
 function latestLaneEvent(slice) {

@@ -696,6 +696,12 @@ export function stepSpeed(current, dir) {
   return SPEEDS[next];
 }
 
+// The stage speed strip shows once a replay or live run is
+// loaded, and stays hidden in the lobby and while booting.
+export function speedStripHidden(mode) {
+  return mode !== "replay" && mode !== "live";
+}
+
 export function motionSetting() {
   try {
     if (typeof window !== "undefined" && window.localStorage) {
