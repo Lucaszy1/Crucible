@@ -1,10 +1,25 @@
 # Crucible
 
-Crucible is an AI cyber range where an AI red team and an AI blue team run containment exercises on simulated company networks, with an independent auditor that checks every defensive decision. Every exercise is logged event by event, so results can be replayed, scored, and inspected after the fact.
+Somewhere right now, an AI agent is being trusted with a company's systems, and nobody can say how good its judgment really is. You can't test it on the real thing, because a wrong call there costs uptime, money, or customer data. Crucible is where you find out first.
 
-Defenders cannot safely test AI agents on live systems: a mistake there costs real uptime or real data. Crucible gives those agents a realistic but fully simulated network to probe and protect, plus honest measurement of what the defense actually did.
+Two AI teams play out a containment exercise on a simulated company network. One probes for a way in. The other watches the logs and decides what to shut down. A third, independent model audits every defensive decision against the exact evidence the defender had in front of it. Every move is logged, so any exercise can be replayed, scored, and argued with.
 
-Built for the Meta Global AI Developer Hackathon, Indie track, Oct 26 to Nov 4 2026, with Muse Code.
+This is Crucible. A crucible is a trial that shows what something is really made of, and that is what this gives AI defenders.
+
+I built it alone during the Meta Global AI Developer Hackathon, with Muse Code and Meta's Muse models.
+
+The first results were wrong. A bug in my own test setup made the defender look smarter than it was. I caught it, threw out the whole campaign, and ran everything again. That habit of measuring, doubting, and measuring again is the point of this project.
+
+With sensor alerts turned on, the defender contained 10 of 10 intrusions in our controlled runs and never lost the secret. With them off, the secret was read in 19 of 20. Below is exactly how we measured that, and what it does not prove.
+
+## Headline results
+
+- With sensor alerts on, Spark blue contained all 20 scripted intrusions and never lost the secret; with them off, the secret was read in 19 of 20 (chain p < 0.0001, noisy p = 0.0001, Fisher exact, computed). Limit: scripted red intrudes every episode by construction, one scenario, 10 episodes per cell.
+- Against model red at 10 episodes per arm, the sensors gap was within noise (secret reads 0/10 versus 4/10, p = 0.087). Limit: small sample against a stochastic intruder, so this run concludes nothing about sensors there.
+- Playbook memory versus control held 16 of 20 versus 10 of 20, within noise (p = 0.096); we do not claim memory helps. Limit: one scenario, and every perfect score came with zero containment against a red that never authenticated.
+- Spark and Spark Open blue each held all 20 scripted episodes with sensors on, though Open reported later (median first report 15 to 17 events versus 1 to 3). Limit: descriptive only at n = 10, with unmatched noisy-red draws across the two runs.
+
+Details, intervals, and limits: `docs/SENSOR_RESULTS.md` and `docs/CAMPAIGN_RESULTS.md`.
 
 ## Architecture
 
@@ -17,6 +32,22 @@ Built for the Meta Global AI Developer Hackathon, Indie track, Oct 26 to Nov 4 2
 - Scenario generator: deterministic seeded networks with a proven intrusion path, decoys, dead ends, and noise, split into train and held-out seeds.
 - Dashboard: the operations center page with live exercise views, replay, lobby, and results.
 - Voice takeover: a judge can type or speak orders that blue executes live, through a command parser plus Muse Voice Transcribe.
+
+```mermaid
+flowchart LR
+    Red[Red agent] -->|probes| Sandbox[Sandbox]
+    Blue[Blue agent] -->|inspects and contains| Sandbox
+    Sandbox -->|log lines| Sensors[Sensors]
+    Sensors -->|alerts| Blue
+    Blue -->|reads| Playbook[Playbook]
+    Referee[Referee] -->|writes lessons| Playbook
+    Blue -->|actions| Auditor[Auditor]
+    Red -->|moves| Log[Event log]
+    Blue -->|moves| Log
+    Auditor -->|verdicts| Log
+    Log --> Dashboard[Dashboard]
+    Voice[Voice takeover] -->|judge orders| Blue
+```
 
 ## Models used and where
 
@@ -52,7 +83,7 @@ Start the operations center (localhost only, no build step):
 python -m crucible.serve
 ```
 
-Open http://127.0.0.1:8000 in a browser. Use the control bar to run a scripted exercise, run a metered model exercise, or replay a past run.
+The server binds to localhost only, port 8000 by default (`python -m crucible.serve --port 8123` picks another). Open http://127.0.0.1:8000 in a browser. Use the control bar to run a scripted exercise, run a metered model exercise, or replay a past run.
 
 Run one scripted exercise from the terminal (free, needs Docker):
 
@@ -112,6 +143,35 @@ Sensors with scripted red (`runs/bench-bench1`, classic scenario, Spark blue, me
 Secret-read gap, sensors on versus off: chain p < 0.0001, noisy p = 0.0001 (Fisher exact two-sided, computed). Limits, stated plainly: scripted red intrudes in every episode by construction, so this measures containment of a fixed chain, not detection of a varied intruder; one scenario only; 10 episodes per cell.
 
 TBD: Stage 3 held-out results. The frozen-playbook generalization run on unseen networks (train seeds 1001 to 1040, held-out seeds 9001 to 9020) is in progress; its intrusion, containment, secret-read, delay, downtime, and auditor numbers will replace this paragraph when the benchmark finishes. No claim about generalization is made until then.
+
+## Open-weights blue
+
+The same blue agent can run on Muse Spark Open (`meta-models/muse-spark-open-1026`) hosted on Baseten instead of Muse Spark on Meta. Red, the auditor, and the referee stay on Meta; only blue's calls move. Set `BASETEN_API_KEY` in `.env` and pass the blue flags:
+
+```bash
+python -m crucible.bench --name open-repro --red chain,noisy --sensors on --memory off --episodes-per-cell 10 \
+  --blue-model meta-models/muse-spark-open-1026 --blue-base-url https://inference.baseten.co/v1 \
+  --blue-api-key-env BASETEN_API_KEY --no-cache
+```
+
+Drop the `--blue-*` flags to run the Spark counterpart. Baseten spend shows as $0.00 in our logs by design (token counts only); check the Baseten invoice for real dollars. Full quirks and flag notes: `docs/BASETEN_NOTES.md`.
+
+Spark versus Spark Open (`runs/bench-v2-spark`, `runs/bench-v2-open`; scripted red, sensors on, memory off, audit off, 10 episodes per cell):
+
+| Blue | Red | Intrusions | Secret reads | Contained | Med first report | Meta cost |
+|---|---|---|---|---|---|---|
+| Spark | chain | 10 | 0 | 10 | 1 | $1.4558 |
+| Spark | noisy | 10 | 0 | 10 | 3 | $1.4032 |
+| Open | chain | 10 | 0 | 10 | 15 | $0.0000 |
+| Open | noisy | 10 | 0 | 10 | 17 | $0.0000 |
+
+Both held every episode. Open reported later but contained at the same median turn; descriptive only, see `docs/SENSOR_RESULTS.md`.
+
+## Demo
+
+- Demo video: TBD (link to be added).
+- X post: TBD (link to be added).
+- Screenshots: TBD (`docs/media/` shot 1 and shot 2, or one GIF, to be added).
 
 ## What was built during the hackathon
 
