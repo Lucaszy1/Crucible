@@ -186,6 +186,40 @@ Spark versus Spark Open (`runs/bench-v2-spark`, `runs/bench-v2-open`; scripted r
 
 Both held every episode. Open reported later but contained at the same median turn; descriptive only, see `docs/SENSOR_RESULTS.md`.
 
+## Human takeover
+
+A judge can take the defender seat live, by typing or by voice. Typed orders go to `POST /api/command`; spoken orders go to `POST /api/audio` as raw WAV bytes, transcribed by Muse Voice Transcribe and queued the same way (`docs/VOICE_API.md`).
+
+Every order runs through the same gate: `crucible/commands.py` parses it onto the blue tool surface only (isolate, patch, restore, read logs, report finding, status, scan, stand down), and every path, deterministic parser, model fallback, or previewed action, passes through `validate_action` against the live allowlist and inventory. Ambiguous orders ask a clarifying question and never guess; anything outside the surface is refused with a plain reason. There is no shell and no free-form command.
+
+Human turns log under actor `human` with source (`voice` or `text`) and transcript. Scoring and the auditor treat them as blue-side moves, the score marks `assisted: true`, the end card labels the run human-assisted, and benchmark summaries drop assisted rows, so judge demos never move benchmark stats. Modes: `human` waits for an order each turn (30 s clock, else hold); `ai_with_override` lets model blue play until an order latches human control, and `hand back` returns it. Scripted and model blue also accept orders through the same queue. A preview endpoint dry-runs one order, and a $1.00 session cap covers transcription plus ambiguous-order parsing; past the cap only offline orders work.
+
+Limit: the browser mic capture path is unverified in headless tests. `POST /api/audio` is covered with synthetic WAV and stubbed transcription, and realtime speech only against a fake server.
+
+## Exercise debrief
+
+`GET /api/runs/{run_id}/debrief` returns a structured report from a finished event log, also shown as a Story tab card. Layer 1 is deterministic code with no model: outcome, a timeline of 4 to 6 key moments with event ids, detection delay and the containment move, strengths, and 2 to 4 weaknesses with recommendations. Every claim cites the event ids that support it.
+
+`rewrite=1` asks Muse Wonder for a plain-language rewrite. The rewrite must match Layer 1 exactly, same item counts and every event id in the same order, and its citations must exist in the log; any mismatch or error falls back to Layer 1 unchanged.
+
+Limit: the rewrite is mostly rephrasing. It can only reword Layer 1, never add claims, so a missing insight needs a Layer 1 rule change, not a rewrite.
+
+## Static replay site
+
+`docs/site` is a self-contained replay bundle: the dashboard plus data, working from static hosting or `file://` with no server, no Docker, and no model calls.
+
+Real runs only. The bundle embeds 4 featured replays, all real episode logs (the contained sample run plus three bench episodes), each scored with `orchestrator.score_events` and outcome-checked. Every replay carries a `Real run` provenance badge (bench, episode, seed) on lobby cards and the replay header, and the build fails if any replay lacks provenance or any emitted text still references localhost or `/api`.
+
+Rebuild with `python scripts/build_static.py`. Live exercise and takeover controls are disabled in the bundle with a run-locally note.
+
+## Model-driven live run
+
+The lobby `model_open` option pairs briefed model red with Muse Spark Open blue on Baseten (red on Meta, blue on Baseten). Starting one shows a confirm step with current spend, a hard $2.00 Meta-side run cap, and the daily guard; Baseten bills its own invoice, so our logs record token counts only. A preflight check refuses without both keys before the range boots.
+
+One verified example, not a rate: a fresh hard network, `scn-9007-hard-a0` (`runs/exercise-20261028T1936.jsonl`, 20 defender turns), ended Contained with 0 secret reads. Meta spend was about $0.45 (red plus auditor calls) and Baseten saw about 53K tokens (48,399 prompt plus 4,742 completion, of which 2,810 thinking). The auditor flagged 6 of the 20 verdicts on defender moves as unsupported in that run, including moves that cited log lines the defender never saw. That says how strict the auditor was on one exercise, not how often it flags in general.
+
+Limit: one run against a stochastic intruder concludes nothing general; check the Baseten invoice for real dollars.
+
 ## Demo
 
 - Demo video: TBD (link to be added).
@@ -194,13 +228,13 @@ Both held every episode. Open reported later but contained at the same median tu
 
 ## What was built during the hackathon
 
-From git history: 265 commits, Oct 26 11:34 PT (initial commit) through Oct 28 (latest at time of writing), all inside the event window so far. Per-day counts use author dates in PT: 123 on Oct 26, 128 on Oct 27, 14 on Oct 28. Every item below maps to commits in this repo between those timestamps; verify with `git log --format=%ad --date=short | sort | uniq -c` and `git log --reverse --format="%ad %s" --date=iso`.
+From git history: 281 commits, Oct 26 11:34 PT (initial commit) through Oct 28 (latest at time of writing), all inside the event window so far. Per-day counts use author dates in PT: 123 on Oct 26, 128 on Oct 27, 30 on Oct 28. Every item below maps to commits in this repo between those timestamps; verify with `git log --format=%ad --date=short | sort | uniq -c` and `git log --reverse --format="%ad %s" --date=iso`.
 
 Oct 26, 123 commits. Repo skeleton, PRD and build spec, model client with cache and spend guard, Docker sandbox growing from 3 to 4 toy hosts (web, app, db, workstation), allowlisted tools, event schema, orchestrator turn loop and scoring, scripted baselines, model agents with tool calling, batch runner, API backend plus dashboard v1, auditor with live judging and an eval harness, referee with playbook memory and campaigns, then the contamination diagnosis and the per-episode log scoping fix.
 
 Oct 27, 128 commits. Arena rebuilt as a canvas scene driven by real events; asset inventory, deterministic sensor alerts with an on/off flag, intrusion-conditional scoring, and the controlled benchmark harness; dashboard show release with lobby and opening slate; Baseten open-model blue with effort probes; scenario generator with simulator, train/held-out seeds, and design docs; config-driven toyhost image, compose renderer, and parity harness with hermetic tests; scenario layouts wired through events, lobby, arena, and map; judge-first lobby with canvas thumbnails and live exercises on picked scenarios; generated cinematic art plus the cinematic stage renderer (lanes, entities, clash orb, beams, callouts); bench pairing, freeze, and audit cells with Stage 3 scripts and runbook; voice takeover (command parser, transcribe client, human blue, routes, verified live probe); sample exercise log; campaign and sensor results write-ups, README headline results, MIT license, and docs index; Stage 3 replan to solver red with the frozen 8-rule playbook; sensor fixes on generated nets; submission checklist; evening show-release push (story tab, learning tab, thumbnails, finish plans).
 
-Oct 28, 14 commits. Arena melt finish (dissolve into code glyphs, white-hot peel, melt cloud); Stage 3 corrected sensors rerun merged into the report with the void original kept; void-by-name gate marks with per-bench duplicate and spend scoping; --no-cache plumbed to the auditor across bench, single-exercise, and live runs; replayed-verdict note in README and results; live agents built after scenario activation; defender orders logged as human and scored as blue; submission cleanup (checklist, this timeline).
+Oct 28, 30 commits. Arena melt finish (dissolve into code glyphs, white-hot peel, melt cloud); Stage 3 corrected sensors rerun merged into the report with the void original kept; void-by-name gate marks with per-bench duplicate and spend scoping; --no-cache plumbed to the auditor across bench, single-exercise, and live runs; replayed-verdict note in README and results; live agents built after scenario activation; defender orders logged as human and scored as blue; submission checklist; takeover with order preview and session spend cap; architecture diagram; defender command bar with human visuals; Next re-arm; thought truncation with full-text expander; art provenance date; exercise debrief report, endpoint, and Story card; model-driven live variant with preflight and run spend cap; static replay export with real featured replays; minute-stamped exercise ids; Baseten live behavior note; merges for the static site and debrief; README pass for takeover, debrief, static site, and live run (this timeline).
 
 TODO: confirm with the organizers that work from Oct 26 11:34 PT counts as inside the event window before submitting. The history side is verified: the initial commit is the earliest timestamp in the repo, so every listed item is Oct 26 11:34 PT or later.
 
