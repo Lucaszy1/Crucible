@@ -7,7 +7,7 @@ import {
   applyCamera, auditorChrome, blueLine, calloutForEvent, clashCrop, dollyTarget, FINISH_PACES, finishPlan,
   flashHold, FLIGHT_MS, flightLaneRect, frameBudget, frameP95, flightLane, fxForEvent,
   guardianPulse, hitstopFor, initStage, intrusionLevel, laneFeed, lanePoint, LOW_STREAK,
-  moveSpanMs, paintGuardian,
+  meltChar, meltGlyphPx, meltSpriteAlpha, meltStride, moveSpanMs, paintGuardian,
   paintIntrusion, projBody, redLine, renderStageStatic, renderStageThumb, sampleMeltMask,
   setStageActive, setStageReduced, stageLayout, stageNotify, stageWash, stepCamera, trailSpan,
 } from "../dashboard/js/stage.js";
@@ -802,10 +802,10 @@ describe("sampleMeltMask", () => {
     assert.ok(rads[0] > rads[rads.length - 1], "rim leads the core");
   });
 
-  it("tints from the pixel blended toward the accent", () => {
+  it("tints white-hot toward the accent with a trace of the pixel", () => {
     const slots = sampleMeltMask(sprite(), 4, [0, 0, 0], 90);
-    // 200 * 0.55 blended toward black, then floored to peak 150.
-    assert.ok(slots[0].fill.startsWith("rgb(150,15,15)"), slots[0].fill);
+    // 255 * 0.55 white plus 200 * 0.15 pixel, blended toward black.
+    assert.ok(slots[0].fill.startsWith("rgb(170,143,143)"), slots[0].fill);
   });
 
   it("keeps bright pixels below the ceiling", () => {
@@ -825,5 +825,42 @@ describe("sampleMeltMask", () => {
   it("survives empty input", () => {
     assert.deepEqual(sampleMeltMask(null, 4, [0, 0, 0], 90), []);
     assert.deepEqual(sampleMeltMask(new Uint8ClampedArray(0), 4, [0, 0, 0], 90), []);
+  });
+});
+
+describe("melt timing", () => {
+  it("holds the sprite full through the flare, above 70% through the peel", () => {
+    assert.equal(meltSpriteAlpha(0), 1);
+    assert.equal(meltSpriteAlpha(399), 1);
+    assert.equal(meltSpriteAlpha(400), 1);
+    assert.ok(meltSpriteAlpha(1200) > 0.7, String(meltSpriteAlpha(1200)));
+    assert.equal(meltSpriteAlpha(2000), 0.7);
+    assert.ok(meltSpriteAlpha(2200) < 0.7 && meltSpriteAlpha(2200) > 0);
+    assert.equal(meltSpriteAlpha(2400), 0);
+    assert.equal(meltSpriteAlpha(3000), 0);
+    assert.equal(meltSpriteAlpha(-50), 1);
+  });
+
+  it("flips 0/1 every 120ms, phased per glyph", () => {
+    assert.equal(meltChar(0, 0), "0");
+    assert.equal(meltChar(0, 119), "0");
+    assert.equal(meltChar(0, 120), "1");
+    assert.equal(meltChar(1, 0), "1");
+    assert.equal(meltChar(1, 120), "0");
+    assert.ok(["0", "1"].includes(meltChar(7, 9999)));
+  });
+
+  it("strides LOW down to about 180 slots, full takes all", () => {
+    assert.equal(meltStride(450, false), 1);
+    assert.equal(meltStride(450, true), 3);
+    assert.equal(meltStride(100, true), 1);
+    assert.equal(meltStride(0, true), 1);
+  });
+
+  it("scales glyphs 16 to 26px with the rendered entity", () => {
+    assert.equal(meltGlyphPx(82), 16);
+    assert.equal(meltGlyphPx(150), 24);
+    assert.equal(meltGlyphPx(300), 26);
+    assert.equal(meltGlyphPx(8), 16);
   });
 });
