@@ -446,3 +446,30 @@ def test_stage3_missing_files_yield_null_sections(client, tmp_runs):
     assert data["sensorsOff"] is None
     assert data["playbook"] is None
     assert data["voidNote"]
+
+
+def test_live_exercise_auditor_ignores_cache(tmp_path, monkeypatch):
+    from crucible import orchestrator, sandbox, tools, voice_api
+    from crucible.scenarios import stack
+
+    seen = {}
+    monkeypatch.setattr(stack, "activate", lambda key: None)
+    monkeypatch.setattr(stack, "deactivate", lambda: None)
+    monkeypatch.setattr(sandbox, "start", lambda: {"web": True})
+    monkeypatch.setattr(sandbox, "stop", lambda: None)
+    monkeypatch.setattr(sandbox, "active_hosts", lambda: [])
+    monkeypatch.setattr(tools, "reset_state", lambda: None)
+    monkeypatch.setattr(voice_api, "detach_queue", lambda: None)
+    monkeypatch.setattr(llm, "SPEND_FILE", tmp_path / "spend.jsonl")
+
+    def fake_exercise(red, blue, auditor_use_cache=True, **kwargs):
+        seen["auditor_use_cache"] = auditor_use_cache
+        return {"events": [], "score": {"outcome": "blue_held"}}
+
+    monkeypatch.setattr(orchestrator, "run_exercise", fake_exercise)
+    result = api._run_live_exercise(
+        "scripted", "live-1", tmp_path / "live-1.jsonl",
+        lambda message: None)
+    assert seen["auditor_use_cache"] is False
+    assert result["exercise_cost"] == 0.0
+    assert result["spend_cap_hit"] is False

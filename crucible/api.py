@@ -316,6 +316,10 @@ def _run_live_exercise(
             red, blue, max_turns=40,  # live episodes keep the classic length
             run_path=run_path, exercise_id=exercise_id,
             audit="live",
+            # Live runs never replay cached audits: exercise ids can
+            # repeat (user-supplied or minute-stamp defaults), so a
+            # cache hit would judge this run with another run's words.
+            auditor_use_cache=False,
             **extra,
         )
     finally:

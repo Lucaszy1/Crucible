@@ -322,6 +322,7 @@ def main(argv=None) -> int:
             run_path=args.out,
             exercise_id=args.exercise_id,
             audit=args.audit,
+            auditor_use_cache=not args.no_cache,
             sensors=args.sensors,
             blue_reasoning_effort=args.blue_reasoning_effort,
             **extra,

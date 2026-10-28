@@ -15,11 +15,12 @@ def _stubbed_run(monkeypatch, tmp_path):
     monkeypatch.setattr(run_exercise.tools, "reset_state", lambda: None)
 
     def fake_exercise(red, blue, max_turns=12, run_path=None, exercise_id=None, audit="off", sensors="on",
-                      blue_reasoning_effort=None):
+                      blue_reasoning_effort=None, auditor_use_cache=True):
         seen["red"] = type(red).__name__
         seen["blue"] = type(blue).__name__
         seen["max_turns"] = max_turns
         seen["sensors"] = sensors
+        seen["auditor_use_cache"] = auditor_use_cache
         path = str(tmp_path / "fake.jsonl")
         (tmp_path / "fake.jsonl").write_text("{}\n", encoding="utf-8")
         return {
@@ -68,7 +69,7 @@ def _stubbed_run_with_events(monkeypatch, tmp_path, events_list):
     seen = _stubbed_run(monkeypatch, tmp_path)
 
     def fake_exercise(red, blue, max_turns=12, run_path=None, exercise_id=None, audit="off", sensors="on",
-                      blue_reasoning_effort=None):
+                      blue_reasoning_effort=None, auditor_use_cache=True):
         path = str(tmp_path / "fake.jsonl")
         return {
             "events": events_list,
@@ -151,6 +152,18 @@ def test_runner_no_cache_disables_agent_cache(tmp_path, monkeypatch):
     assert seen["blue_use_cache"] is False
 
 
+def test_runner_no_cache_disables_auditor_cache(tmp_path, monkeypatch):
+    seen = _stubbed_run(monkeypatch, tmp_path)
+    assert run_exercise.main(["--agents", "model", "--no-cache"]) == 0
+    assert seen["auditor_use_cache"] is False
+
+
+def test_runner_auditor_cache_default_on(tmp_path, monkeypatch):
+    seen = _stubbed_run(monkeypatch, tmp_path)
+    assert run_exercise.main(["--agents", "model"]) == 0
+    assert seen["auditor_use_cache"] is True
+
+
 def test_runner_summary_prints_outcome_and_delay(tmp_path, monkeypatch, capsys):
     _stubbed_run(monkeypatch, tmp_path)
     assert run_exercise.main(["--agents", "scripted"]) == 0
@@ -167,7 +180,7 @@ def test_runner_summary_prints_downtime_blue_and_cost(tmp_path, monkeypatch, cap
     monkeypatch.setattr(llm, "SPEND_FILE", tmp_path / "spend.jsonl")
 
     def fake_exercise(red, blue, max_turns=12, run_path=None, exercise_id=None, audit="off", sensors="on",
-                      blue_reasoning_effort=None):
+                      blue_reasoning_effort=None, auditor_use_cache=True):
         path = str(tmp_path / "fake.jsonl")
         return {
             "events": [],

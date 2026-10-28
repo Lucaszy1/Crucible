@@ -640,7 +640,7 @@ def test_run_exercise_passes_audit_mode(tmp_path, monkeypatch, capsys):
 
     def fake_exercise(red, blue, max_turns=12, run_path=None,
                       exercise_id=None, audit="off", sensors="on",
-                      blue_reasoning_effort=None):
+                      blue_reasoning_effort=None, auditor_use_cache=True):
         seen["audit"] = audit
         return {"events": [],
                 "score": {"turns_used": 0, "total_events": 0,
