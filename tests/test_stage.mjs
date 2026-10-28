@@ -5,9 +5,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   applyCamera, auditorChrome, blueLine, calloutForEvent, dollyTarget, FINISH_PACES, finishPlan,
-  FLIGHT_MS, flightLaneRect, frameBudget, frameP95, flightLane, fxForEvent, guardianPulse,
-  initStage, intrusionLevel, laneFeed, lanePoint, paintGuardian, paintIntrusion, redLine,
-  setStageActive, setStageReduced, stageLayout, stageWash, stepCamera,
+  flashHold, FLIGHT_MS, flightLaneRect, frameBudget, frameP95, flightLane, fxForEvent,
+  guardianPulse, initStage, intrusionLevel, laneFeed, lanePoint, paintGuardian, paintIntrusion,
+  projBody, redLine, setStageActive, setStageReduced, stageLayout, stageWash, stepCamera,
+  trailSpan,
 } from "../dashboard/js/stage.js";
 import { arenaGeometry, classicLayout, normalizeLayout } from "../dashboard/js/layout.js";
 
@@ -595,5 +596,39 @@ describe("auditorChrome", () => {
     const chrome = { hudBottom: 110, capTop: 420, audBottom: null };
     const stage = stageLayout({ w: 860, h: 484 }, arenaGeometry(classicLayout()), chrome);
     assert.equal(stage.lanes.blue.y, 110 + 10);
+  });
+});
+
+describe("projectile bodies", () => {
+  it("keeps small bodies above 28px at full stage scale", () => {
+    const small = projBody("small", 1);
+    assert.ok(small.lanceLen >= 28, String(small.lanceLen));
+    assert.ok(small.orbD >= 28, String(small.orbD));
+  });
+
+  it("scales heavy bodies up from small", () => {
+    const small = projBody("small", 1);
+    const heavy = projBody("heavy", 1);
+    const large = projBody("large", 1);
+    assert.ok(heavy.lanceLen > small.lanceLen * 1.5, String(heavy.lanceLen));
+    assert.ok(large.orbD > small.orbD * 1.5, String(large.orbD));
+  });
+
+  it("spans at least three body lengths of trail", () => {
+    const laneLen = 600;
+    for (const size of ["small", "standard", "heavy"]) {
+      const body = projBody(size, 1);
+      const span = trailSpan(body.lanceLen, laneLen);
+      assert.ok(span * laneLen >= 3 * body.lanceLen - 1, `${size}: ${span}`);
+      const orbSpan = trailSpan(body.orbD, laneLen);
+      assert.ok(orbSpan * laneLen >= 3 * body.orbD - 1, `${size} orb: ${orbSpan}`);
+    }
+  });
+
+  it("holds the impact flash through 250ms of the 350ms window", () => {
+    assert.equal(flashHold(0), 1);
+    assert.equal(flashHold(250 / 350), 1);
+    assert.ok(flashHold(0.85) < 0.6, String(flashHold(0.85)));
+    assert.equal(flashHold(1), 0);
   });
 });

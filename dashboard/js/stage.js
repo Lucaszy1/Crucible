@@ -734,6 +734,8 @@ function buildSprites(refs) {
     blue: glowSprite([[0, "rgba(47,123,255,0.55)"], [0.5, "rgba(47,123,255,0.18)"], [1, "rgba(47,123,255,0)"]]),
     cyan: glowSprite([[0, "rgba(127,212,255,0.5)"], [0.5, "rgba(127,212,255,0.16)"], [1, "rgba(127,212,255,0)"]]),
     white: glowSprite([[0, "rgba(232,236,244,0.5)"], [0.5, "rgba(232,236,244,0.16)"], [1, "rgba(232,236,244,0)"]]),
+    lance: glowSprite([[0, "rgba(255,64,42,0.95)"], [0.35, "rgba(255,45,30,0.55)"], [0.7, "rgba(178,24,18,0.22)"], [1, "rgba(178,24,18,0)"]]),
+    orb: glowSprite([[0, "rgba(150,220,255,0.95)"], [0.35, "rgba(70,180,255,0.55)"], [0.7, "rgba(30,120,255,0.22)"], [1, "rgba(30,120,255,0)"]]),
     gold: glowSprite([[0, "rgba(255,200,61,0.45)"], [0.5, "rgba(255,200,61,0.15)"], [1, "rgba(255,200,61,0)"]]),
     intrusion: glowSprite([[0, "rgba(255,59,47,0.6)"], [0.55, "rgba(160,20,16,0.3)"], [1, "rgba(255,59,47,0)"]]),
     guardian: glowSprite([[0, "rgba(127,212,255,0.56)"], [0.6, "rgba(47,123,255,0.28)"], [1, "rgba(127,212,255,0)"]]),
@@ -3031,9 +3033,38 @@ function paintFxCallout(refs, ctx, fx, p) {
   ctx.restore();
 }
 
-// Body scale by move significance: volley shards fly small,
-// heavy lances and large orbs land the big impacts.
-const PROJ_SCALE = { small: 0.7, standard: 1, heavy: 1.5, large: 1.5 };
+// Body scale by move significance: even the small volley shards
+// read at full size, heavy lances and large orbs fly much bigger.
+export const PROJ_SCALE = { small: 1, standard: 1.3, heavy: 1.8, large: 1.8 };
+export const LANCE_LEN = 46;
+export const LANCE_WID = 13;
+export const ORB_R = 15;
+
+// Body size in stage px for a size class at a stage scale: the
+// lance length, the lance width, and the orb diameter. Pure, for
+// tests and the lane-pixel harness. Small stays above 28px at
+// full stage scale so every move reads at normal size.
+export function projBody(size, stage) {
+  const s = (PROJ_SCALE[size] || 1) * (Number(stage) || 1);
+  return { lanceLen: LANCE_LEN * s, lanceWid: LANCE_WID * s, orbD: ORB_R * 2 * s };
+}
+
+// Trail reach as a fraction of the lane: at least three body
+// lengths of streak behind the head, clamped to the lane. Pure.
+export function trailSpan(bodyLen, laneLen) {
+  const dist = Math.max(1, Number(laneLen) || 1);
+  const want = (3.2 * (Number(bodyLen) || 0)) / dist;
+  return Math.min(0.6, Math.max(0.15, want));
+}
+
+// Impact flash hold over the strike window: near-full brightness
+// for the first 250ms of the 350ms window, then a quick decay.
+// Pure; iq runs 0 at the strike to 1 at the window end.
+export function flashHold(iq) {
+  const q = Math.min(1, Math.max(0, Number(iq) || 0));
+  if (q <= 0.72) return 1;
+  return Math.max(0, 1 - (q - 0.72) / 0.28);
+}
 
 // Finish ray: a shaft of light along the flight lane, white core
 // with the winner's tint, widening with each ray's power. After
@@ -3199,40 +3230,45 @@ function paintProjOne(refs, ctx, fx, side, lane, ends, local, flight, index, sta
 function paintLance(refs, ctx, lane, q, s, index) {
   const head = lanePoint(lane, q);
   const ang = laneTangent(lane, q);
-  const px = head.x + Math.cos(ang + Math.PI / 2) * (index - 1) * 8;
-  const py = head.y + Math.sin(ang + Math.PI / 2) * (index - 1) * 8;
+  const off = (index - 1) * 9 * s;
+  const px = head.x + Math.cos(ang + Math.PI / 2) * off;
+  const py = head.y + Math.sin(ang + Math.PI / 2) * off;
   const sprites = refs.sprites || {};
-  const len = 52 * s;
-  const wid = 11 * s;
+  const len = LANCE_LEN * s;
+  const wid = LANCE_WID * s;
+  const laneLen = Math.max(1, Math.hypot(lane.x1 - lane.x0, lane.y1 - lane.y0));
+  const span = trailSpan(len, laneLen);
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
-  // Trail: hot streak back along the lane plus cooling dots.
-  const tail = lanePoint(lane, Math.max(0, q - 0.16));
+  // Trail: hot streak back along the lane plus cooling dots,
+  // at least three body lengths behind the head.
+  const tail = lanePoint(lane, Math.max(0, q - span));
   const streak = fxTex(refs, "streak");
   if (streak) {
     const tlen = Math.hypot(px - tail.x, py - tail.y);
     const tang = Math.atan2(py - tail.y, px - tail.x);
     ctx.save();
-    ctx.globalAlpha = 0.8;
+    ctx.globalAlpha = 0.6;
     ctx.translate((px + tail.x) / 2, (py + tail.y) / 2);
     ctx.rotate(tang);
     ctx.drawImage(streak, -tlen / 2, -wid, tlen, wid * 2);
     ctx.restore();
   }
-  for (let i = 1; i <= 3; i += 1) {
-    const dot = lanePoint(lane, Math.max(0, q - i * 0.05));
-    ctx.fillStyle = `rgba(255,110,90,${(0.62 - i * 0.13).toFixed(2)})`;
+  for (let i = 1; i <= 5; i += 1) {
+    const dot = lanePoint(lane, Math.max(0, q - (i * span) / 5));
+    ctx.fillStyle = `rgba(255,60,40,${(0.95 - i * 0.12).toFixed(2)})`;
     ctx.beginPath();
-    ctx.arc(dot.x, dot.y, (4 - i) * s, 0, 6.283);
+    ctx.arc(dot.x, dot.y, Math.max(1.2, (6 - i) * s), 0, 6.283);
     ctx.fill();
   }
-  drawGlow(ctx, sprites.red, px, py, len * 1.1, 0.85);
+  drawGlow(ctx, sprites.lance || sprites.red, px, py, len * 1.2, 1);
   const shard = fxTex(refs, "shard");
   ctx.translate(px, py);
   ctx.rotate(ang);
-  // Crimson silhouette under the texture so the body reads red
-  // even where the generated shard runs pale.
-  ctx.fillStyle = "rgba(255,59,47,0.85)";
+  // Saturated crimson silhouette under the texture so the body
+  // reads red even where the generated shard runs pale; the
+  // texture stays dim so it cannot wash the body white.
+  ctx.fillStyle = "rgba(255,45,32,0.95)";
   ctx.beginPath();
   ctx.moveTo(len / 2, 0);
   ctx.lineTo(-len * 0.3, -wid / 2);
@@ -3241,52 +3277,70 @@ function paintLance(refs, ctx, lane, q, s, index) {
   ctx.closePath();
   ctx.fill();
   if (shard) {
+    ctx.save();
+    ctx.globalAlpha = 0.4;
     ctx.drawImage(shard, -len * 0.55, -wid * 1.6, len * 1.1, wid * 3.2);
+    ctx.restore();
   }
-  ctx.fillStyle = "rgba(255,240,235,0.95)";
+  ctx.fillStyle = "rgba(255,246,240,1)";
   ctx.beginPath();
-  ctx.arc(len * 0.22, 0, 2.4 * s, 0, 6.283);
+  ctx.arc(len * 0.22, 0, 4.5 * s, 0, 6.283);
   ctx.fill();
   ctx.restore();
 }
 
-// Cyan light orb: a glowing sphere with a short comet tail.
+// Cyan light orb: a glowing sphere with a long comet tail.
 function paintOrb(refs, ctx, lane, q, s) {
   const head = lanePoint(lane, q);
   const sprites = refs.sprites || {};
-  const r = 10 * s;
+  const r = ORB_R * s;
+  const laneLen = Math.max(1, Math.hypot(lane.x1 - lane.x0, lane.y1 - lane.y0));
+  const span = trailSpan(r * 2, laneLen);
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
-  for (let i = 1; i <= 4; i += 1) {
-    const dot = lanePoint(lane, Math.max(0, q - i * 0.045));
-    ctx.fillStyle = `rgba(140,210,255,${(0.68 - i * 0.12).toFixed(2)})`;
+  for (let i = 1; i <= 5; i += 1) {
+    const dot = lanePoint(lane, Math.max(0, q - (i * span) / 5));
+    ctx.fillStyle = `rgba(80,190,255,${(0.85 - i * 0.12).toFixed(2)})`;
     ctx.beginPath();
-    ctx.arc(dot.x, dot.y, Math.max(1, r * (1 - i * 0.15)), 0, 6.283);
+    ctx.arc(dot.x, dot.y, Math.max(1, r * (1 - i * 0.14)), 0, 6.283);
     ctx.fill();
   }
-  drawGlow(ctx, sprites.cyan, head.x, head.y, r * 3.4, 0.8);
+  drawGlow(ctx, sprites.orb || sprites.cyan, head.x, head.y, r * 3.6, 1);
   const flare = fxTex(refs, "flare");
   if (flare) {
-    ctx.globalAlpha = 0.9;
+    ctx.save();
+    ctx.globalAlpha = 0.7;
     ctx.drawImage(flare, head.x - r * 1.8, head.y - r * 1.8, r * 3.6, r * 3.6);
-    ctx.globalAlpha = 1;
+    ctx.restore();
   }
-  ctx.fillStyle = "#eaf6ff";
+  ctx.fillStyle = "rgba(120,210,255,0.95)";
   ctx.beginPath();
-  ctx.arc(head.x, head.y, r * 0.55, 0, 6.283);
+  ctx.arc(head.x, head.y, r * 0.85, 0, 6.283);
+  ctx.fill();
+  ctx.fillStyle = "#f2faff";
+  ctx.beginPath();
+  ctx.arc(head.x, head.y, r * 0.5, 0, 6.283);
   ctx.fill();
   ctx.restore();
 }
 
 // A landed strike: shockwave ring plus a hot flash on the struck
-// entity's rim. Sparks, hit-stop, and recoil fire from the ledger.
+// entity's rim, held near-full for the first 250ms. Sparks,
+// hit-stop, and recoil fire from the ledger.
 function paintStrike(refs, ctx, at, iq, s, red) {
-  const color = red ? "255,110,100" : "140,210,255";
-  paintFxRing(refs, ctx, { r0: 10 * s, r1: 74 * s, color, dur: IMPACT_MS }, iq * IMPACT_MS, at);
+  const color = red ? "255,80,60" : "90,195,255";
+  paintFxRing(refs, ctx, { r0: 12 * s, r1: 96 * s, color, dur: IMPACT_MS }, iq * IMPACT_MS, at);
+  const hold = flashHold(iq);
+  if (hold <= 0) return;
   const sprites = refs.sprites || {};
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
-  drawGlow(ctx, red ? sprites.red : sprites.cyan, at.x, at.y, 60 * s * (1 - iq * 0.5), 0.85 * (1 - iq));
+  const hot = red ? (sprites.lance || sprites.red) : (sprites.orb || sprites.cyan);
+  drawGlow(ctx, hot, at.x, at.y, 78 * s * (1 - iq * 0.4), hold);
+  ctx.fillStyle = red ? "rgba(255,240,235,1)" : "rgba(242,250,255,1)";
+  ctx.beginPath();
+  ctx.arc(at.x, at.y, 9 * s * hold + 1, 0, 6.283);
+  ctx.fill();
   ctx.restore();
 }
 
