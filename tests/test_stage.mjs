@@ -6,9 +6,9 @@ import assert from "node:assert/strict";
 import {
   applyCamera, auditorChrome, blueLine, calloutForEvent, dollyTarget, FINISH_PACES, finishPlan,
   flashHold, FLIGHT_MS, flightLaneRect, frameBudget, frameP95, flightLane, fxForEvent,
-  guardianPulse, initStage, intrusionLevel, laneFeed, lanePoint, paintGuardian, paintIntrusion,
-  projBody, redLine, setStageActive, setStageReduced, stageLayout, stageWash, stepCamera,
-  trailSpan,
+  guardianPulse, initStage, intrusionLevel, laneFeed, lanePoint, moveSpanMs, paintGuardian,
+  paintIntrusion, projBody, redLine, renderStageStatic, setStageActive, setStageReduced,
+  stageLayout, stageNotify, stageWash, stepCamera, trailSpan,
 } from "../dashboard/js/stage.js";
 import { arenaGeometry, classicLayout, normalizeLayout } from "../dashboard/js/layout.js";
 
@@ -630,5 +630,40 @@ describe("projectile bodies", () => {
     assert.equal(flashHold(250 / 350), 1);
     assert.ok(flashHold(0.85) < 0.6, String(flashHold(0.85)));
     assert.equal(flashHold(1), 0);
+  });
+});
+
+describe("move flow", () => {
+  it("runs every move past the 1600ms replay beat", () => {
+    for (const size of ["small", "standard", "heavy", "large"]) {
+      assert.ok(moveSpanMs(size) > 1600, `${size}: ${moveSpanMs(size)}`);
+    }
+  });
+
+  it("overlaps the next windup with the previous aftermath", () => {
+    const fake = { clientWidth: 800, clientHeight: 450, width: 0, height: 0, getContext: () => null };
+    const refs = initStage(fake, { reduced: false });
+    const red = { id: "r0", actor: "red", tool: "scan_host", args: { host: "web" }, result: { ok: true } };
+    const blue = { id: "b0", actor: "blue", tool: "read_logs", args: { host: "web" }, result: { ok: true, lines: [] } };
+    renderStageStatic(refs, [red, blue], 1, { layout: null }, false);
+    stageNotify(refs, red, {}, 1);
+    assert.ok(refs.fx.some((fx) => fx.kind === "volley"), "scan launches a volley");
+    refs.clock = 1600;
+    renderStageStatic(refs, [red, blue], 2, { layout: null, keepFx: true }, false);
+    assert.ok(refs.fx.some((fx) => fx.kind === "volley"), "volley aftermath survives the beat");
+    assert.ok(!refs.fx.some((fx) => fx.kind === "fan"), "expired host marks drop");
+    stageNotify(refs, blue, {}, 1);
+    assert.ok(refs.fx.some((fx) => fx.kind === "orb"), "next windup starts over the aftermath");
+  });
+
+  it("clears every effect on scrub", () => {
+    const fake = { clientWidth: 800, clientHeight: 450, width: 0, height: 0, getContext: () => null };
+    const refs = initStage(fake, { reduced: false });
+    const red = { id: "r0", actor: "red", tool: "scan_host", args: { host: "web" }, result: { ok: true } };
+    renderStageStatic(refs, [red], 1, { layout: null }, false);
+    stageNotify(refs, red, {}, 1);
+    assert.ok(refs.fx.length > 0, "effects exist before the scrub");
+    renderStageStatic(refs, [red], 1, { layout: null }, true);
+    assert.equal(refs.fx.length, 0, "scrub rebuilds with no effects");
   });
 });

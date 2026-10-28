@@ -923,9 +923,17 @@ export function renderStageStatic(refs, events, cursor, opts, instant) {
     refs.intrusion = intrusionLevel(list, slice);
     refs.guardian = guardianPulse(slice);
     refs.barTarget = bar.value;
-    refs.fx = [];
-    refs.impacts = [];
-    refs.sparks = [];
+    if (o.keepFx && !instant) {
+      // Single-step playback advance: the previous move's tail
+      // (impact aftermath, callout) keeps painting under the next
+      // windup. Expired entries drop; sparks and the impact ledger
+      // age out on their own. Scrub and jump still clear all.
+      refs.fx = (refs.fx || []).filter((fx) => refs.clock - (fx.t0 || 0) <= (fx.dur || 0) + 200);
+    } else {
+      refs.fx = [];
+      refs.impacts = [];
+      refs.sparks = [];
+    }
     refs.finish = null;
     refs.dead = null;
     refs.desat = 0;
@@ -1099,7 +1107,7 @@ export function stageNotify(refs, ev, states, speed) {
     }
     const callout = calloutForEvent(ev, refs.attackMap);
     if (callout) {
-      refs.fx.push({ kind: "callout", ...callout, host: eventHost(ev), t0: refs.clock, dur: 1500 });
+      refs.fx.push({ kind: "callout", ...callout, host: eventHost(ev), t0: refs.clock, dur: 2000 });
     }
   }
   if (ev.actor === "red" && ev.tool === "read_file" && (ev.result || {}).ok === true &&
@@ -1560,7 +1568,16 @@ export function flightLaneRect(intrusion, guardian, pad) {
 // impact window for the shockwave and flash.
 export const FLIGHT_MS = { small: 500, standard: 650, heavy: 800, large: 800 };
 export const IMPACT_MS = 350;
+export const AFTERMATH_MS = 800;
 export const VOLLEY_STAGGER_MS = 120;
+
+// Full on-screen life of one move's projectile, flight plus
+// impact plus the fading aftermath ring. Every size runs past
+// the 1600ms replay beat so the next windup starts while the
+// previous impact is still fading. Pure, for tests.
+export function moveSpanMs(size) {
+  return (FLIGHT_MS[size] || FLIGHT_MS.standard) + IMPACT_MS + AFTERMATH_MS;
+}
 
 // Finish pace scales every beat of the ending: rays two seconds
 // apart at standard pace, the whole finish about nine seconds;
@@ -1584,7 +1601,10 @@ export function finishPlan(pace) {
 function projectileEntry(kind, side, size, fail) {
   const flight = FLIGHT_MS[size] || FLIGHT_MS.standard;
   const stagger = kind === "volley" ? VOLLEY_STAGGER_MS * 2 : 0;
-  return { kind, side, size, fail: Boolean(fail), flight, dur: flight + stagger + IMPACT_MS };
+  return {
+    kind, side, size, fail: Boolean(fail), flight,
+    dur: flight + stagger + IMPACT_MS + AFTERMATH_MS,
+  };
 }
 
 // Rolling frame-time budget with hysteresis: slow machines drop to a
@@ -3220,9 +3240,41 @@ function paintProjOne(refs, ctx, fx, side, lane, ends, local, flight, index, sta
     else paintOrb(refs, ctx, lane, q, s);
     return;
   }
-  const iq = Math.min(1, (local - flight) / IMPACT_MS);
-  if (fx.fail) paintShatter(refs, ctx, ends.to, iq, s);
-  else paintStrike(refs, ctx, ends.to, iq, s, red);
+  const it = local - flight;
+  if (it < IMPACT_MS) {
+    const iq = Math.min(1, it / IMPACT_MS);
+    if (fx.fail) paintShatter(refs, ctx, ends.to, iq, s);
+    else paintStrike(refs, ctx, ends.to, iq, s, red);
+    return;
+  }
+  // Failed moves end with the debris; landed strikes leave a
+  // fading aftermath ring the next windup overlaps.
+  if (!fx.fail) {
+    paintAftermath(refs, ctx, ends.to, (it - IMPACT_MS) / AFTERMATH_MS, s, red);
+  }
+}
+
+// Aftermath: the strike's echo, a widening faint ring and a dim
+// glow settling on the struck rim. aq runs 0 to 1. Painted by
+// hand, not through the textured ring, so the handoff from the
+// strike never pops back to full brightness.
+function paintAftermath(refs, ctx, at, aq, s, red) {
+  const q = Math.min(1, Math.max(0, aq));
+  if (q >= 1) return;
+  const color = red ? "255,80,60" : "90,195,255";
+  const ease = 1 - (1 - q) * (1 - q);
+  const r = 96 * s + (165 * s - 96 * s) * ease;
+  const sprites = refs.sprites || {};
+  const hot = red ? (sprites.lance || sprites.red) : (sprites.orb || sprites.cyan);
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.strokeStyle = `rgba(${color},${(0.4 * (1 - q)).toFixed(2)})`;
+  ctx.lineWidth = 3 * (1 - q) + 1;
+  ctx.beginPath();
+  ctx.arc(at.x, at.y, r, 0, 6.283);
+  ctx.stroke();
+  drawGlow(ctx, hot, at.x, at.y, 60 * s * (1 - q * 0.5), 0.3 * (1 - q));
+  ctx.restore();
 }
 
 // Crimson code-lance: a shard body along the flight tangent with

@@ -36,7 +36,7 @@ import {
   classicLayout, layoutFromEvents, layoutHosts, layoutWeights, scenarioMeta, scenarioText,
 } from "./layout.js";
 
-const REPLAY_INTERVAL_MS = 1200;
+const REPLAY_INTERVAL_MS = 1600;
 const LOBBY_FETCH_POOL = 6;
 const ADVANCE_SECONDS = 8;
 
@@ -349,6 +349,7 @@ function render(animate) {
       weights: store.weights, finalScore: store.finalScore, label: store.label,
       display: display ? { label: display.label, line: outcomeLine(display.key) } : null,
       layout, attackMap: store.attackMap,
+      keepFx: animate && store.cursor === store.arenaCursor + 1,
     },
     !animate,
   );
