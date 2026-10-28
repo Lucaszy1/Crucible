@@ -1,5 +1,5 @@
 // Operations Center bootstrap: lobby, arena show flow, tabs, themes.
-import { fetchAttackMap, fetchCampaign, fetchCampaigns, fetchConfig, fetchFeatured, fetchPreview, fetchRun, fetchRuns, fetchStage3, fetchStatus, openLive, startExercise } from "./api.js";
+import { fetchAttackMap, fetchCampaign, fetchCampaigns, fetchConfig, fetchDebrief, fetchFeatured, fetchPreview, fetchRun, fetchRuns, fetchStage3, fetchStatus, openLive, startExercise } from "./api.js";
 import { renderLearning } from "./learn.js";
 import {
   acceptLiveTraffic, autoplayQueue, bootStale, bootTimedOut, displayOutcome, endCardStats, eventHost,
@@ -7,6 +7,7 @@ import {
   phaseLabel, rankFeatured, reduceHostStates, runFlags, scoreEvents, streamDead,
 } from "./state.js";
 import { describeEvent, keyMoments, statusSentence } from "./story.js";
+import { jumpTarget, renderDebrief } from "./debrief.js";
 import { initMap, updateMap } from "./network.js";
 import { renderFeed } from "./feed.js";
 import { renderStrip, renderTransport, stripModel } from "./timeline.js";
@@ -53,6 +54,7 @@ const els = {
   blueTech: document.getElementById("blueLabelList"),
   feed: document.getElementById("feedList"),
   storyOutcome: document.getElementById("storyOutcome"),
+  debriefBody: document.getElementById("debriefBody"),
   momentList: document.getElementById("momentList"),
   presentLatest: document.getElementById("presentLatest"),
   play: document.getElementById("playBtn"),
@@ -191,6 +193,8 @@ const store = {
   spend: null,
   finalScore: null,
   storyKey: "",
+  debrief: null,
+  debriefRun: null,
   label: "No exercise loaded",
   liveSource: null,
   livePath: null,
@@ -452,7 +456,8 @@ function render(animate) {
 // when the story changes (new run or longer lane); frames are
 // static stills, so the Motion setting needs no special case.
 function renderStoryPanels(display) {
-  const key = `${store.runId}|${store.events.length}|${store.finalScore ? "end" : "live"}`;
+  const debriefKey = !store.debrief ? "none" : store.debrief.error ? "error" : "ready";
+  const key = `${store.runId}|${store.events.length}|${store.finalScore ? "end" : "live"}|${debriefKey}`;
   if (store.storyKey === key) return;
   store.storyKey = key;
   const out = els.storyOutcome;
@@ -478,6 +483,13 @@ function renderStoryPanels(display) {
     meta.textContent = `${score} · ${store.events.length} moves`;
     out.append(badge, line, meta);
   }
+  renderDebrief(els.debriefBody, store.runId ? store.debrief : null, {
+    onEvidence: (id) => {
+      const target = jumpTarget(store.events, id);
+      if (target !== null) jump(target);
+    },
+    onCopy: copyDebrief,
+  });
   const list = els.momentList;
   list.innerHTML = "";
   const moments = keyMoments(store.events);
@@ -516,6 +528,39 @@ function renderStoryPanels(display) {
     item.append(frame, body);
     list.append(item);
   }
+}
+
+async function copyDebrief(text, btn) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (err) {
+    const area = document.createElement("textarea");
+    area.value = text;
+    document.body.append(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+  if (btn) {
+    btn.textContent = "Copied";
+    setTimeout(() => { btn.textContent = "Copy as markdown"; }, 1500);
+  }
+}
+
+// Fetch one replay's debrief after its events load. Stale
+// responses (user moved on) are dropped by run id.
+function loadDebrief(runId) {
+  store.debriefRun = runId;
+  store.debrief = null;
+  fetchDebrief(runId).then((data) => {
+    if (store.debriefRun !== runId) return;
+    store.debrief = (data && data.debrief) || { error: true };
+    render(false);
+  }).catch(() => {
+    if (store.debriefRun !== runId) return;
+    store.debrief = { error: true };
+    render(false);
+  });
 }
 
 function stopTimer() {
@@ -665,6 +710,7 @@ async function openExercise(runId, opts) {
   // System events are harness notes, not moves: skip them everywhere.
   store.events = (data.events || []).filter((ev) => ev && ev.actor !== "system");
   store.replayScore = data.score || null;
+  loadDebrief(runId);
   store.cursor = 0;
   store.firstAuthIndex = store.events.findIndex(
     (ev) => ev.actor === "red" && ev.tool === "try_credential" && (ev.result || {}).authenticated === true,
