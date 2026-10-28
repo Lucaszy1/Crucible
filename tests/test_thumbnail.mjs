@@ -3,7 +3,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { classicLayout, normalizeLayout } from "../dashboard/js/layout.js";
-import { thumbnailModel, thumbnailState } from "../dashboard/js/thumbnail.js";
+import { posterCursor, thumbnailModel, thumbnailState } from "../dashboard/js/thumbnail.js";
 
 function ev(id, actor, tool, args, result) {
   return { id, actor, tool, args: args || {}, result: result || { ok: true } };
@@ -163,5 +163,35 @@ describe("thumbnailModel", () => {
     assert.equal(model.blocks.length, 4);
     assert.equal(model.wash, "none");
     assert.deepEqual(model.path, []);
+  });
+});
+
+describe("posterCursor", () => {
+  it("picks the secret read over everything", () => {
+    const events = [SCAN("web"), AUTH("app"), ISOLATE("app"), SECRET("db"), NOTE("web")];
+    assert.equal(posterCursor(events), 4);
+  });
+
+  it("picks the first containment over a compromise", () => {
+    const events = [AUTH("app"), SCAN("web"), ISOLATE("app"), PATCH("db")];
+    assert.equal(posterCursor(events), 3);
+  });
+
+  it("picks the first compromise when nothing else lands", () => {
+    const events = [SCAN("web"), AUTH("app"), SCAN("db")];
+    assert.equal(posterCursor(events), 2);
+  });
+
+  it("falls back to the final state on quiet runs", () => {
+    assert.equal(posterCursor([SCAN("web"), NOTE("web")]), 2);
+    assert.equal(posterCursor([]), 0);
+    assert.equal(posterCursor(null), 0);
+  });
+
+  it("ignores failed moves", () => {
+    const failAuth = ev("a-x", "red", "try_credential", { host: "app" },
+      { ok: true, host: "app", authenticated: false });
+    const failIso = ev("c-x", "blue", "isolate_host", { host: "app" }, { ok: false, host: "app" });
+    assert.equal(posterCursor([failAuth, failIso, SCAN("web")]), 3);
   });
 });

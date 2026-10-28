@@ -22,7 +22,7 @@ import {
 import { playOpening } from "./opening.js";
 import { initThoughtHeads, renderThoughts, setThoughtsCollapsed } from "./thoughts.js";
 import { endCardVisible, hideEndCard, initEndCard, setEndNext, showEndCard } from "./endcard.js";
-import { thumbnailState } from "./thumbnail.js";
+import { clearArenaThumbCache, thumbnailState } from "./thumbnail.js";
 import {
   arenaNotify, cancelArena, firstAccessStinger, flashArenaHost, glitchStinger,
   initArena, renderArenaStatic, setArenaActive, setArenaLayout, toggleArenaSound,
@@ -172,6 +172,7 @@ const store = {
   layout: null,
   scenario: "classic",
   attackMap: null,
+  stageArt: null,
   spend: null,
   finalScore: null,
   label: "No exercise loaded",
@@ -886,6 +887,8 @@ async function classifyRun(run, armByEpisode) {
       tstate: thumbnailState(events, layout),
       flags: runFlags(run.id, events),
       layout,
+      weights,
+      events,
       scenario: scenarioText(scenarioMeta(full)),
     };
   } catch {
@@ -909,7 +912,8 @@ function paintLobby() {
     cards: store.lobby.cards,
     featuredIds: effectiveFeaturedIds(),
     loading: store.lobby.loading,
-  }, { onPlay: (id) => openExercise(id) });
+  }, { onPlay: (id) => openExercise(id) },
+  { art: store.stageArt || {}, attackMap: store.attackMap });
 }
 
 async function refreshRuns() {
@@ -1251,10 +1255,14 @@ async function boot() {
   stageRefs = initStage(els.arenaCanvas, { reduced: reducedMotion() });
   if (els.classicBox) els.classicBox.checked = store.classic;
   loadStageArt("/assets/art/").then((art) => {
+    store.stageArt = art || {};
     if (stageRefs) {
-      setStageArt(stageRefs, art);
+      setStageArt(stageRefs, store.stageArt);
       render(false);
     }
+    // Thumbnails painted before the art arrived repaint textured.
+    clearArenaThumbCache();
+    paintLobby();
   });
   try {
     store.attackMap = await fetchAttackMap();

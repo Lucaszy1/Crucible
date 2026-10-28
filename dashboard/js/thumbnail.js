@@ -9,6 +9,7 @@
 // short path-draw flourish on hover and focus (static under
 // reduced motion).
 import { classicLayout, columnsOf, edgesOf, roleKind } from "./layout.js";
+import { renderStageThumb } from "./stage.js";
 import { displayOutcome, eventHost } from "./state.js";
 
 const RECON = ["scan_host", "http_request", "list_files"];
@@ -301,12 +302,98 @@ export function paintThumbnail(ctx, model, progress) {
   return model;
 }
 
+// Poster event for an arena-frame thumbnail: the most dramatic
+// real moment wins, secret read over containment over first
+// compromise, else the final state. Pure and tested.
+export function posterCursor(events) {
+  const list = events || [];
+  let compromise = -1;
+  let contain = -1;
+  for (let i = 0; i < list.length; i += 1) {
+    const ev = list[i];
+    if (!ev) continue;
+    const r = ev.result || {};
+    if (ev.actor === "red") {
+      if (ev.tool === "read_file" && r.ok === true &&
+        String(r.path || "").startsWith("/secret/")) return i + 1;
+      if (ev.tool === "try_credential" && r.authenticated === true && compromise < 0) {
+        compromise = i;
+      }
+    } else if (ev.actor === "blue" && r.ok === true) {
+      if ((ev.tool === "isolate_host" || ev.tool === "patch_service") && contain < 0) {
+        contain = i;
+      }
+    }
+  }
+  if (contain >= 0) return contain + 1;
+  if (compromise >= 0) return compromise + 1;
+  return list.length;
+}
+
 // Painted-model cache: one entry per card key, so re-renders and
 // scroll-backs never recompute geometry.
 const modelCache = new Map();
 
 export function clearThumbnailCache() {
   modelCache.clear();
+}
+
+// Rendered arena frames, one offscreen canvas per run id, capped
+// so a long archive cannot eat memory; evicted frames repaint.
+const frameCache = new Map();
+const FRAME_CACHE_MAX = 60;
+
+export function clearArenaThumbCache() {
+  frameCache.clear();
+}
+
+// Mount a real arena frame: paint the episode's stage at its
+// poster event once per run, then blit the cached bitmap into
+// every card canvas. Eager on purpose: lobby re-renders churn
+// canvases faster than an observer would fire. Falls back to the
+// schematic miniature if the arena render throws.
+export function mountArenaThumb(canvas, card, env, opts) {
+  const options = opts || {};
+  const w = 480;
+  const h = 270;
+  canvas.width = w;
+  canvas.height = h;
+  if (options.w) canvas.style.width = `${options.w}px`;
+  if (options.h) canvas.style.height = `${options.h}px`;
+  canvas.dataset.thumb = "1";
+  const key = (card && card.id) || "";
+  let frame = (key && frameCache.get(key)) || null;
+  if (!frame && typeof document !== "undefined") {
+    frame = document.createElement("canvas");
+    try {
+      renderStageThumb(frame, (card && card.events) || [], posterCursor(card && card.events), {
+        layout: card && card.layout,
+        art: (env && env.art) || {},
+        weights: (card && card.weights) || {},
+        attackMap: env && env.attackMap,
+        label: key,
+      });
+    } catch {
+      const clean = card && card.layout && card.layout.hosts ? card.layout : classicLayout();
+      const state = card && card.tstate && card.tstate.hosts
+        ? card.tstate
+        : thumbnailState([], clean);
+      paintThumbnail(frame.getContext("2d"), thumbnailModel(clean, state, w, h), 1);
+    }
+    if (key) {
+      frameCache.set(key, frame);
+      while (frameCache.size > FRAME_CACHE_MAX) {
+        frameCache.delete(frameCache.keys().next().value);
+      }
+    }
+  }
+  canvas._thumbPaint = () => {
+    const ctx = canvas.getContext("2d");
+    const src = (key && frameCache.get(key)) || frame;
+    if (ctx && src) ctx.drawImage(src, 0, 0, w, h);
+  };
+  canvas._thumbPaint();
+  return canvas;
 }
 
 function drawOn(canvas, paintAt, durationMs) {

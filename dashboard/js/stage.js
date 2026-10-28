@@ -822,7 +822,9 @@ function maskSplash(tex) {
 function relayoutStage(refs) {
   if (!refs) return;
   const { cw, ch } = refs.geom;
-  const measured = measureChrome();
+  // Offscreen thumbnails override with a zero-size rect to force
+  // the proportional fallback instead of the live wrap boxes.
+  const measured = refs.chromeOverride || measureChrome();
   const chrome = measured && measured.w > 0
     ? measured
     : {
@@ -1041,6 +1043,31 @@ function pulseBar(refs) {
   hud.tug.classList.remove("hit");
   void hud.tug.offsetWidth;
   hud.tug.classList.add("hit");
+}
+
+// One static arena frame for lobby thumbnails: the episode's real
+// stage at the poster event, painted once into the given canvas.
+// Headless by design: no HUD writes, no loop, no effects, always
+// the reduced still path. Returns the refs for harness inspection.
+export function renderStageThumb(canvas, lane, cursor, opts) {
+  const o = opts || {};
+  const refs = initStage(canvas, { art: o.art || {}, reduced: true });
+  refs.hud = {};
+  refs.geom = { cw: 480, ch: 270, dpr: 1 };
+  canvas.width = 480;
+  canvas.height = 270;
+  refs.chromeOverride = { w: 0, h: 0 };
+  setStageLayout(refs, o.layout || classicLayout());
+  const list = lane || [];
+  const at = Math.max(0, Math.min(list.length, cursor || 0));
+  renderStageStatic(refs, list, at, {
+    weights: o.weights || {},
+    label: o.label || "thumbnail",
+    display: null,
+    layout: refs.layout,
+    attackMap: o.attackMap,
+  }, true);
+  return refs;
 }
 
 export function stageNotify(refs, ev, states, speed) {

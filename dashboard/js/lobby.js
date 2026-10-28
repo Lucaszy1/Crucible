@@ -5,7 +5,7 @@
 // state.js. Runs whose ids start with fake- never appear anywhere.
 import { classicLayout } from "./layout.js";
 import { eventHost, motionReduced, rankFeatured } from "./state.js";
-import { mountThumbnail, thumbnailState } from "./thumbnail.js";
+import { mountArenaThumb, mountThumbnail, thumbnailState } from "./thumbnail.js";
 
 const FLAG_LABEL = { test: "test", fallback: "fallback", scripted: "scripted" };
 
@@ -132,6 +132,23 @@ export function thumbnail(layout, tstate, opts) {
   return thumb;
 }
 
+// Arena-frame thumbnail for a classified replay: the episode's
+// real stage at its poster event. env: { art, attackMap }.
+export function arenaThumb(model, env, opts) {
+  const options = opts || {};
+  const thumb = document.createElement("canvas");
+  thumb.className = "lobby-thumb";
+  thumb.setAttribute("role", "img");
+  thumb.setAttribute("aria-label",
+    options.label || `Arena frame for ${model.id}: ${model.outcome.label}`);
+  thumb.title = `${model.id}: ${model.outcome.label}`;
+  mountArenaThumb(thumb, model, env || {}, {
+    w: options.w || 120,
+    h: options.h || 68,
+  });
+  return thumb;
+}
+
 function outcomeBadge(outcome) {
   const badge = document.createElement("span");
   badge.className = "lobby-outcome";
@@ -161,13 +178,13 @@ function playButton(id, label, callbacks) {
 }
 
 // Large featured card: thumbnail, outcome badge, story, duration.
-function featureCard(model, callbacks) {
+function featureCard(model, callbacks, env) {
   const el = document.createElement("article");
   el.className = "feature-card";
   el.dataset.tone = model.outcome.tone;
-  const thumb = thumbnail(model.layout, model.tstate, {
-    w: 176, h: 100, key: `${model.id}@176x100`,
-    label: `Range map for ${model.id}: ${model.outcome.label}`,
+  const thumb = arenaThumb(model, env, {
+    w: 176, h: 100,
+    label: `Arena frame for ${model.id}: ${model.outcome.label}`,
   });
   thumb.classList.add("feature-thumb");
   const body = document.createElement("div");
@@ -202,7 +219,7 @@ function featureCard(model, callbacks) {
 }
 
 // Compact archive card: outcome and shape, never a bare score.
-function archiveCard(model, callbacks) {
+function archiveCard(model, callbacks, env) {
   const el = document.createElement("article");
   el.className = "lobby-card";
   el.dataset.tone = model.outcome.tone;
@@ -224,9 +241,9 @@ function archiveCard(model, callbacks) {
   }
   const foot = document.createElement("div");
   foot.className = "lobby-foot";
-  const states = thumbnail(model.layout, model.tstate, {
-    w: 120, h: 68, key: `${model.id}@120x68`,
-    label: `Range map for ${model.id}: ${model.outcome.label}`,
+  const states = arenaThumb(model, env, {
+    w: 120, h: 68,
+    label: `Arena frame for ${model.id}: ${model.outcome.label}`,
   });
   states.classList.add("lobby-states");
   foot.append(states, playButton(model.id, "Play", callbacks));
@@ -238,7 +255,7 @@ function archiveCard(model, callbacks) {
 
 // model: { cards, featuredIds, loading }. Renders the featured row
 // and the archive; the hero lives in static HTML.
-export function renderLobby(featuredRoot, archiveRoot, archiveCount, model, callbacks) {
+export function renderLobby(featuredRoot, archiveRoot, archiveCount, model, callbacks, env) {
   const { featured, archive } = partitionLobby(model.cards, model.featuredIds);
   featuredRoot.innerHTML = "";
   if (model.loading && model.cards.length === 0) {
@@ -254,7 +271,7 @@ export function renderLobby(featuredRoot, archiveRoot, archiveCount, model, call
       : "No featured replays yet. Start a live exercise to make one.";
     featuredRoot.append(idle);
   } else {
-    for (const item of featured) featuredRoot.append(featureCard(item, callbacks));
+    for (const item of featured) featuredRoot.append(featureCard(item, callbacks, env));
   }
   archiveRoot.innerHTML = "";
   archiveCount.textContent = model.loading
@@ -267,7 +284,7 @@ export function renderLobby(featuredRoot, archiveRoot, archiveCount, model, call
     archiveRoot.append(idle);
     return;
   }
-  for (const item of archive) archiveRoot.append(archiveCard(item, callbacks));
+  for (const item of archive) archiveRoot.append(archiveCard(item, callbacks, env));
 }
 
 // The dealing moment: a drawn scenario preview with its range
