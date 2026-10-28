@@ -490,13 +490,18 @@ describe("entity levels", () => {
     assert.equal(FINISH_PACES.standard, 1);
   });
 
-  it("ends the card about a second after the explosion", () => {
-    // The dissolve keeps its own timing and finishes behind the
-    // card; the tail after the blast stays near one second.
+  it("ends the card after the long dissolve without stretching the total", () => {
+    // The dissolve runs about twice as long as before; the card
+    // lands past its middle while the trimmed seal hold keeps the
+    // whole finish near eight seconds. Beams and projectile stay.
+    const plan = finishPlan("standard");
+    assert.equal(plan.postBeam, 500);
+    assert.equal(plan.explodeDur, 1800);
+    assert.equal(plan.cardDelay, 400);
     for (const pace of ["quick", "standard", "slow"]) {
-      const plan = finishPlan(pace);
-      const tail = plan.explodeDur + plan.cardDelay;
-      const want = Math.round(1000 * (FINISH_PACES[pace] || 1));
+      const timed = finishPlan(pace);
+      const tail = timed.explodeDur + timed.cardDelay;
+      const want = Math.round(2200 * (FINISH_PACES[pace] || 1));
       assert.ok(Math.abs(tail - want) <= 60, `${pace} tail ${tail}`);
     }
   });
@@ -870,11 +875,11 @@ describe("melt timing", () => {
     assert.equal(meltSpriteAlpha(0), 1);
     assert.equal(meltSpriteAlpha(399), 1);
     assert.equal(meltSpriteAlpha(400), 1);
-    assert.ok(meltSpriteAlpha(1200) > 0.7, String(meltSpriteAlpha(1200)));
-    assert.equal(meltSpriteAlpha(2000), 0.7);
-    assert.ok(meltSpriteAlpha(2200) < 0.7 && meltSpriteAlpha(2200) > 0);
-    assert.equal(meltSpriteAlpha(2400), 0);
-    assert.equal(meltSpriteAlpha(3000), 0);
+    assert.ok(meltSpriteAlpha(2000) > 0.7, String(meltSpriteAlpha(2000)));
+    assert.equal(meltSpriteAlpha(3600), 0.7);
+    assert.ok(meltSpriteAlpha(4000) < 0.7 && meltSpriteAlpha(4000) > 0);
+    assert.equal(meltSpriteAlpha(4400), 0);
+    assert.equal(meltSpriteAlpha(5000), 0);
     assert.equal(meltSpriteAlpha(-50), 1);
   });
 
@@ -904,15 +909,15 @@ describe("melt timing", () => {
   it("ramps glyphs in fast and keeps late glyphs readable", () => {
     assert.equal(meltGlyphAlpha(0), 0);
     assert.ok(meltGlyphAlpha(0.25) > 0.5, String(meltGlyphAlpha(0.25)));
-    // Soft falloff: at 90% of life the fill still reads.
-    assert.ok(meltGlyphAlpha(0.9) > 0.2, String(meltGlyphAlpha(0.9)));
+    // Soft falloff: at 90% of life the fill still reads well.
+    assert.ok(meltGlyphAlpha(0.9) > 0.35, String(meltGlyphAlpha(0.9)));
     assert.equal(meltGlyphAlpha(1), 0);
   });
 
   it("keeps the halo under the fill and fades it with life", () => {
     assert.ok(meltHaloAlpha(0) > meltGlyphAlpha(0));
     assert.ok(meltHaloAlpha(0.5) < meltGlyphAlpha(0.5));
-    assert.ok(meltHaloAlpha(0.9) > 0.1, String(meltHaloAlpha(0.9)));
+    assert.ok(meltHaloAlpha(0.9) > 0.3, String(meltHaloAlpha(0.9)));
     assert.equal(meltHaloAlpha(1), 0);
   });
 

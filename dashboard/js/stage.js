@@ -1776,10 +1776,9 @@ export function moveSpanMs(size) {
 
 // Finish pace scales every beat of the ending: a short charge,
 // one giant projectile, then three beams two seconds apart at
-// standard pace; the card lands about a second after the blast
-// (the dissolve keeps its own timing and finishes behind it),
-// so the whole finish runs eight seconds, quick near five,
-// slow near fourteen for narration.
+// standard pace; the card lands past the middle of the long
+// dissolve, and the trimmed seal hold keeps the whole finish
+// near eight seconds (quick near five, slow near fourteen).
 export const FINISH_PACES = { quick: 0.65, standard: 1, slow: 1.8 };
 
 export function finishPlan(pace) {
@@ -1788,8 +1787,8 @@ export function finishPlan(pace) {
   const titanFlight = Math.round(900 * m);
   const gap = Math.round(2000 * m);
   const beamDur = Math.round(1400 * m);
-  const postBeam = Math.round(1500 * m);
-  const explodeDur = Math.round(600 * m);
+  const postBeam = Math.round(500 * m);
+  const explodeDur = Math.round(1800 * m);
   const cardDelay = Math.round(400 * m);
   return {
     mult: m, charge, titanFlight, gap, beamDur, postBeam, explodeDur, cardDelay,
@@ -1921,12 +1920,14 @@ const MONO = "'JetBrains Mono',ui-monospace,Menlo,monospace";
 const DISP = "'Big Shoulders Display',Impact,'Arial Narrow',sans-serif";
 const CODE_GLYPHS = "01<>/\\{}=+*#$";
 // Melt tuning: the flare and shockwave peak and fade for 400ms
-// before the peel starts, glyphs peel across 1600ms, and the last
-// of the sprite fades over 400ms after. Desktop samples 450
+// before the peel starts, glyphs peel across 3200ms, and the last
+// of the sprite fades over 800ms after. The whole dissolve runs
+// about twice as long as the first cut, with a softer falloff so
+// glyphs stay readable for most of it. Desktop samples 450
 // slots; LOW strides the same mask down to about 180.
 export const MELT_DELAY_MS = 400;
-export const MELT_SPAN_MS = 1600;
-export const MELT_FADE_MS = 400;
+export const MELT_SPAN_MS = 3200;
+export const MELT_FADE_MS = 800;
 export const MELT_SLOTS = 450;
 export const MELT_SLOTS_LOW = 180;
 const MELT_GLYPHS = "01";
@@ -1971,13 +1972,13 @@ export function meltGlyphPx(rr) {
 // still has room to run.
 export function meltGlyphAlpha(lp) {
   const t = Math.max(0, Math.min(1, Number(lp) || 0));
-  return Math.min(1, t * 4) * Math.pow(1 - t, 0.6) * 0.95;
+  return Math.min(1, t * 4) * Math.pow(1 - t, 0.35) * 0.95;
 }
 
 export function meltHaloAlpha(lp) {
   const t = Math.max(0, Math.min(1, Number(lp) || 0));
   // Dark enough to ring each glyph even over the white-hot core.
-  return Math.pow(1 - t, 0.6) * 0.8;
+  return Math.pow(1 - t, 0.35) * 0.8;
 }
 
 // Melt drift at life lp: mostly radial with a mild upward bias
@@ -2705,7 +2706,7 @@ function paintEntities(refs, ctx) {
 // Guardian wreckage: pale plates tumbling outward, fading over
 // about two seconds. Deterministic scatter, opaque fills.
 function paintShatterDebris(ctx, x, y, r, age) {
-  const k = Math.max(0, Math.min(1, age / 2000));
+  const k = Math.max(0, Math.min(1, age / (MELT_DELAY_MS + MELT_SPAN_MS)));
   if (k >= 1) return;
   ctx.save();
   for (let i = 0; i < 12; i += 1) {
