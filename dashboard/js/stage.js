@@ -1920,6 +1920,19 @@ export function meltGlyphPx(rr) {
   return Math.min(26, Math.max(16, Math.round(Math.max(8, Number(rr) || 8) * 0.16)));
 }
 
+// Per-glyph alphas over life lp (0 birth, 1 death). Soft falloff:
+// late glyphs stay readable instead of winking out while the peel
+// still has room to run.
+export function meltGlyphAlpha(lp) {
+  const t = Math.max(0, Math.min(1, Number(lp) || 0));
+  return Math.min(1, t * 4) * Math.pow(1 - t, 0.6) * 0.95;
+}
+
+export function meltHaloAlpha(lp) {
+  const t = Math.max(0, Math.min(1, Number(lp) || 0));
+  return Math.pow(1 - t, 0.6) * 0.6;
+}
+
 function roundRectPath(ctx, x, y, w, h, r) {
   const rr = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
@@ -2672,9 +2685,9 @@ function paintMeltGlyphs(refs, ctx, side, x, y, r, age) {
   const stride = meltStride(pts.length, refs.lowDetail);
   const count = Math.ceil(pts.length / stride);
   // Long overlapping lives: starts stagger outer-first across the
-  // first fifth while each glyph lives four fifths of the span, so
-  // the peel reads rim-to-core and the cloud stays dense.
-  const LIFE = 0.8;
+  // first stretch while each glyph lives most of the span, so the
+  // peel reads rim-to-core and the cloud stays dense to the end.
+  const LIFE = 0.85;
   const rr = Math.max(8, r);
   const bs = rr * 2.5;
   const live = [];
@@ -2702,12 +2715,12 @@ function paintMeltGlyphs(refs, ctx, side, x, y, r, age) {
   ctx.lineJoin = "round";
   ctx.strokeStyle = "rgba(2,4,8,0.6)";
   for (const g of live) {
-    ctx.globalAlpha = (1 - g.lp) * 0.6;
+    ctx.globalAlpha = meltHaloAlpha(g.lp);
     ctx.strokeText(g.ch, g.gx, g.gy);
   }
   ctx.globalCompositeOperation = "lighter";
   for (const g of live) {
-    ctx.globalAlpha = Math.min(1, g.lp * 4) * (1 - g.lp) * 0.95;
+    ctx.globalAlpha = meltGlyphAlpha(g.lp);
     ctx.fillStyle = g.s.fill;
     ctx.fillText(g.ch, g.gx, g.gy);
   }

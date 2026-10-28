@@ -7,7 +7,7 @@ import {
   applyCamera, auditorChrome, blueLine, calloutForEvent, clashCrop, dollyTarget, FINISH_PACES, finishPlan,
   flashHold, FLIGHT_MS, flightLaneRect, frameBudget, frameP95, flightLane, fxForEvent,
   guardianPulse, hitstopFor, initStage, intrusionLevel, laneFeed, lanePoint, LOW_STREAK,
-  meltChar, meltGlyphPx, meltSpriteAlpha, meltStride, moveSpanMs, paintGuardian,
+  meltChar, meltGlyphAlpha, meltGlyphPx, meltHaloAlpha, meltSpriteAlpha, meltStride, moveSpanMs, paintGuardian,
   paintIntrusion, projBody, redLine, renderStageStatic, renderStageThumb, sampleMeltMask,
   setStageActive, setStageReduced, stageLayout, stageNotify, stageWash, stepCamera, trailSpan,
 } from "../dashboard/js/stage.js";
@@ -862,5 +862,20 @@ describe("melt timing", () => {
     assert.equal(meltGlyphPx(150), 24);
     assert.equal(meltGlyphPx(300), 26);
     assert.equal(meltGlyphPx(8), 16);
+  });
+
+  it("ramps glyphs in fast and keeps late glyphs readable", () => {
+    assert.equal(meltGlyphAlpha(0), 0);
+    assert.ok(meltGlyphAlpha(0.25) > 0.5, String(meltGlyphAlpha(0.25)));
+    // Soft falloff: at 90% of life the fill still reads.
+    assert.ok(meltGlyphAlpha(0.9) > 0.2, String(meltGlyphAlpha(0.9)));
+    assert.equal(meltGlyphAlpha(1), 0);
+  });
+
+  it("keeps the halo under the fill and fades it with life", () => {
+    assert.ok(meltHaloAlpha(0) > meltGlyphAlpha(0));
+    assert.ok(meltHaloAlpha(0.5) < meltGlyphAlpha(0.5));
+    assert.ok(meltHaloAlpha(0.9) > 0.1, String(meltHaloAlpha(0.9)));
+    assert.equal(meltHaloAlpha(1), 0);
   });
 });
