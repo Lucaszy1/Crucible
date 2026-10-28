@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from crucible import events, llm, orchestrator, sandbox, tools, voice_api
+from crucible import debrief, events, llm, orchestrator, sandbox, tools, voice_api
 from crucible.agents import ModelBlue, ModelRed, ScriptedBlue, ScriptedRed
 from crucible.agents.briefed_red import ModelBriefedRed
 from crucible.human_blue import AIWithOverride, CommandQueue, HumanBlue
@@ -454,6 +454,28 @@ def get_run(run_id: str) -> dict:
     """Return one run's events plus its score when computable."""
     found = _read_run_events(run_id)
     return {"id": run_id, "events": found, "score": _score_or_none(found)}
+
+
+@app.get("/api/runs/{run_id}/debrief")
+def get_debrief(
+    run_id: str, rewrite: int = Query(default=0)
+) -> dict:
+    """Return one run's exercise debrief report.
+
+    Layer 1 is deterministic and needs no model. rewrite=1 asks Muse
+    Wonder for a plain-language rewrite, falling back to Layer 1 on
+    any mismatch or error, including a missing model key.
+    """
+    found = _read_run_events(run_id)
+    try:
+        report = debrief.build_debrief(found, run_id=run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if rewrite:
+        report = debrief.rewrite_plain(
+            report, found, exercise_id=f"debrief-{run_id}"
+        )
+    return {"id": run_id, "debrief": report}
 
 
 @app.get("/api/stream/{run_id}")

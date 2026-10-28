@@ -48,6 +48,7 @@ ROLE_MODELS = {
     "blue-open": "meta-models/muse-spark-open-1026",
     "auditor": "muse-wonder-1.0",
     "referee": "muse-wonder-1.0",
+    "debrief": "muse-wonder-1.0",
     "dev": "muse-spark-1.3-contributor",
 }
 

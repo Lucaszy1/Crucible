@@ -105,6 +105,10 @@ export function fetchStage3() {
   return getJson("/api/bench/stage3");
 }
 
+export function fetchDebrief(runId) {
+  return getJson(`/api/runs/${encodeURIComponent(runId)}/debrief`);
+}
+
 export async function startExercise(agents, exerciseId, scenario) {
   const res = await fetch("/api/exercise/start", {
     method: "POST",
