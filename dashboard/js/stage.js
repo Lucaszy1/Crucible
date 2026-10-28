@@ -1306,7 +1306,7 @@ function updateStageHud(refs) {
     if (hud.capTag) {
       hud.capTag.textContent = snap.tag;
       hud.capTag.className = snap.tagTone || "system";
-      hud.capTag.style.fontSize = snap.tag.length > 5 ? "clamp(14px,2.6cqw,40px)" : "";
+      hud.capTag.style.fontSize = capTagFontSize(snap.tag);
     }
     if (hud.capText) hud.capText.textContent = snap.caption;
     if (hud.capSub) hud.capSub.textContent = snap.sub;
@@ -1640,6 +1640,13 @@ export function fxForEvent(ev, ctx) {
 
 // Kinetic callout content for one move: the technique name from the
 // data over the plain-English line. Null for non-move events.
+// Caption tag size: short tags (RED, BLUE) use the chip's full
+// size; longer tags (EXERCISE) step down so the whole word fits
+// the chip at any canvas width instead of clipping. Pure.
+export function capTagFontSize(tag) {
+  return String(tag || "").length > 5 ? "clamp(12px,2.2cqw,34px)" : "";
+}
+
 export function calloutForEvent(ev, attackMap) {
   if (!ev || (ev.actor !== "red" && ev.actor !== "blue")) return null;
   const map = attackMap || {};

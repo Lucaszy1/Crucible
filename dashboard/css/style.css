@@ -599,11 +599,12 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
 }
 #arenaCapTag {
   flex: none; display: flex; align-items: center; justify-content: center;
-  width: clamp(76px, 13cqw, 200px);
+  width: auto; min-width: clamp(76px, 13cqw, 200px);
+  padding: 0 clamp(10px, 2cqw, 28px); white-space: nowrap;
   font-family: Impact, 'Arial Narrow', sans-serif;
   font-size: clamp(20px, 4.4cqw, 60px); font-weight: 900; line-height: 1; letter-spacing: .04em;
   background: #8791a3; color: #0a0c10;
-  clip-path: polygon(0 0,100% 0,calc(100% - 28px) 100%,0 100%);
+  clip-path: polygon(0 0,100% 0,calc(100% - 12px) 100%,0 100%);
 }
 #arenaCapTag.red { background: #ff3b2f; }
 #arenaCapTag.blue { background: #2f7bff; }

@@ -4,7 +4,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  applyCamera, auditorChrome, blueLine, calloutForEvent, clashCrop, dollyTarget, FINISH_PACES, finishPlan,
+  applyCamera, auditorChrome, blueLine, calloutForEvent, capTagFontSize, clashCrop, dollyTarget, FINISH_PACES, finishPlan,
   flashHold, FLIGHT_MS, flightLaneRect, frameBudget, frameP95, flightLane, fxForEvent,
   guardianPulse, hitstopFor, initStage, intrusionLevel, laneFeed, lanePoint, LOW_STREAK,
   meltChar, meltDrift, meltGlyphAlpha, meltGlyphPx, meltHaloAlpha, meltSpriteAlpha, meltStride, moveSpanMs, paintGuardian,
@@ -499,6 +499,13 @@ describe("entity levels", () => {
       const want = Math.round(1000 * (FINISH_PACES[pace] || 1));
       assert.ok(Math.abs(tail - want) <= 60, `${pace} tail ${tail}`);
     }
+  });
+
+  it("shrinks long caption tags to fit the chip", () => {
+    assert.equal(capTagFontSize("RED"), "");
+    assert.equal(capTagFontSize("BLUE"), "");
+    assert.equal(capTagFontSize("EXERCISE"), "clamp(12px,2.2cqw,34px)");
+    assert.equal(capTagFontSize(""), "");
   });
 
   it("cuts the tail camera toward the winner", () => {
