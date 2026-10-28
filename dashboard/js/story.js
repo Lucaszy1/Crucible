@@ -183,7 +183,11 @@ export function keyMoments(events) {
   const out = [];
   const push = (key, index, title) => {
     if (index < 0) return;
-    out.push({ key, index, title, caption: describeEvent(list[index]) });
+    out.push({
+    key, index, title,
+    caption: describeEvent(list[index]),
+    reasoning: String(list[index].reasoning_summary || ""),
+  });
   };
   push("signin", signin, "First sign-in");
   if (detection >= 0 && detection !== containment) push("detection", detection, "Detection");

@@ -8,6 +8,35 @@ const CLASSIC_REF_ID = /^(web|app|db|workstation):\d+$/;
 const TYPE_MS = 12;
 const TYPE_BUDGET_MS = 2600;
 
+// Margin budget: longer thoughts truncate (sentence, else word)
+// and open full in the expander.
+export const THOUGHT_MAX_CHARS = 220;
+
+// Truncate without ever splitting a word: a sentence end wins when
+// one keeps at least half the cap, else the last fitting space.
+// Short text passes through; a lone over-long token stays whole.
+export function truncateThought(text, max) {
+  const clean = String(text || "");
+  const cap = Math.max(20, Math.floor(max) || THOUGHT_MAX_CHARS);
+  if (clean.length <= cap) return { text: clean, cut: false };
+  const floor = cap / 2;
+  let cut = -1;
+  const re = /[.!?](\s|$)/g;
+  let hit = re.exec(clean);
+  while (hit !== null) {
+    const end = hit.index + 1;
+    if (end > cap) break;
+    if (end >= floor) cut = end;
+    hit = re.exec(clean);
+  }
+  if (cut < 0) {
+    const space = clean.lastIndexOf(" ", cap);
+    if (space > 0) cut = space;
+  }
+  if (cut < 0) return { text: clean, cut: false };
+  return { text: `${clean.slice(0, cut).trimEnd()}…`, cut: true };
+}
+
 // Evidence refs name a range host and line: upland:12. Hosts come
 // from the exercise layout; without one the classic four apply.
 function refPattern(hosts) {
@@ -67,6 +96,8 @@ function renderPanel(panel, slice, actor, opts, state) {
       panel.text.dataset.lastId = "";
       panel.text.textContent = actor === "red" ? "Red is waiting." : "Blue is waiting.";
     }
+    panel.root.classList.remove("cut");
+    closeExpander(state, opts);
     return;
   }
   for (const ref of thoughtRefs(ev, opts && opts.hosts)) {
@@ -81,11 +112,91 @@ function renderPanel(panel, slice, actor, opts, state) {
   }
   if (panel.text.dataset.lastId === id) return;
   panel.text.dataset.lastId = id;
-  typeInto(panel.text, thoughtText(ev), opts.reduced, state);
+  closeExpander(state, opts);
+  const full = thoughtText(ev);
+  const shown = truncateThought(full, THOUGHT_MAX_CHARS);
+  panel.text.dataset.full = full;
+  panel.root.classList.toggle("cut", shown.cut);
+  wireExpander(panel, state, opts);
+  typeInto(panel.text, shown.text, opts.reduced, state);
+}
+
+// One open expander at a time across both panels.
+let openExpander = null;
+
+function expanderEl(panel) {
+  let box = panel.root.querySelector(".thought-full");
+  if (box) return box;
+  box = document.createElement("div");
+  box.className = "thought-full";
+  box.hidden = true;
+  const body = document.createElement("p");
+  body.className = "thought-full-text";
+  const shut = document.createElement("button");
+  shut.type = "button";
+  shut.className = "thought-full-close";
+  shut.textContent = "Close";
+  shut.setAttribute("aria-label", "Close full thought");
+  box.append(body, shut);
+  panel.root.append(box);
+  return box;
+}
+
+function openExpanderFor(panel, state, opts) {
+  if (panel.text.dataset.lastId === "") return;
+  if (!panel.root.classList.contains("cut")) return;
+  const box = expanderEl(panel);
+  if (openExpander && openExpander !== box) closeExpander(openExpander._state, openExpander._opts);
+  box.querySelector(".thought-full-text").textContent = panel.text.dataset.full || "";
+  box.hidden = false;
+  box._state = state;
+  box._opts = opts;
+  openExpander = box;
+  if (opts && typeof opts.onExpandChange === "function") opts.onExpandChange(true);
+}
+
+function closeExpander(state, opts) {
+  const box = openExpander;
+  if (!box) return;
+  box.hidden = true;
+  openExpander = null;
+  const hook = (opts && opts.onExpandChange)
+    || (box._opts && box._opts.onExpandChange);
+  if (typeof hook === "function") hook(false);
+}
+
+function wireExpander(panel, state, opts) {
+  if (panel.text.dataset.wired === "1") return;
+  panel.text.dataset.wired = "1";
+  panel.text.setAttribute("tabindex", "0");
+  panel.text.setAttribute("role", "button");
+  panel.text.setAttribute("aria-label", "Open the full thought");
+  panel.text.addEventListener("mouseenter", () => openExpanderFor(panel, state, opts));
+  panel.root.addEventListener("mouseleave", () => closeExpander(state, opts));
+  panel.text.addEventListener("click", () => {
+    const box = panel.root.querySelector(".thought-full");
+    if (box && !box.hidden) closeExpander(state, opts);
+    else openExpanderFor(panel, state, opts);
+  });
+  panel.text.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      openExpanderFor(panel, state, opts);
+    } else if (ev.key === "Escape") {
+      closeExpander(state, opts);
+    }
+  });
+  panel.root.addEventListener("click", (ev) => {
+    if (ev.target && ev.target.classList && ev.target.classList.contains("thought-full-close")) {
+      closeExpander(state, opts);
+    }
+  });
 }
 
 // panels: { red: {root, text, chips}, blue: {...} }. opts:
-// { reduced, onFlash }. Hidden when the slice holds no moves.
+// { reduced, onFlash, onExpandChange }. Hidden when the slice holds
+// no moves. onExpandChange(open) fires when the full-text expander
+// opens or closes so the caller can pause and resume playback.
 export function renderThoughts(panels, slice, opts, state) {
   const st = state || { red: {}, blue: {} };
   const lane = (slice || []).filter((ev) => ev && (ev.actor === "red" || ev.actor === "blue"));

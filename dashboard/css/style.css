@@ -905,11 +905,27 @@ canvas.lobby-thumb:focus-visible { outline: 2px solid #8fb8ff; outline-offset: 2
 }
 .arena-row3 > .arena-canvas-wrap { flex: 1 1 auto; min-width: 0; margin: 0; }
 .thought {
+  position: relative;
   flex: 0 0 248px; width: 248px; max-height: 70vh; overflow-y: auto;
   background: rgba(9, 11, 16, 0.92); border: 1px solid #2a3140;
   border-radius: 8px; padding: 8px 10px;
   font-size: 12px; line-height: 1.45;
 }
+.thought.cut .thought-text { cursor: pointer; }
+.thought.cut .thought-text:hover, .thought.cut .thought-text:focus-visible { outline: 1px solid #2f7bff; outline-offset: 2px; }
+.thought-full {
+  position: absolute; z-index: 6; top: 0; left: 0; right: 0;
+  max-height: 100%; overflow-y: auto;
+  background: #0d1119; border: 1px solid #2f7bff; border-radius: 8px;
+  padding: 8px 10px; text-align: left;
+}
+.thought-full[hidden] { display: none; }
+.thought-full-text { margin: 0 0 6px; color: #f2efe8; white-space: pre-wrap; }
+.thought-full-close {
+  font-size: 11px; background: #1a2030; color: #8fb8ff;
+  border: 1px solid #2c3548; border-radius: 6px; padding: 1px 8px; cursor: pointer;
+}
+.moment-thought { margin: 4px 0 0; font-size: 13px; color: var(--muted); font-style: italic; }
 .thought.red { border-top: 3px solid #ff3b2f; }
 .thought.blue { border-top: 3px solid #2f7bff; text-align: right; }
 @media (max-width: 900px) {

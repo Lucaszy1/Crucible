@@ -233,6 +233,17 @@ describe("keyMoments", () => {
     assert.deepEqual(keyMoments(quick).map((m) => m.key), ["signin", "containment"]);
   });
 
+  it("carries the full reasoning text on each moment", () => {
+    const full = "The sign-in burst looks wrong, so I will check the logs first.";
+    const withReason = [
+      ev("red", "try_credential", { host: "web", user: "op" }, { ok: true, authenticated: true }),
+      { ...ev("blue", "isolate_host", { host: "web" }, { ok: true }), reasoning_summary: full },
+    ];
+    const moments = keyMoments(withReason);
+    assert.equal(moments[1].reasoning, full);
+    assert.equal(moments[0].reasoning, "");
+  });
+
   it("ignores waits, failed sign-ins, and empty lanes", () => {
     assert.deepEqual(keyMoments([]), []);
     const idle = [

@@ -435,6 +435,15 @@ function render(animate) {
       const flashView = sceneView();
       if (flashView.refs) flashView.flash(flashView.refs, host);
     },
+    onExpandChange: (open) => {
+      if (open) {
+        store.thoughtPaused = store.playing;
+        if (store.playing) pauseReplay();
+      } else if (store.thoughtPaused && !store.playing) {
+        store.thoughtPaused = false;
+        playReplay();
+      }
+    },
   }, store.thoughtState);
   renderTechniques(
     { stages: els.stages, redTech: els.redTech, blueTech: els.blueTech },
@@ -513,6 +522,12 @@ function renderStoryPanels(display) {
     cap.className = "moment-cap";
     cap.textContent = moment.caption;
     body.append(head, cap);
+    if (moment.reasoning) {
+      const thought = document.createElement("p");
+      thought.className = "moment-thought";
+      thought.textContent = moment.reasoning;
+      body.append(thought);
+    }
     item.append(frame, body);
     list.append(item);
   }
