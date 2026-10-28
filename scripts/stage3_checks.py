@@ -425,6 +425,21 @@ def check_episodes(report: Report, bench_dirs: list) -> None:
                 if "daily model spend cap reached" in note:
                     report.add(FAIL, f"{episode}: spend-cap degraded turn")
                     break
+            if row.get("red_profile") == "model-briefed":
+                for event in events:
+                    result = event.get("result", {}) or {}
+                    if event.get("degraded") is True \
+                            or result.get("degraded") is True:
+                        report.add(
+                            FAIL, f"{episode}: model-briefed turn ran "
+                                  f"degraded")
+                        break
+                    note = str(event.get("reasoning_summary", "") or "")
+                    if "using baseline" in note.lower():
+                        report.add(
+                            FAIL, f"{episode}: model-briefed turn used "
+                                  f"baseline fallback")
+                        break
             if row.get("secret_read") == "True" \
                     and row.get("intrusion") != "True":
                 report.add(FAIL, f"{episode}: secret read without intrusion")

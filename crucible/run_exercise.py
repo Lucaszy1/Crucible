@@ -120,6 +120,21 @@ def _spend_cap_hit(event_list: list) -> bool:
     )
 
 
+def _degraded_hit(event_list: list) -> bool:
+    """Check whether any turn fell back after a model error.
+
+    Red turns carry the flag on the event; auditor verdicts carry it
+    in their result payload.
+    """
+    for event in event_list or []:
+        if event.get("degraded") is True:
+            return True
+        result = event.get("result", {}) or {}
+        if result.get("degraded") is True:
+            return True
+    return False
+
+
 def _warn_spend_cap() -> None:
     """Print a loud warning with the spend limit and amount used."""
     try:
@@ -289,6 +304,17 @@ def main(argv=None) -> int:
     # scenario= rides along only for generated runs so the classic
     # call shape stays exactly as it was.
     extra = {"scenario": info} if info else {}
+    key_envs = []
+    if args.agents == "model" or args.audit != "off":
+        key_envs.append("MODEL_API_KEY")
+    if args.agents == "model" and args.blue_api_key_env:
+        key_envs.append(args.blue_api_key_env)
+    for env_var in key_envs:
+        try:
+            llm.require_api_key(env_var)
+        except RuntimeError as exc:
+            print(f"run_exercise: {exc}", file=sys.stderr)
+            return 1
     if args.agents == "model":
         try:
             blue_client = llm.custom_client(args.blue_base_url, args.blue_api_key_env)

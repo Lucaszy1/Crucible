@@ -7,6 +7,8 @@ falls back to the scripted baseline move so an exercise never hangs.
 
 from __future__ import annotations
 
+import sys
+
 from crucible import llm
 from crucible.agents import _common
 from crucible.agents.scripted_red import ScriptedRed  # noqa: F401 (compat re-export)
@@ -209,13 +211,26 @@ class ModelRed:
         self._use_cache = use_cache
         self._seed = seed
         self._fallback = ScriptedRed()
+        self._degraded_warned = False
 
-    def _fallback_action(self, turn: int, history: list, note: str) -> dict | None:
+    def _warn_degraded_once(self, note: str) -> None:
+        """Print one stderr warning for the run's first error fallback."""
+        if self._degraded_warned:
+            return
+        self._degraded_warned = True
+        print(f"WARNING: {note} Episode results are degraded.",
+              file=sys.stderr)
+
+    def _fallback_action(self, turn: int, history: list, note: str,
+                         degraded: bool = False) -> dict | None:
         action = self._fallback.next_action(turn, history)
         if action is None:
             return None
         reason = action.get("reasoning", "")
         action["reasoning"] = f"{note} Baseline move: {reason}".strip()
+        if degraded:
+            action["degraded"] = True
+            self._warn_degraded_once(note)
         return action
 
     def next_action(self, turn: int, history: list,

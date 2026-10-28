@@ -317,3 +317,44 @@ def test_custom_client_builds_with_overrides(monkeypatch):
     close = getattr(client, "close", None)
     if callable(close):
         close()
+
+
+def test_key_preflight_rejects_missing_and_empty(monkeypatch):
+    monkeypatch.delenv("MODEL_API_KEY", raising=False)
+    assert llm.key_problem() == \
+        "MODEL_API_KEY looks like a placeholder or is missing"
+    monkeypatch.setenv("MODEL_API_KEY", "   ")
+    assert llm.key_problem() == \
+        "MODEL_API_KEY looks like a placeholder or is missing"
+
+
+def test_key_preflight_rejects_placeholders_and_short_keys(monkeypatch):
+    for bad in ("put-your-key-here", "PLACEHOLDER-1234567890",
+                "changeme-abcdef123456", "example-key-123456",
+                "abxxxcdef1234567890", "short"):
+        monkeypatch.setenv("MODEL_API_KEY", bad)
+        problem = llm.key_problem()
+        assert problem == \
+            "MODEL_API_KEY looks like a placeholder or is missing"
+        assert bad not in problem
+
+
+def test_key_preflight_accepts_real_looking_key(monkeypatch):
+    monkeypatch.setenv("MODEL_API_KEY", "unit-test-key-0123456789abcdef")
+    assert llm.key_problem() is None
+
+
+def test_key_preflight_names_custom_env_var(monkeypatch):
+    monkeypatch.delenv("BENCH_CUSTOM_KEY", raising=False)
+    assert llm.key_problem("BENCH_CUSTOM_KEY") == \
+        "BENCH_CUSTOM_KEY looks like a placeholder or is missing"
+    monkeypatch.setenv("BENCH_CUSTOM_KEY", "unit-test-key-0123456789abcdef")
+    assert llm.key_problem("BENCH_CUSTOM_KEY") is None
+
+
+def test_require_api_key_raises_on_bad_key(monkeypatch):
+    monkeypatch.setenv("MODEL_API_KEY", "put-your-key-here")
+    with pytest.raises(RuntimeError, match="MODEL_API_KEY"):
+        llm.require_api_key()
+    monkeypatch.setenv("MODEL_API_KEY", "unit-test-key-0123456789abcdef")
+    assert llm.require_api_key() is None

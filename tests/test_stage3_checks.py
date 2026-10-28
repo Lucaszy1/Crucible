@@ -18,14 +18,19 @@ import stage3_checks
 
 def _write_bench(path: Path, *, sensors: str, alerts: int, count: int = 2,
                  signin_last: bool = False,
-                 episodes: list | None = None) -> Path:
+                 episodes: list | None = None,
+                 red_profile: str = "solver",
+                 blue_notes: dict | None = None,
+                 degraded: tuple = ()) -> Path:
     """Write a bench with N alert-bearing blue events.
 
     Every episode intrudes: a red authenticated sign-in with a blue
     turn after it, unless signin_last puts the sign-in after blue's
     only turn (sensors never had a chance, so silence owes nothing).
     episodes overrides the default ep-{index} ids (duplicates allowed,
-    to test the within-bench duplicate check).
+    to test the within-bench duplicate check). red_profile sets the
+    CSV red profile; blue_notes overrides the blue reasoning note per
+    episode; degraded flags those episodes' blue events degraded.
     """
     path.mkdir(parents=True, exist_ok=True)
     (path / "summary.json").write_text(json.dumps({
@@ -36,7 +41,8 @@ def _write_bench(path: Path, *, sensors: str, alerts: int, count: int = 2,
     names = list(episodes) if episodes is not None \
         else [f"ep-{index}" for index in range(count)]
     rows = [{"episode": name, "cell": "solver-sensors-on-memory-off",
-             "red_profile": "solver", "cost": "0.0", "secret_read": "False",
+             "red_profile": red_profile, "cost": "0.0",
+             "secret_read": "False",
              "intrusion": "True", "scenario_seed": "",
              "scenario_difficulty": ""}
             for name in names]
@@ -47,7 +53,11 @@ def _write_bench(path: Path, *, sensors: str, alerts: int, count: int = 2,
     for order, row in enumerate(rows):
         blue = {"id": "evt-0003", "actor": "blue", "tool": "wait",
                 "args": {}, "result": {"ok": True, "waited": True},
-                "reasoning_summary": "stand by", "evidence_refs": []}
+                "reasoning_summary": (blue_notes or {}).get(
+                    row["episode"], "stand by"),
+                "evidence_refs": []}
+        if row["episode"] in (degraded or ()):
+            blue["degraded"] = True
         if order < alerts:
             blue["sensor_alerts"] = [
                 {"id": "alert-1", "rule": "success_first_try",
@@ -199,3 +209,38 @@ def test_cached_entry_in_own_window_still_flags(tmp_path, monkeypatch):
     report = stage3_checks.Report()
     stage3_checks.check_episodes(report, [bench])
     assert report.fails() == ["solo: cached replay under --no-cache"]
+
+
+def test_model_briefed_degraded_episode_fails(tmp_path):
+    bench = _write_bench(tmp_path / "briefed-deg", sensors="on", alerts=2,
+                         red_profile="model-briefed", degraded=("ep-0",))
+    report = stage3_checks.Report()
+    stage3_checks.check_episodes(report, [bench])
+    assert report.fails() == ["ep-0: model-briefed turn ran degraded"]
+
+
+def test_model_briefed_baseline_note_fails(tmp_path):
+    bench = _write_bench(
+        tmp_path / "briefed-base", sensors="on", alerts=2,
+        red_profile="model-briefed",
+        blue_notes={"ep-1": "Model call failed (boom), using baseline."})
+    report = stage3_checks.Report()
+    stage3_checks.check_episodes(report, [bench])
+    assert report.fails() == ["ep-1: model-briefed turn used baseline fallback"]
+
+
+def test_model_briefed_clean_episodes_pass(tmp_path):
+    bench = _write_bench(tmp_path / "briefed-clean", sensors="on", alerts=2,
+                         red_profile="model-briefed")
+    report = stage3_checks.Report()
+    stage3_checks.check_episodes(report, [bench])
+    assert report.fails() == []
+
+
+def test_solver_baseline_note_is_not_checked(tmp_path):
+    bench = _write_bench(
+        tmp_path / "solver-base", sensors="on", alerts=2,
+        blue_notes={"ep-0": "Model call failed (boom), using baseline."})
+    report = stage3_checks.Report()
+    stage3_checks.check_episodes(report, [bench])
+    assert report.fails() == []

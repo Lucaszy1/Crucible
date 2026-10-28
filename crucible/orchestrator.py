@@ -819,9 +819,9 @@ def run_exercise(
         idle_rounds = 0
         turns_used += 1
         result = run_tool(action.get("tool", ""), action.get("args", {}))
-        # Human provenance and blue thinking ride private action keys
-        # into extra event fields; actions without them log
-        # byte-identically to before.
+        # Human provenance, blue thinking, and error-fallback flags ride
+        # private action keys into extra event fields; actions without
+        # them log byte-identically to before.
         extra = None
         if isinstance(action, dict) \
                 and action.get("_human_source") in ("voice", "text"):
@@ -836,6 +836,10 @@ def run_exercise(
             if extra is None:
                 extra = {}
             extra["thinking"] = events.sanitize_reasoning_summary(thinking)
+        if isinstance(action, dict) and action.get("degraded") is True:
+            if extra is None:
+                extra = {}
+            extra["degraded"] = True
         logged = writer.log(
             actor=(action.get("_actor")
                    if isinstance(action, dict) and action.get("_actor")

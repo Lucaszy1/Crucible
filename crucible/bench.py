@@ -73,6 +73,7 @@ CSV_FIELDS = (
     "scenario_difficulty",
     "blue_profile",
     "assisted",
+    "degraded",
 )
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -317,6 +318,9 @@ def parse_args(argv=None):
     parser.add_argument("--spend-cap-usd", type=float, default=None,
                         help="Stop before an episode would pass this spend "
                         "(default: the daily limit)")
+    parser.add_argument("--allow-degraded", action="store_true",
+                        help="Keep model-fallback-degraded episodes in the "
+                        "cell and continue instead of stopping")
     parser.add_argument("--resume", action="store_true",
                         help="Continue an existing benchmark instead of starting over")
     parser.add_argument("--force", action="store_true",
@@ -380,6 +384,29 @@ def _audit_cells(args, cells: list) -> list | None:
     return want
 
 
+def _model_key_envs(args, cells: list) -> list:
+    """Env vars holding keys this benchmark needs, in check order.
+
+    Model reds, the end-of-episode auditor, and the referee (memory-on
+    cells without a frozen playbook) all bill MODEL_API_KEY. A model
+    blue bills it too unless --blue-api-key-env names its own var.
+    Scripted-only benches need no key at all.
+    """
+    envs = []
+    default_key = (
+        any(cell["red"] in ("model", "model-briefed") for cell in cells)
+        or args.audit == "end"
+        or (not args.freeze_playbook
+            and any(cell["memory"] == "on" for cell in cells))
+        or (args.blue == "model" and not args.blue_api_key_env)
+    )
+    if default_key:
+        envs.append("MODEL_API_KEY")
+    if args.blue == "model" and args.blue_api_key_env:
+        envs.append(args.blue_api_key_env)
+    return envs
+
+
 def _bench_dir(name: str) -> Path:
     return events.RUNS_DIR / f"bench-{name}"
 
@@ -409,6 +436,22 @@ def _write_csv(path: Path, rows: list) -> None:
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _write_summaries(bench: dict, args) -> None:
+    """Rewrite the CSV and JSON summaries from the current rows."""
+    _write_csv(bench["dir"] / "summary.csv", bench["rows"])
+    _write_json(bench["summary_path"], {
+        "name": bench["name"],
+        "cells": [cell["key"] for cell in _cells(args)],
+        "episodes_per_cell": args.episodes_per_cell,
+        "scenarios": bench.get("scenarios", ["classic"]),
+        "playbook_frozen": bool(args.freeze_playbook),
+        "audit": args.audit,
+        "audit_cells": bench.get("audit_cells"),
+        "blue_profile": args.blue,
+        "episodes": bench["rows"],
+    })
 
 
 def _load_state(path: Path) -> dict | None:
@@ -611,23 +654,13 @@ def _run_episode(bench: dict, cell: dict, rep: int, args, client,
         "scenario_difficulty": (scenario or {}).get("difficulty"),
         "blue_profile": args.blue,
         "assisted": bool(score.get("assisted", False)),
+        "degraded": run_exercise._degraded_hit(result.get("events", [])),
     })
     latest = bench["rows"][-1]
     print(f"{exercise_id}: outcome={latest['outcome']} "
           f"blue_score={latest['blue_score']} "
           f"cost=${cost:.4f}")
-    _write_csv(bench["dir"] / "summary.csv", bench["rows"])
-    _write_json(bench["summary_path"], {
-        "name": bench["name"],
-        "cells": [cell["key"] for cell in _cells(args)],
-        "episodes_per_cell": args.episodes_per_cell,
-        "scenarios": bench.get("scenarios", ["classic"]),
-        "playbook_frozen": bool(args.freeze_playbook),
-        "audit": args.audit,
-        "audit_cells": bench.get("audit_cells"),
-        "blue_profile": args.blue,
-        "episodes": bench["rows"],
-    })
+    _write_summaries(bench, args)
     return result
 
 
@@ -703,6 +736,12 @@ def main(argv=None) -> int:
     if cap <= 0:
         print("--spend-cap-usd must be positive", file=sys.stderr)
         return 1
+    for env_var in _model_key_envs(args, cells):
+        try:
+            llm.require_api_key(env_var)
+        except RuntimeError as exc:
+            print(f"bench: {exc}", file=sys.stderr)
+            return 1
 
     bench = _open_bench(name, cells, per_cell, args, labels, audit_cells)
     if bench is None:
@@ -765,6 +804,19 @@ def main(argv=None) -> int:
                               f"episodes as clean ones.",
                               file=sys.stderr)
                         return 2
+                    if bench["rows"] and bench["rows"][-1].get("degraded"):
+                        if args.allow_degraded:
+                            print(f"bench: warning: {latest_id} ran "
+                                  f"degraded; --allow-degraded keeps it in "
+                                  f"the cell.", file=sys.stderr)
+                        else:
+                            bench["rows"].pop()
+                            _write_summaries(bench, args)
+                            print(f"bench: model fallback degraded "
+                                  f"{latest_id}; stopping instead of "
+                                  f"recording degraded episodes as clean "
+                                  f"ones.", file=sys.stderr)
+                            return 2
             try:
                 sandbox.stop()
             except sandbox.SandboxError as exc:

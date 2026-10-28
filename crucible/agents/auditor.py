@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 
 from crucible import llm, sensors
 
@@ -36,6 +37,20 @@ AUDIT_MODES = ("off", "end", "live")
 
 # Blue tools too broken to judge; everything else gets an audit event.
 SKIP_TOOLS = ("agent_error",)
+
+# Exercises that already got their degraded-fallback warning, so one
+# broken key warns once per exercise instead of once per verdict.
+_WARNED_DEGRADED: set = set()
+
+
+def _warn_degraded_once(exercise_id: str | None, exc: BaseException) -> None:
+    """Print one stderr warning for an exercise's first error fallback."""
+    if exercise_id in _WARNED_DEGRADED:
+        return
+    _WARNED_DEGRADED.add(exercise_id)
+    print(f"WARNING: auditor model call failed ({exc}); verdicts fell "
+          f"back to deterministic Layer 1. Episode results are degraded.",
+          file=sys.stderr)
 
 ALLOWED_HOSTS = ("web", "app", "db", "workstation")
 
@@ -613,8 +628,10 @@ def judge_with_model(blue_event: dict, prior_events: list, check: dict,
     Uses the auditor role (muse-wonder-1.0) at medium effort first, or
     the given role or model id when the caller overrides it. When the
     API reports that model unavailable, retries once on muse-spark-1.3
-    at high effort. Any other failure (spend cap, parse error, outage)
-    falls back to the deterministic Layer 1 verdict at zero cost.
+    at high effort. Any other failure (spend cap, outage) falls back
+    to the deterministic Layer 1 verdict at zero cost, marks the
+    judgment degraded, and warns once per exercise. Unparseable
+    replies still fall back quietly; the model was reached.
     Returns the verdict, score, rationale, model_used, and cost.
     """
     messages = build_messages(blue_event, prior_events, check, weights,
@@ -636,14 +653,16 @@ def judge_with_model(blue_event: dict, prior_events: list, check: dict,
                     temperature=TEMPERATURE,
                     reasoning_effort=FALLBACK_EFFORT,
                 )
-            except Exception:
+            except Exception as retry_exc:
                 verdict = deterministic_judgment(blue_event, check)
+                _warn_degraded_once(exercise_id, retry_exc)
                 return {**verdict, "model_used": FALLBACK_NO_MODEL,
-                        "estimated_cost_usd": 0.0}
+                        "estimated_cost_usd": 0.0, "degraded": True}
         else:
             verdict = deterministic_judgment(blue_event, check)
+            _warn_degraded_once(exercise_id, exc)
             return {**verdict, "model_used": FALLBACK_NO_MODEL,
-                    "estimated_cost_usd": 0.0}
+                    "estimated_cost_usd": 0.0, "degraded": True}
     parsed = parse_judgment((response or {}).get("content", ""))
     if parsed is None:
         verdict = deterministic_judgment(blue_event, check)
@@ -687,6 +706,7 @@ def audit_blue_event(blue_event: dict, prior_events: list,
         "refs_valid": check["refs_valid"],
         "model_used": judgment["model_used"],
         "estimated_cost_usd": judgment["estimated_cost_usd"],
+        "degraded": judgment.get("degraded", False),
     }
 
 
@@ -748,6 +768,7 @@ def audit_result(audit: dict) -> dict:
         "refs_valid": audit.get("refs_valid") is True,
         "model_used": audit.get("model_used", FALLBACK_NO_MODEL),
         "estimated_cost_usd": audit.get("estimated_cost_usd", 0.0),
+        "degraded": audit.get("degraded", False),
     }
 
 

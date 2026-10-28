@@ -21,6 +21,8 @@ def _stub_common(monkeypatch, tmp_path):
     monkeypatch.setattr(events, "RUNS_DIR", tmp_path / "runs")
     monkeypatch.setattr(llm, "SPEND_FILE", tmp_path / "spend.jsonl")
     monkeypatch.setattr(llm, "spent_today", lambda *a, **k: 0.0)
+    monkeypatch.setenv("MODEL_API_KEY", "unit-test-key-0123456789abcdef")
+    monkeypatch.setenv("BASETEN_API_KEY", "unit-test-key-0123456789abcdef")
     return seen
 
 
@@ -318,6 +320,88 @@ def test_bench_aborts_when_spend_cap_degrades_episode(tmp_path, monkeypatch,
     assert len(seen["ids"]) == 1
     err = capsys.readouterr().err
     assert "spend cap degraded" in err
+
+
+def _degraded_events():
+    return [{"actor": "red", "tool": "scan_host", "args": {},
+             "result": {"ok": True}, "evidence_refs": [],
+             "reasoning_summary": "Model call failed (boom), "
+             "using baseline. Baseline move: probe web.",
+             "degraded": True}]
+
+
+def test_bench_stops_without_recording_degraded_episode(tmp_path, monkeypatch,
+                                                        capsys):
+    seen = _stub_common(monkeypatch, tmp_path)
+    _stub_exercise(monkeypatch, seen, events_list=_degraded_events())
+    _stub_referee(monkeypatch, seen)
+    assert bench.main(["--name", "loud", "--red", "model-briefed",
+                       "--sensors", "on", "--memory", "off",
+                       "--episodes-per-cell", "2"]) == 2
+    assert len(seen["ids"]) == 1
+    assert "model fallback degraded" in capsys.readouterr().err
+    state = json.loads((tmp_path / "runs" / "bench-loud" / "summary.json")
+                       .read_text(encoding="utf-8"))
+    assert state["episodes"] == []
+    with (tmp_path / "runs" / "bench-loud" / "summary.csv").open(
+            encoding="utf-8") as handle:
+        assert list(csv.DictReader(handle)) == []
+
+
+def test_bench_allow_degraded_keeps_flagged_episode(tmp_path, monkeypatch,
+                                                    capsys):
+    seen = _stub_common(monkeypatch, tmp_path)
+    _stub_exercise(monkeypatch, seen, events_list=_degraded_events())
+    _stub_referee(monkeypatch, seen)
+    assert bench.main(["--name", "kept", "--red", "model-briefed",
+                       "--sensors", "on", "--memory", "off",
+                       "--episodes-per-cell", "2",
+                       "--allow-degraded"]) == 0
+    assert len(seen["ids"]) == 2
+    assert "--allow-degraded keeps it" in capsys.readouterr().err
+    state = json.loads((tmp_path / "runs" / "bench-kept" / "summary.json")
+                       .read_text(encoding="utf-8"))
+    assert [row["degraded"] for row in state["episodes"]] == [True, True]
+    with (tmp_path / "runs" / "bench-kept" / "summary.csv").open(
+            encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert [row["degraded"] for row in rows] == ["True", "True"]
+
+
+def test_bench_clean_episode_records_degraded_false(tmp_path, monkeypatch):
+    seen = _stub_common(monkeypatch, tmp_path)
+    _stub_exercise(monkeypatch, seen)
+    _stub_referee(monkeypatch, seen)
+    assert bench.main(["--name", "clean", "--red", "chain",
+                       "--sensors", "on", "--memory", "off",
+                       "--episodes-per-cell", "1"]) == 0
+    state = json.loads((tmp_path / "runs" / "bench-clean" / "summary.json")
+                       .read_text(encoding="utf-8"))
+    assert state["episodes"][0]["degraded"] is False
+
+
+def test_bench_model_bench_rejects_placeholder_key(tmp_path, monkeypatch,
+                                                   capsys):
+    _stub_common(monkeypatch, tmp_path)
+    monkeypatch.setenv("MODEL_API_KEY", "put-your-key-here")
+    assert bench.main(["--name", "key", "--red", "model-briefed",
+                       "--episodes-per-cell", "1"]) == 1
+    err = capsys.readouterr().err
+    assert "MODEL_API_KEY looks like a placeholder or is missing" in err
+    assert "put-your-key-here" not in err
+    assert not (tmp_path / "runs" / "bench-key").exists()
+
+
+def test_bench_scripted_only_needs_no_key(tmp_path, monkeypatch):
+    seen = _stub_common(monkeypatch, tmp_path)
+    monkeypatch.delenv("MODEL_API_KEY", raising=False)
+    _stub_exercise(monkeypatch, seen)
+    _stub_referee(monkeypatch, seen)
+    assert bench.main(["--name", "free", "--red", "chain",
+                       "--blue", "scripted", "--sensors", "on",
+                       "--memory", "off", "--audit", "off",
+                       "--episodes-per-cell", "1"]) == 0
+    assert len(seen["ids"]) == 1
 
 
 def test_bench_memory_on_reviews_per_cell(tmp_path, monkeypatch):

@@ -13,6 +13,7 @@ def _stubbed_run(monkeypatch, tmp_path):
     monkeypatch.setattr(run_exercise.tools, "restore_host",
                         lambda host: {"ok": True, "host": host})
     monkeypatch.setattr(run_exercise.tools, "reset_state", lambda: None)
+    monkeypatch.setenv("MODEL_API_KEY", "unit-test-key-0123456789abcdef")
 
     def fake_exercise(red, blue, max_turns=12, run_path=None, exercise_id=None, audit="off", sensors="on",
                       blue_reasoning_effort=None, auditor_use_cache=True):
@@ -269,3 +270,41 @@ def test_runner_strict_still_fails_on_spend_cap(tmp_path, monkeypatch, capsys):
     err = capsys.readouterr().err
     assert "WARNING" in err
     assert "$5.00 of $5.00" in err
+
+
+def test_runner_model_agents_reject_placeholder_key(tmp_path, monkeypatch,
+                                                    capsys):
+    _stubbed_run(monkeypatch, tmp_path)
+    monkeypatch.setenv("MODEL_API_KEY", "put-your-key-here")
+    assert run_exercise.main(["--agents", "model"]) == 1
+    err = capsys.readouterr().err
+    assert "MODEL_API_KEY looks like a placeholder or is missing" in err
+    assert "put-your-key-here" not in err
+
+
+def test_runner_scripted_audit_needs_key(tmp_path, monkeypatch, capsys):
+    _stubbed_run(monkeypatch, tmp_path)
+    monkeypatch.delenv("MODEL_API_KEY", raising=False)
+    assert run_exercise.main(["--agents", "scripted"]) == 1
+    assert "MODEL_API_KEY looks like a placeholder or is missing" in \
+        capsys.readouterr().err
+
+
+def test_runner_scripted_only_needs_no_key(tmp_path, monkeypatch, capsys):
+    seen = _stubbed_run(monkeypatch, tmp_path)
+    monkeypatch.delenv("MODEL_API_KEY", raising=False)
+    assert run_exercise.main(["--agents", "scripted", "--audit", "off"]) == 0
+    assert seen["red"] == ScriptedRed.__name__
+    assert seen["stopped"] is True
+    assert "agents=scripted" in capsys.readouterr().out
+
+
+def test_degraded_hit_detects_flag_on_event_and_result():
+    red = _evt("Model call failed (boom), using baseline.")
+    red["degraded"] = True
+    assert run_exercise._degraded_hit([red]) is True
+    audit = _evt("note")
+    audit["result"] = {"ok": True, "degraded": True}
+    assert run_exercise._degraded_hit([audit]) is True
+    assert run_exercise._degraded_hit([_evt("Probing first.")]) is False
+    assert run_exercise._degraded_hit([]) is False

@@ -345,6 +345,54 @@ def test_bad_model_json_uses_deterministic_fallback(tmp_path, monkeypatch):
     assert audit["estimated_cost_usd"] == 0.0
 
 
+def test_error_fallback_marks_degraded_and_warns_once_per_exercise(
+        tmp_path, monkeypatch, capsys):
+    _isolated_llm(tmp_path, monkeypatch)
+    client = _FakeClient(error=RuntimeError("401 unauthorized"))
+    priors = [_read_logs(1, "db", [("db:1", "signin ok user=a from=controller")])]
+    blue = _evt(2, "blue", "isolate_host", {"host": "db"}, {"ok": True},
+                "Isolating db.", ["db:1"])
+    check = check_evidence(blue, priors)
+    first = judge_with_model(blue, priors, check, exercise_id="ex-deg-audit",
+                             client=client)
+    assert first["degraded"] is True
+    assert first["model_used"] == "none"
+    second = judge_with_model(blue, priors, check, exercise_id="ex-deg-audit",
+                              client=client)
+    assert second["degraded"] is True
+    assert capsys.readouterr().err.count("WARNING") == 1
+    third = judge_with_model(blue, priors, check,
+                             exercise_id="ex-deg-audit-other", client=client)
+    assert third["degraded"] is True
+    err = capsys.readouterr().err
+    assert err.count("WARNING") == 1
+    assert "degraded" in err.lower()
+
+
+def test_audit_record_and_result_carry_degraded_flag(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    client = _FakeClient(error=RuntimeError("connection reset"))
+    priors = [_read_logs(1, "db", [("db:1", "signin ok user=a from=controller")])]
+    blue = _evt(2, "blue", "isolate_host", {"host": "db"}, {"ok": True},
+                "Isolating db.", ["db:1"])
+    audit = audit_blue_event(blue, priors, exercise_id="ex-deg-record",
+                             client=client)
+    assert audit["degraded"] is True
+    assert auditor.audit_result(audit)["degraded"] is True
+
+
+def test_clean_audit_record_is_not_degraded(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    client = _FakeClient(_response(_judgment("justified", 8, "Fits.")))
+    priors = [_read_logs(1, "db", [("db:1", "signin ok user=a from=controller")])]
+    blue = _evt(2, "blue", "isolate_host", {"host": "db"}, {"ok": True},
+                "Isolating db.", ["db:1"])
+    audit = audit_blue_event(blue, priors, exercise_id="ex-clean-audit",
+                             client=client)
+    assert audit["degraded"] is False
+    assert auditor.audit_result(audit)["degraded"] is False
+
+
 def test_parse_judgment_rejects_bad_values():
     assert parse_judgment("") is None
     assert parse_judgment("no json") is None
@@ -656,6 +704,7 @@ def test_run_exercise_passes_audit_mode(tmp_path, monkeypatch, capsys):
     from crucible import orchestrator, run_exercise, sandbox
 
     seen = {}
+    monkeypatch.setenv("MODEL_API_KEY", "unit-test-key-0123456789abcdef")
     monkeypatch.setattr(sandbox, "start", lambda: {"web": True})
     monkeypatch.setattr(sandbox, "stop", lambda: True)
     monkeypatch.setattr(run_exercise.tools, "restore_host",

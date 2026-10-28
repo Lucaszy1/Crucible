@@ -199,6 +199,7 @@ def _stub_bench(monkeypatch, tmp_path, seen):
     monkeypatch.setattr(events, "RUNS_DIR", tmp_path / "runs")
     monkeypatch.setattr(llm, "SPEND_FILE", tmp_path / "spend.jsonl")
     monkeypatch.setattr(llm, "spent_today", lambda *a, **k: 0.0)
+    monkeypatch.setenv("MODEL_API_KEY", "unit-test-key-0123456789abcdef")
     monkeypatch.setattr(stack_mod, "activate",
                         lambda key: {"scenario_id": "scn-t",
                                      "seed": 1, "difficulty": "easy"})
@@ -303,3 +304,31 @@ def test_turn_ceiling_sixty_with_forty_defaults():
     assert campaign.parse_args(
         ["--episodes", "1", "--name", "x",
          "--memory", "on"]).max_turns == 40
+
+
+def test_error_fallback_marks_degraded_and_warns_once(monkeypatch, capsys):
+    def _boom(*args, **kwargs):
+        raise RuntimeError("401 unauthorized")
+
+    monkeypatch.setattr(briefed_red.llm, "chat", _boom)
+    agent = briefed_red.ModelBriefedRed(exercise_id="ex-deg")
+    first = agent.next_action(1, [])
+    assert first["degraded"] is True
+    assert "using baseline" in first["reasoning"]
+    second = agent.next_action(1, [])
+    assert second["degraded"] is True
+    err = capsys.readouterr().err
+    assert err.count("WARNING") == 1
+    assert "degraded" in err.lower()
+
+
+def test_empty_reply_fallback_stays_unflagged(monkeypatch, capsys):
+    monkeypatch.setattr(
+        briefed_red.llm, "chat",
+        lambda *args, **kwargs: {"tool_calls": [], "content": "",
+                                 "finish_reason": "stop"})
+    agent = briefed_red.ModelBriefedRed(exercise_id="ex-soft")
+    action = agent.next_action(1, [])
+    assert "degraded" not in action
+    assert "using baseline" in action["reasoning"]
+    assert capsys.readouterr().err == ""

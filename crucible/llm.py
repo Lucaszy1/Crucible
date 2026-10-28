@@ -368,6 +368,37 @@ def _retryable(exc: BaseException) -> bool:
     return isinstance(http_status, int) and http_status in _RETRYABLE_STATUS
 
 
+# Substrings that mark a model key as a placeholder (matched
+# case-insensitively), plus the shortest length a real key plausibly
+# has. A placeholder key once sailed through startup and ran a whole
+# bench on scripted fallbacks, so anything matching these fails fast.
+KEY_PLACEHOLDER_MARKERS = ("placeholder", "your", "xxx", "changeme",
+                           "example")
+MIN_API_KEY_LENGTH = 16
+
+
+def key_problem(env_var: str = "MODEL_API_KEY") -> str | None:
+    """Return why a model key env var is unusable, or None when fine.
+
+    The message names only the variable, never the key itself.
+    """
+    value = os.environ.get(env_var, "") or ""
+    if not value.strip():
+        return f"{env_var} looks like a placeholder or is missing"
+    lowered = value.strip().lower()
+    if len(value.strip()) < MIN_API_KEY_LENGTH or any(
+            marker in lowered for marker in KEY_PLACEHOLDER_MARKERS):
+        return f"{env_var} looks like a placeholder or is missing"
+    return None
+
+
+def require_api_key(env_var: str = "MODEL_API_KEY") -> None:
+    """Raise RuntimeError when a model key env var is unusable."""
+    problem = key_problem(env_var)
+    if problem is not None:
+        raise RuntimeError(problem)
+
+
 def _default_client():
     """Build an OpenAI-compatible client for the Meta Model API."""
     _load_env_file(ROOT / ".env")

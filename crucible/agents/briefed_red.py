@@ -166,7 +166,8 @@ class ModelBriefedRed(red.ModelRed):
             )
         except Exception as exc:
             return self._fallback_action(
-                turn, history, f"Model call failed ({exc}), using baseline."
+                turn, history, f"Model call failed ({exc}), using baseline.",
+                degraded=True,
             )
         calls = (response or {}).get("tool_calls", []) or []
         if not calls:
