@@ -2912,27 +2912,40 @@ function paintStrike(refs, ctx, at, iq, s, red) {
   ctx.restore();
 }
 
-// A failed lance bursts against the shield: fragments rebound and
-// fall short. No ring marches on; the bar does not move.
+// A failed lance bursts against the shield: a white-hot contact
+// flash, a ripple racing over the shield, and dark debris
+// silhouettes rebounding clear of the glow. Debris paints opaque
+// dark crimson so it reads against the bright shield. No ring
+// marches on; the bar does not move.
 function paintShatter(refs, ctx, at, iq, s) {
-  const shard = fxTex(refs, "shard");
+  const sprites = refs.sprites || {};
+  paintFxRing(refs, ctx, { r0: 8 * s, r1: 70 * s, color: "255,255,255", dur: IMPACT_MS * 0.7 },
+    Math.min(1, iq * 1.6) * IMPACT_MS * 0.7, at);
+  if (iq < 0.55) {
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    drawGlow(ctx, sprites.white, at.x, at.y, 54 * s * (1 - iq), 0.9 * (1 - iq / 0.55));
+    ctx.restore();
+  }
   ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-  for (let i = 0; i < 4; i += 1) {
-    const a = Math.PI + (i - 1.5) * 0.5;
-    const d = iq * 90 * s;
+  for (let i = 0; i < 5; i += 1) {
+    const a = Math.PI + (i - 2) * 0.42;
+    const d = iq * 150 * s;
     const x = at.x + Math.cos(a) * d;
-    const y = at.y + Math.sin(a) * d * 0.6 + iq * iq * 40;
-    const w = 7 * s * (1 - iq * 0.6);
+    const y = at.y + Math.sin(a) * d * 0.6 + iq * iq * 48;
+    const w = 15 * s * (1 - iq * 0.45);
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(iq * 8 + i * 1.7);
-    ctx.globalAlpha = 0.9 * (1 - iq);
-    if (shard) ctx.drawImage(shard, -w * 1.5, -w * 1.5, w * 3, w * 3);
-    else {
-      ctx.fillStyle = "rgba(255,150,130,0.9)";
-      ctx.fillRect(-w / 2, -w / 4, w, w / 2);
-    }
+    ctx.globalAlpha = 0.95 * (1 - iq);
+    ctx.fillStyle = "#6e130d";
+    ctx.beginPath();
+    ctx.moveTo(w / 2, 0);
+    ctx.lineTo(-w * 0.3, -w * 0.28);
+    ctx.lineTo(-w * 0.1, 0);
+    ctx.lineTo(-w * 0.3, w * 0.28);
+    ctx.closePath();
+    ctx.fill();
     ctx.restore();
   }
   ctx.restore();
