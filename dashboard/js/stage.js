@@ -2658,8 +2658,23 @@ export function paintGuardian(ctx, env, x, y, r, energy, t) {
 
 // Transient event effects: rings, sparks, projectiles, callouts. Entries
 // resolve host positions at paint time so the camera carries them.
+// Flights paint above everything else in the effects layer:
+// the kinetic callout plate sits on the lane apex and used to
+// cover single lances mid-flight, leaving only their glow and
+// embers visible. Host marks, plates, and seals paint first,
+// then projectiles and finish rays over them, each pass keeping
+// its push order.
+const TOP_FX = new Set(["lance", "volley", "orb", "ray"]);
+
 function paintFx(refs, ctx) {
+  paintFxPass(refs, ctx, false);
+  paintFxPass(refs, ctx, true);
+  paintFxSparks(refs, ctx);
+}
+
+function paintFxPass(refs, ctx, top) {
   for (const fx of refs.fx) {
+    if (TOP_FX.has(fx.kind) !== top) continue;
     const age = refs.clock - fx.t0;
     if (age < 0 || age > fx.dur + 200) continue;
     const p = Math.max(0, Math.min(1, age / fx.dur));
@@ -2727,6 +2742,9 @@ function paintFx(refs, ctx) {
         break;
     }
   }
+}
+
+function paintFxSparks(refs, ctx) {
   if (refs.sparks.length > 0) {
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
@@ -3319,10 +3337,9 @@ function paintLance(refs, ctx, lane, q, s, index) {
   const wid = LANCE_WID * s;
   const laneLen = Math.max(1, Math.hypot(lane.x1 - lane.x0, lane.y1 - lane.y0));
   const span = trailSpan(len, laneLen);
+  // Additive halo first: streak and glow are light.
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
-  // Trail: hot streak back along the lane plus cooling dots,
-  // at least three body lengths behind the head.
   const tail = lanePoint(lane, Math.max(0, q - span));
   const streak = fxTex(refs, "streak");
   if (streak) {
@@ -3335,21 +3352,15 @@ function paintLance(refs, ctx, lane, q, s, index) {
     ctx.drawImage(streak, -tlen / 2, -wid, tlen, wid * 2);
     ctx.restore();
   }
-  for (let i = 1; i <= 5; i += 1) {
-    const dot = lanePoint(lane, Math.max(0, q - (i * span) / 5));
-    ctx.fillStyle = `rgba(255,60,40,${(0.95 - i * 0.12).toFixed(2)})`;
-    ctx.beginPath();
-    ctx.arc(dot.x, dot.y, Math.max(1.2, (6 - i) * s), 0, 6.283);
-    ctx.fill();
-  }
   drawGlow(ctx, sprites.lance || sprites.red, px, py, len * 1.2, 1);
-  const shard = fxTex(refs, "shard");
+  ctx.restore();
+  // Opaque body over the light: additive red over the bright
+  // backdrop can never go crimson (the backdrop's green stays),
+  // so the silhouette, embers, and core cover it for real.
+  ctx.save();
   ctx.translate(px, py);
   ctx.rotate(ang);
-  // Saturated crimson silhouette under the texture so the body
-  // reads red even where the generated shard runs pale; the
-  // texture stays dim so it cannot wash the body white.
-  ctx.fillStyle = "rgba(255,45,32,0.95)";
+  ctx.fillStyle = "#f52d1e";
   ctx.beginPath();
   ctx.moveTo(len / 2, 0);
   ctx.lineTo(-len * 0.3, -wid / 2);
@@ -3357,16 +3368,37 @@ function paintLance(refs, ctx, lane, q, s, index) {
   ctx.lineTo(-len * 0.3, wid / 2);
   ctx.closePath();
   ctx.fill();
-  if (shard) {
-    ctx.save();
-    ctx.globalAlpha = 0.4;
-    ctx.drawImage(shard, -len * 0.55, -wid * 1.6, len * 1.1, wid * 3.2);
-    ctx.restore();
+  // No shard texture on the opaque body: its dark surround used
+  // to vanish under additive blending, but covered the crimson
+  // with near-black once the body went opaque. A dark spine and
+  // code ticks keep the flat fill from reading blank.
+  ctx.strokeStyle = "#7d0f0a";
+  ctx.lineWidth = Math.max(1, 1.6 * s);
+  ctx.beginPath();
+  ctx.moveTo(len * 0.42, 0);
+  ctx.lineTo(-len * 0.26, 0);
+  ctx.stroke();
+  ctx.lineWidth = Math.max(1, 1.2 * s);
+  for (let i = 0; i < 3; i += 1) {
+    const tx = len * (0.28 - i * 0.16);
+    ctx.beginPath();
+    ctx.moveTo(tx, -wid * 0.22);
+    ctx.lineTo(tx, wid * 0.22);
+    ctx.stroke();
   }
-  ctx.fillStyle = "rgba(255,246,240,1)";
+  ctx.fillStyle = "#fff6f0";
   ctx.beginPath();
   ctx.arc(len * 0.22, 0, 4.5 * s, 0, 6.283);
   ctx.fill();
+  ctx.restore();
+  ctx.save();
+  ctx.fillStyle = "#f52d1e";
+  for (let i = 1; i <= 5; i += 1) {
+    const dot = lanePoint(lane, Math.max(0, q - (i * span) / 5));
+    ctx.beginPath();
+    ctx.arc(dot.x, dot.y, Math.max(1.2, (6 - i) * s), 0, 6.283);
+    ctx.fill();
+  }
   ctx.restore();
 }
 
@@ -3377,15 +3409,10 @@ function paintOrb(refs, ctx, lane, q, s) {
   const r = ORB_R * s;
   const laneLen = Math.max(1, Math.hypot(lane.x1 - lane.x0, lane.y1 - lane.y0));
   const span = trailSpan(r * 2, laneLen);
+  // Additive halo first, then the opaque body over it, mirroring
+  // the lance: light glows, the body covers.
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
-  for (let i = 1; i <= 5; i += 1) {
-    const dot = lanePoint(lane, Math.max(0, q - (i * span) / 5));
-    ctx.fillStyle = `rgba(80,190,255,${(0.85 - i * 0.12).toFixed(2)})`;
-    ctx.beginPath();
-    ctx.arc(dot.x, dot.y, Math.max(1, r * (1 - i * 0.14)), 0, 6.283);
-    ctx.fill();
-  }
   drawGlow(ctx, sprites.orb || sprites.cyan, head.x, head.y, r * 3.6, 1);
   const flare = fxTex(refs, "flare");
   if (flare) {
@@ -3394,7 +3421,9 @@ function paintOrb(refs, ctx, lane, q, s) {
     ctx.drawImage(flare, head.x - r * 1.8, head.y - r * 1.8, r * 3.6, r * 3.6);
     ctx.restore();
   }
-  ctx.fillStyle = "rgba(120,210,255,0.95)";
+  ctx.restore();
+  ctx.save();
+  ctx.fillStyle = "#5ac8ff";
   ctx.beginPath();
   ctx.arc(head.x, head.y, r * 0.85, 0, 6.283);
   ctx.fill();
@@ -3402,6 +3431,13 @@ function paintOrb(refs, ctx, lane, q, s) {
   ctx.beginPath();
   ctx.arc(head.x, head.y, r * 0.5, 0, 6.283);
   ctx.fill();
+  ctx.fillStyle = "#5ac8ff";
+  for (let i = 1; i <= 5; i += 1) {
+    const dot = lanePoint(lane, Math.max(0, q - (i * span) / 5));
+    ctx.beginPath();
+    ctx.arc(dot.x, dot.y, Math.max(1, r * (1 - i * 0.14)), 0, 6.283);
+    ctx.fill();
+  }
   ctx.restore();
 }
 
