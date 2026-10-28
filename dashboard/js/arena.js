@@ -194,7 +194,6 @@ export function initArena(canvas) {
       capText: el("arenaCapText"), capSub: el("arenaCapSub"),
       aud: el("arenaAud"), audNum: el("arenaAudNum"), audWord: el("arenaAudWord"),
       audCite: el("arenaAudCite"), audNote: el("arenaAudNote"),
-      readout: el("arenaReadout"),
     },
     geom: { cw: 0, ch: 0, dpr: 1, sc: 1, cx: 0, cy: 0 },
     dots: null,
@@ -1401,15 +1400,6 @@ function updateHud(refs) {
       void hud.cap.offsetWidth;
       hud.cap.classList.add("slam");
     }
-  }
-  if (hud.readout) {
-    const live = refs.transients.filter((t) => t.pts).length;
-    const lat = Math.round(refs.latencyEma);
-    const link = shown.pressure > 0.3 ? "CONTESTED" : shown.pressure < -0.3 ? "HELD" : "OPEN";
-    hud.readout.textContent =
-      `${snap.label || "EX"}  MOVE ${snap.moves}/${snap.total}\n` +
-      `PKT ${String(live).padStart(2, "0")}  LAT ${lat}MS\n` +
-      `LINK ${link}`;
   }
 }
 

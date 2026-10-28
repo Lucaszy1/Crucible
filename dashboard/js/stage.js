@@ -514,7 +514,6 @@ export function initStage(canvas, opts) {
       audWord: el("arenaAudWord"),
       audCite: el("arenaAudCite"),
       audNote: el("arenaAudNote"),
-      readout: el("arenaReadout"),
     },
     audTimer: 0,
   };
@@ -1138,14 +1137,6 @@ function updateStageHud(refs) {
     }
     if (hud.capText) hud.capText.textContent = snap.caption;
     if (hud.capSub) hud.capSub.textContent = snap.sub;
-  }
-  if (hud.readout) {
-    const shown = Number(refs.barShown) || 0;
-    const link = shown > 0.3 ? "CONTESTED" : shown < -0.3 ? "HELD" : "OPEN";
-    hud.readout.textContent =
-      `${snap.label || "EX"}  MOVE ${snap.moves}/${snap.totalMoves}\n` +
-      `LANES R${refs.lanes.red.length} B${refs.lanes.blue.length}\n` +
-      `LINK ${link}`;
   }
 }
 

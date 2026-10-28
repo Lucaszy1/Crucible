@@ -493,11 +493,6 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
     linear-gradient(var(--b),var(--b)) 100% 100%/30px 2px no-repeat,
     linear-gradient(var(--b),var(--b)) 100% 100%/2px 30px no-repeat;
 }
-#arenaReadout {
-  position: absolute; left: 26px; top: 14.5%;
-  font-size: 10px; font-weight: 700; line-height: 1.7; letter-spacing: .14em;
-  color: #6b7690; white-space: pre; pointer-events: none; text-transform: uppercase;
-}
 #arenaScan {
   position: absolute; inset: 0; pointer-events: none;
   background: repeating-linear-gradient(0deg, rgba(0,0,0,.2) 0 1px, transparent 1px 3px);
@@ -612,7 +607,6 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
   .arena-team small, .arena-meter-l { display: none; }
   .arena-team.red { clip-path: polygon(0 0,100% 0,calc(100% - 18px) 100%,0 100%); }
   .arena-team.blue { clip-path: polygon(18px 0,100% 0,100% 100%,0 100%); }
-  #arenaReadout { display: none; }
   #arenaCapTag { width: 76px; clip-path: polygon(0 0,100% 0,calc(100% - 14px) 100%,0 100%); }
 }
 @media (prefers-reduced-motion: reduce) {
