@@ -6,6 +6,7 @@ only check_episodes runs, against local summary and jsonl files.
 
 import csv
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -138,3 +139,63 @@ def test_within_bench_duplicate_ids_fail(tmp_path):
     stage3_checks.check_episodes(report, [bench])
     assert any("duplicate exercise id ep-0" in fail
                for fail in report.fails())
+
+
+def _write_spend(path: Path, entries: list) -> Path:
+    with path.open("w", encoding="utf-8") as handle:
+        for entry in entries:
+            handle.write(json.dumps(entry) + "\n")
+    return path
+
+
+def _finish(path: Path, name: str, when: float) -> None:
+    os.utime(path / f"{name}.jsonl", (when, when))
+
+
+def test_cached_entry_scoped_to_writing_bench(tmp_path, monkeypatch):
+    old = _write_bench(tmp_path / "bench-old", sensors="on", alerts=2,
+                       episodes=["shared"])
+    new = _write_bench(tmp_path / "bench-new", sensors="on", alerts=2,
+                       episodes=["shared"])
+    base = 1793000000.0
+    _finish(old, "shared", base)
+    _finish(new, "shared", base + 7200)
+    spend = _write_spend(tmp_path / "spend.jsonl", [
+        {"exercise_id": "shared", "cached": True,
+         "model": "muse-wonder-1.0", "ts": base + 7100}])
+    monkeypatch.setattr(stage3_checks, "SPEND_FILE", spend)
+    for order in ([old, new], [new, old]):
+        report = stage3_checks.Report()
+        stage3_checks.check_episodes(report, order)
+        assert report.fails() == ["shared: cached replay under --no-cache"]
+
+
+def test_older_bench_keeps_own_cached_entry(tmp_path, monkeypatch):
+    old = _write_bench(tmp_path / "bench-old", sensors="on", alerts=2,
+                       episodes=["shared"])
+    new = _write_bench(tmp_path / "bench-new", sensors="on", alerts=2,
+                       episodes=["shared"])
+    base = 1793000000.0
+    _finish(old, "shared", base)
+    _finish(new, "shared", base + 7200)
+    spend = _write_spend(tmp_path / "spend.jsonl", [
+        {"exercise_id": "shared", "cached": True,
+         "model": "muse-spark-1.3", "ts": base - 100}])
+    monkeypatch.setattr(stage3_checks, "SPEND_FILE", spend)
+    report = stage3_checks.Report()
+    stage3_checks.check_episodes(report, [old, new])
+    assert report.fails() == ["shared: cached replay under --no-cache"]
+
+
+def test_cached_entry_in_own_window_still_flags(tmp_path, monkeypatch):
+    bench = _write_bench(tmp_path / "bench-solo", sensors="on", alerts=2,
+                         episodes=["solo"])
+    base = 1793000000.0
+    _finish(bench, "solo", base)
+    spend = _write_spend(tmp_path / "spend.jsonl", [
+        {"exercise_id": "solo", "cached": True,
+         "model": "muse-spark-1.3", "ts": base - 100}])
+    monkeypatch.setattr(stage3_checks, "SPEND_FILE", spend)
+    report = stage3_checks.Report()
+    stage3_checks.check_episodes(report, [bench])
+    assert report.fails() == ["solo: cached replay under --no-cache"]

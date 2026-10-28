@@ -8,10 +8,11 @@ Checks that a finished run is evidence, not artifact:
   frozen playbook byte for byte (rules)
 - leak-grep: the frozen playbook contains no held-out scenario content
 - episodes: per-episode artifact scan (zero-cost model episodes, cached
-  replays under --no-cache, degraded or dirty episodes, audit gaps,
-  sensors-on benches with zero alerts across all episodes; the two
-  void benches are marked void by name instead of failing on silence,
-  and duplicate exercise ids fail only within one bench)
+  replays under --no-cache scoped per bench by episode log times,
+  degraded or dirty episodes, audit gaps, sensors-on benches with
+  zero alerts across all episodes; the two void benches are marked
+  void by name instead of failing on silence, and duplicate exercise
+  ids fail only within one bench)
 
 Exit 0 when every FAIL check passes (warnings allowed); exit 1 on any
 FAIL, or on warnings with --strict. Reads runs/, spend.jsonl, and the
@@ -51,6 +52,15 @@ VOID_ZERO_ALERT_BENCHES = frozenset({
     "bench-stage3-train-solver",
     "bench-stage3-heldout",
 })
+
+# Spend entries for one episode can land slightly after its jsonl
+# closes (the trailing referee review runs after the loop), but never
+# before the episode starts. 300 seconds clears any referee call (one
+# model call with bounded retries; no entry in the log lands later
+# than that past its newest same-id log) while staying far under the
+# hours between same-id episodes across benches (79 minutes minimum
+# on grouped ids), so reruns stop flagging each other.
+_SPEND_TAIL_S = 300
 
 FAIL = "FAIL"
 WARN = "WARN"
@@ -273,6 +283,50 @@ def _spend_index() -> dict:
     return index
 
 
+def _episode_mtime(bench_dir: Path, episode: str) -> float | None:
+    try:
+        return (bench_dir / f"{episode}.jsonl").stat().st_mtime
+    except OSError:
+        return None
+
+
+def _bench_entries(bench_dir: Path, episode: str, entries: list) -> list:
+    """Keep the spend entries plausibly written by this bench's run.
+
+    Reruns reuse exercise ids across benches, so a global lookup flags
+    one bench for another's cache hits. An entry belongs to this bench
+    when it predates this bench's episode log (plus a tail for the
+    trailing referee review) and postdates every older same-id log on
+    disk. Episodes without a log, and entries without a timestamp,
+    keep everything: missing logs fail elsewhere, and scoping must
+    never hide a real same-bench hit.
+    """
+    mine = _episode_mtime(bench_dir, episode)
+    if mine is None:
+        return list(entries)
+    try:
+        siblings = [path for path in bench_dir.parent.iterdir()
+                    if path.is_dir() and path != bench_dir]
+    except OSError:
+        siblings = []
+    floor = float("-inf")
+    for sibling in siblings:
+        other = _episode_mtime(sibling, episode)
+        if other is not None and other < mine:
+            floor = max(floor, other + _SPEND_TAIL_S)
+    kept = []
+    for entry in entries:
+        raw = entry.get("ts", None)
+        try:
+            when = float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            when = None
+        if when is None \
+                or (when <= mine + _SPEND_TAIL_S and when > floor):
+            kept.append(entry)
+    return kept
+
+
 def _spec_hosts(seed: int, difficulty: str) -> set:
     spec = generate.generate(seed, difficulty)
     return {host["name"] for host in spec.get("hosts", []) or []}
@@ -374,7 +428,8 @@ def check_episodes(report: Report, bench_dirs: list) -> None:
             if row.get("secret_read") == "True" \
                     and row.get("intrusion") != "True":
                 report.add(FAIL, f"{episode}: secret read without intrusion")
-            for entry in spend.get(episode, []):
+            for entry in _bench_entries(bench_dir, episode,
+                                         spend.get(episode, [])):
                 if entry.get("cached"):
                     report.add(FAIL, f"{episode}: cached replay under "
                                      "--no-cache")
