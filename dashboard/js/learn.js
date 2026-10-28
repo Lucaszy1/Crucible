@@ -1,128 +1,172 @@
-// Learning tab: campaign score chart plus playbook table.
-// Data helpers are pure (node-testable); renderLearn touches the DOM.
+// Learning tab: the Stage 3 memory experiment plus the frozen playbook.
+// Numbers arrive from /api/bench/stage3; stats and sentence helpers
+// are pure (node-testable) and renderLearning touches the DOM.
 
-const SVG_NS = "http://www.w3.org/2000/svg";
+function binom(n, k) {
+  const kk = Math.min(Math.max(0, k), n);
+  let num = 1;
+  for (let i = 0; i < kk; i += 1) num = (num * (n - i)) / (i + 1);
+  return num;
+}
 
-// Trailing rolling mean over the last `window` numeric values.
-export function rollingMean(values, window = 3) {
+// Exact two-sided McNemar p-value from discordant pair counts:
+// b pairs where memory-on won, c where memory-off won. With no
+// discordant pairs the arms agreed everywhere, so p = 1.
+export function mcnemarExact(b, c) {
+  const bb = Math.max(0, Math.floor(Number(b) || 0));
+  const cc = Math.max(0, Math.floor(Number(c) || 0));
+  const n = bb + cc;
+  if (n === 0) return 1;
+  let sum = 0;
+  for (let i = 0; i <= Math.min(bb, cc); i += 1) sum += binom(n, i);
+  return Math.min(1, 2 * sum * Math.pow(0.5, n));
+}
+
+export function formatP(p) {
+  if (!(p >= 0)) return "n/a";
+  if (p < 0.001) return "p < 0.001";
+  return `p = ${p.toFixed(3)}`;
+}
+
+export function formatPct(part, whole) {
+  if (!(whole > 0)) return "n/a";
+  return `${Math.round((part / whole) * 100)}%`;
+}
+
+const RULE_ACTIONS = [
+  [/isolate/i, "Isolate"],
+  [/patch/i, "Patch"],
+  [/restor/i, "Restore"],
+  [/report/i, "Report"],
+  [/monitor|watch|check/i, "Watch"],
+  [/wait|hold/i, "Hold"],
+];
+
+// Action chips derived from the rule's own verbs, in a fixed order.
+export function ruleActions(rule) {
+  const text = String(rule || "");
   const out = [];
-  const queue = [];
-  for (const value of values || []) {
-    if (typeof value === "number" && Number.isFinite(value)) queue.push(value);
-    const tail = queue.slice(-window);
-    out.push(tail.length > 0 ? tail.reduce((sum, v) => sum + v, 0) / tail.length : null);
+  for (const [re, label] of RULE_ACTIONS) {
+    if (re.test(text)) out.push(label);
   }
   return out;
 }
 
-// Normalize campaign episodes to sorted [episode_no, blue_score] pairs.
-export function seriesFor(detail) {
-  const rows = [];
-  for (const row of (detail && detail.episodes) || []) {
-    const rawX = row.episode_no;
-    const rawY = row.blue_score;
-    if (rawX === null || rawX === undefined || rawX === "") continue;
-    if (rawY === null || rawY === undefined || rawY === "") continue;
-    const x = Number(rawX);
-    const y = Number(rawY);
-    if (Number.isFinite(x) && Number.isFinite(y)) rows.push([x, y]);
+// One plain sentence for a memory on/off section, from its counts.
+export function stage3Line(section, label) {
+  const pairs = (section && section.pairs) || { n: 0 };
+  if (!(pairs.n > 0)) return `No paired ${label} runs to compare.`;
+  const agree = (pairs.contained.b + pairs.contained.c === 0) &&
+    (pairs.secret.b + pairs.secret.c === 0);
+  if (agree) {
+    return `Memory made no measurable difference with ${label}: ` +
+      `all ${pairs.n} paired runs agreed.`;
   }
-  return rows.sort((a, b) => a[0] - b[0]);
+  const { on, off } = section;
+  const pc = mcnemarExact(pairs.contained.b, pairs.contained.c);
+  const ps = mcnemarExact(pairs.secret.b, pairs.secret.c);
+  return `With ${label}, memory on contained ${on.contained} of ${on.n} runs ` +
+    `against ${off.contained} of ${off.n} without it ` +
+    `(${pairs.n} paired runs, ${formatP(pc)}); secret reads ` +
+    `${on.secretRead} against ${off.secretRead} (${formatP(ps)}).`;
 }
 
-function el(name, attrs, text) {
-  const node = document.createElementNS(SVG_NS, name);
-  for (const [key, value] of Object.entries(attrs || {})) node.setAttribute(key, value);
-  if (text !== undefined) node.textContent = text;
-  return node;
+function armRow(doc, name, cell, metric, noun) {
+  const row = doc.createElement("div");
+  row.className = `arm-row${metric === "secretRead" ? " secret" : ""}`;
+  const who = doc.createElement("span");
+  who.className = "arm-name";
+  who.textContent = name;
+  const bar = doc.createElement("div");
+  bar.className = "bar";
+  bar.setAttribute("role", "img");
+  const pct = cell.n > 0 ? Math.round((cell[metric] / cell.n) * 100) : 0;
+  bar.setAttribute("aria-label", `${name}: ${cell[metric]} of ${cell.n} ${noun}`);
+  const fill = doc.createElement("div");
+  fill.className = "bar-fill";
+  fill.style.width = `${cell.n > 0 ? pct : 0}%`;
+  bar.append(fill);
+  const num = doc.createElement("span");
+  num.className = "arm-num";
+  num.textContent = `${cell[metric]} of ${cell.n} ${noun}`;
+  row.append(who, bar, num);
+  return row;
 }
 
-const CHART = { width: 660, height: 280, left: 44, right: 16, top: 14, bottom: 30 };
-
-export function renderLearn(els, mem, ctl) {
-  const memSeries = seriesFor(mem);
-  const ctlSeries = seriesFor(ctl);
-  const svg = els.svg;
-  svg.innerHTML = "";
-  svg.setAttribute("viewBox", `0 0 ${CHART.width} ${CHART.height}`);
-  const maxX = Math.max(1, ...memSeries.map(([x]) => x), ...ctlSeries.map(([x]) => x));
-  const plotW = CHART.width - CHART.left - CHART.right;
-  const plotH = CHART.height - CHART.top - CHART.bottom;
-  const xPos = (v) => CHART.left + (maxX <= 1 ? plotW / 2 : ((v - 1) / (maxX - 1)) * plotW);
-  const yPos = (v) => CHART.top + (1 - Math.min(100, Math.max(0, v)) / 100) * plotH;
-
-  for (const grid of [0, 25, 50, 75, 100]) {
-    svg.append(el("line", {
-      x1: CHART.left, y1: yPos(grid),
-      x2: CHART.width - CHART.right, y2: yPos(grid),
-      class: "chart-grid",
-    }));
-    svg.append(el("text", { x: CHART.left - 8, y: yPos(grid) + 4, class: "chart-axis" }, String(grid)));
-  }
-  for (let n = 1; n <= maxX; n += 1) {
-    svg.append(el("text", { x: xPos(n), y: CHART.height - 10, class: "chart-axis chart-x" }, String(n)));
-  }
-
-  const draw = (series, cls, rollCls) => {
-    if (series.length === 0) return;
-    const pts = series.map(([x, y]) => `${xPos(x).toFixed(1)},${yPos(y).toFixed(1)}`).join(" ");
-    svg.append(el("polyline", { points: pts, class: cls }));
-    const means = rollingMean(series.map(([, y]) => y));
-    const roll = series.map(([x], i) => [x, means[i]]).filter(([, m]) => m !== null);
-    if (roll.length > 1) {
-      svg.append(el("polyline", {
-        points: roll.map(([x, m]) => `${xPos(x).toFixed(1)},${yPos(m).toFixed(1)}`).join(" "),
-        class: rollCls,
-      }));
-    }
-    for (const [x, y] of series) {
-      svg.append(el("circle", { cx: xPos(x), cy: yPos(y), r: 3.5, class: `${cls}-dot` }));
-    }
-  };
-  draw(memSeries, "chart-mem", "chart-mem-roll");
-  draw(ctlSeries, "chart-ctl", "chart-ctl-roll");
-
-  if (memSeries.length === 0 && ctlSeries.length === 0) {
-    const idle = el("text", {
-      x: CHART.width / 2, y: CHART.height / 2, class: "chart-empty",
-    }, "Pick two campaigns to compare.");
-    svg.append(idle);
-  }
-
-  els.legendMem.textContent = (mem && mem.name) || "memory";
-  els.legendCtl.textContent = (ctl && ctl.name) || "control";
-
-  const book = (mem && mem.playbook && mem.playbook.length > 0 ? mem.playbook : (ctl && ctl.playbook) || []);
-  els.table.innerHTML = "";
-  if (book.length === 0) {
-    els.empty.hidden = false;
+function renderSection(doc, root, section, title, tag, label) {
+  root.innerHTML = "";
+  if (!section) {
+    const idle = doc.createElement("p");
+    idle.className = "empty";
+    idle.textContent = `${title}: no runs on file.`;
+    root.append(idle);
     return;
   }
-  els.empty.hidden = true;
-  for (const entry of book) {
-    const row = document.createElement("tr");
-    const rule = document.createElement("td");
-    rule.textContent = entry.rule || "";
-    const from = document.createElement("td");
-    from.className = "episode-cell";
-    from.textContent = entry.episode || "";
-    row.append(rule, from);
-    els.table.append(row);
+  const head = doc.createElement("h3");
+  head.className = "stage3-head";
+  head.textContent = title;
+  if (tag) {
+    const chip = doc.createElement("span");
+    chip.className = "lobby-badge";
+    chip.textContent = tag;
+    head.append(doc.createTextNode(" "), chip);
   }
+  const src = doc.createElement("p");
+  src.className = "cost-sub";
+  src.textContent = section.source || "";
+  const wrap = doc.createElement("div");
+  wrap.className = "arm-group";
+  wrap.append(
+    armRow(doc, "Memory on", section.on, "contained", "contained"),
+    armRow(doc, "Memory off", section.off, "contained", "contained"),
+    armRow(doc, "Memory on", section.on, "secretRead", "secret reads"),
+    armRow(doc, "Memory off", section.off, "secretRead", "secret reads"),
+  );
+  const pairs = doc.createElement("p");
+  pairs.className = "pairs-line";
+  pairs.textContent = `${section.pairs.n} paired runs · containment ` +
+    `${formatP(mcnemarExact(section.pairs.contained.b, section.pairs.contained.c))} · ` +
+    `secret reads ${formatP(mcnemarExact(section.pairs.secret.b, section.pairs.secret.c))}`;
+  const line = doc.createElement("p");
+  line.className = "stage3-line";
+  line.textContent = stage3Line(section, label);
+  root.append(head, src, wrap, pairs, line);
 }
 
-export function fillCampaignSelects(select, campaigns, preferredMemory) {
-  select.innerHTML = "";
-  const blank = document.createElement("option");
-  blank.value = "";
-  blank.textContent = campaigns.length === 0 ? "No campaigns yet" : "Select…";
-  select.append(blank);
-  for (const item of campaigns) {
-    const opt = document.createElement("option");
-    opt.value = item.name;
-    opt.textContent = `${item.name} (${item.episodes} episodes, memory ${item.memory || "?"})`;
-    select.append(opt);
+export function renderLearning(els, data) {
+  const doc = els.doc || document;
+  els.empty.hidden = Boolean(data);
+  els.note.hidden = !data || !data.voidNote;
+  if (data && data.voidNote) els.note.textContent = data.voidNote;
+  renderSection(doc, els.on, data && data.sensorsOn, "Sensors on", "corrected rerun", "sensors on");
+  renderSection(doc, els.off, data && data.sensorsOff, "Sensors off", "valid half", "sensors off");
+  els.rules.innerHTML = "";
+  const book = (data && data.playbook && data.playbook.rules) || [];
+  els.source.textContent = data && data.playbook
+    ? `Frozen playbook · ${data.playbook.source}`
+    : "";
+  els.playEmpty.hidden = book.length > 0;
+  for (const entry of book) {
+    const item = doc.createElement("li");
+    item.className = "rule";
+    const text = doc.createElement("p");
+    text.className = "rule-text";
+    text.textContent = entry.rule || "";
+    const meta = doc.createElement("p");
+    meta.className = "rule-meta";
+    for (const action of ruleActions(entry.rule)) {
+      const chip = doc.createElement("span");
+      chip.className = "lobby-badge";
+      chip.textContent = action;
+      meta.append(chip, doc.createTextNode(" "));
+    }
+    if (entry.episode) {
+      const from = doc.createElement("span");
+      from.className = "rule-from";
+      from.textContent = `from ${entry.episode}`;
+      meta.append(from);
+    }
+    item.append(text, meta);
+    els.rules.append(item);
   }
-  const pick = campaigns.find((item) => item.memory === preferredMemory) || campaigns[0];
-  if (pick) select.value = pick.name;
 }

@@ -1,6 +1,6 @@
 // Operations Center bootstrap: lobby, arena show flow, tabs, themes.
-import { fetchAttackMap, fetchCampaign, fetchCampaigns, fetchConfig, fetchFeatured, fetchPreview, fetchRun, fetchRuns, fetchStatus, openLive, startExercise } from "./api.js";
-import { fillCampaignSelects, renderLearn } from "./learn.js";
+import { fetchAttackMap, fetchCampaign, fetchCampaigns, fetchConfig, fetchFeatured, fetchPreview, fetchRun, fetchRuns, fetchStage3, fetchStatus, openLive, startExercise } from "./api.js";
+import { renderLearning } from "./learn.js";
 import {
   acceptLiveTraffic, autoplayQueue, bootStale, displayOutcome, endCardStats, eventHost,
   finishSide, followOpensLive, motionReduced, motionSetting, outcomeLine,
@@ -125,12 +125,12 @@ const els = {
   storyView: document.getElementById("storyView"),
   detailsView: document.getElementById("detailsView"),
   learnView: document.getElementById("learnView"),
-  memSelect: document.getElementById("memSelect"),
-  ctlSelect: document.getElementById("ctlSelect"),
-  learnSvg: document.getElementById("learnSvg"),
-  legendMem: document.getElementById("legendMem"),
-  legendCtl: document.getElementById("legendCtl"),
-  playBody: document.getElementById("playBody"),
+  stage3Empty: document.getElementById("stage3Empty"),
+  stage3Void: document.getElementById("stage3Void"),
+  stage3On: document.getElementById("stage3On"),
+  stage3Off: document.getElementById("stage3Off"),
+  playSource: document.getElementById("playSource"),
+  playRules: document.getElementById("playRules"),
   playEmpty: document.getElementById("playEmpty"),
   themeBtn: document.getElementById("themeBtn"),
   presentBtn: document.getElementById("presentBtn"),
@@ -1104,29 +1104,20 @@ function switchTab(name) {
   setSceneActive(active === "arena");
 }
 
-async function drawLearning() {
-  try {
-    const [mem, ctl] = await Promise.all([
-      els.memSelect.value ? fetchCampaign(els.memSelect.value) : Promise.resolve(null),
-      els.ctlSelect.value ? fetchCampaign(els.ctlSelect.value) : Promise.resolve(null),
-    ]);
-    renderLearn(
-      { svg: els.learnSvg, legendMem: els.legendMem, legendCtl: els.legendCtl, table: els.playBody, empty: els.playEmpty },
-      mem, ctl,
-    );
-  } catch (err) {
-    notice(`Could not load campaigns: ${err.message}`, true);
-  }
-}
-
 async function loadLearning() {
   try {
-    const data = await fetchCampaigns();
-    fillCampaignSelects(els.memSelect, data.campaigns || [], "on");
-    fillCampaignSelects(els.ctlSelect, data.campaigns || [], "off");
-    await drawLearning();
+    const data = await fetchStage3();
+    renderLearning(
+      {
+        note: els.stage3Void, on: els.stage3On, off: els.stage3Off, empty: els.stage3Empty,
+        source: els.playSource, rules: els.playRules, playEmpty: els.playEmpty,
+      },
+      data,
+    );
   } catch (err) {
-    notice(`Could not list campaigns: ${err.message}`, true);
+    els.stage3Empty.hidden = false;
+    els.stage3Empty.textContent = "Stage 3 numbers are unavailable.";
+    notice(`Could not load Stage 3 numbers: ${err.message}`, true);
   }
 }
 
@@ -1383,8 +1374,6 @@ async function boot() {
   els.tabStory.addEventListener("click", () => switchTab("story"));
   els.tabDetails.addEventListener("click", () => switchTab("details"));
   els.tabLearn.addEventListener("click", () => switchTab("learn"));
-  els.memSelect.addEventListener("change", drawLearning);
-  els.ctlSelect.addEventListener("change", drawLearning);
   els.themeBtn.addEventListener("click", toggleTheme);
   els.presentBtn.addEventListener("click", togglePresent);
   els.liveBtn.addEventListener("click", () => onRunRequest(controls.agents.value));

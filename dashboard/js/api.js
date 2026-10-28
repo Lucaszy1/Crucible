@@ -42,6 +42,10 @@ export function fetchCampaign(name) {
   return getJson(`/api/campaigns/${encodeURIComponent(name)}`);
 }
 
+export function fetchStage3() {
+  return getJson("/api/bench/stage3");
+}
+
 export async function startExercise(agents, exerciseId, scenario) {
   const res = await fetch("/api/exercise/start", {
     method: "POST",

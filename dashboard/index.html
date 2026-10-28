@@ -327,32 +327,18 @@
 </div>
 
 <div id="learnView" hidden>
-  <section class="panel learn-pick" aria-label="Campaign comparison">
-    <h2>Learning curve</h2>
-    <div class="learn-controls">
-      <div class="control-group">
-        <label for="memSelect">Memory</label>
-        <select id="memSelect"><option value="">Loading campaigns…</option></select>
-      </div>
-      <div class="control-group">
-        <label for="ctlSelect">Control</label>
-        <select id="ctlSelect"><option value="">Loading campaigns…</option></select>
-      </div>
-      <div class="legend learn-legend">
-        <span><i class="sw" data-state="isolated"></i><span id="legendMem">memory</span></span>
-        <span><i class="sw" data-state="probed"></i><span id="legendCtl">control</span></span>
-        <span class="empty">solid per episode, dashed rolling mean</span>
-      </div>
-    </div>
-    <svg id="learnSvg" viewBox="0 0 660 280" role="img" aria-label="Blue score per episode"></svg>
+  <section class="panel" aria-label="Memory experiment">
+    <h2>Memory experiment (Stage 3)</h2>
+    <p id="stage3Empty" class="empty">Loading Stage 3 numbers…</p>
+    <p id="stage3Void" class="void-note" hidden></p>
+    <div id="stage3On" class="stage3-section"></div>
+    <div id="stage3Off" class="stage3-section"></div>
   </section>
-  <section class="panel" aria-label="Playbook">
-    <h2>Playbook</h2>
-    <p id="playEmpty" class="empty">Pick a memory campaign to see its rules.</p>
-    <table class="play-table" aria-label="Playbook rules">
-      <thead><tr><th>Rule</th><th>From</th></tr></thead>
-      <tbody id="playBody"></tbody>
-    </table>
+  <section class="panel" aria-label="Frozen playbook">
+    <h2>Frozen playbook</h2>
+    <p id="playSource" class="cost-sub"></p>
+    <p id="playEmpty" class="empty">No playbook on file.</p>
+    <ol id="playRules" class="play-rules"></ol>
   </section>
 </div>
 

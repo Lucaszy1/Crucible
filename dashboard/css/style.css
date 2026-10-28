@@ -357,26 +357,41 @@ select {
 
 /* Learning view */
 #learnView { padding: 16px 24px 28px; display: grid; gap: 20px; grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr); align-items: start; max-width: 1560px; margin: 0 auto; }
-.learn-controls { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; margin-bottom: 12px; }
-.learn-controls .control-group { display: flex; align-items: center; gap: 8px; }
-.learn-controls label { color: var(--muted); font-size: 13px; }
-.learn-legend { margin-top: 0; }
-#learnSvg { width: 100%; height: auto; display: block; }
-.chart-grid { stroke: var(--border); stroke-width: 1; }
-.chart-axis { fill: var(--muted); font-size: 11px; font-family: var(--sans); text-anchor: end; }
-.chart-axis.chart-x { text-anchor: middle; }
-.chart-empty { fill: var(--muted); font-size: 13px; text-anchor: middle; }
-.chart-mem { fill: none; stroke: var(--accent); stroke-width: 2; }
-.chart-mem-roll { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 5 4; opacity: 0.7; }
-.chart-mem-dot { fill: var(--accent); }
-.chart-ctl { fill: none; stroke: var(--amber); stroke-width: 2; }
-.chart-ctl-roll { fill: none; stroke: var(--amber); stroke-width: 1.5; stroke-dasharray: 5 4; opacity: 0.7; }
-.chart-ctl-dot { fill: var(--amber); }
-.play-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.play-table th { text-align: left; color: var(--muted); font-size: 12px; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--border); }
-.play-table td { padding: 6px 8px 6px 0; border-bottom: 1px solid var(--border); vertical-align: top; }
-.play-table tr:last-child td { border-bottom: none; }
-.episode-cell { color: var(--muted); white-space: nowrap; }
+.void-note {
+  border-left: 3px solid var(--amber); background: var(--amber-soft);
+  padding: 8px 12px; border-radius: 0 6px 6px 0; font-size: 13px; margin: 0 0 12px;
+}
+.stage3-section + .stage3-section { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+.stage3-head { font-size: 15px; margin: 0 0 2px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.arm-group { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.arm-row { display: grid; grid-template-columns: 92px minmax(60px, 1fr) auto; gap: 10px; align-items: center; }
+.arm-name { font-size: 13px; font-weight: 600; }
+.arm-num { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.arm-row .bar { height: 14px; border-radius: 7px; background: var(--border); overflow: hidden; }
+.arm-row .bar-fill { height: 100%; background: var(--accent); border-radius: 7px; }
+.arm-row.secret .bar-fill { background: var(--red); }
+.pairs-line { font-size: 13px; margin: 8px 0 4px; }
+.stage3-line { margin: 0; font-size: 13px; }
+.play-rules { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; counter-reset: rule; }
+.play-rules .rule { position: relative; padding-left: 30px; }
+.play-rules .rule::before {
+  counter-increment: rule; content: counter(rule);
+  position: absolute; left: 0; top: 1px;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--border); color: var(--text);
+  font-size: 12px; font-weight: 700; text-align: center; line-height: 20px;
+}
+.rule-text { margin: 0; font-size: 13px; }
+.rule-meta { margin: 4px 0 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.rule-from { font-size: 12px; color: var(--muted); }
+@media (max-width: 900px) {
+  #learnView { grid-template-columns: 1fr; }
+}
+@media (max-width: 480px) {
+  #learnView { padding: 12px 12px 20px; }
+  .arm-row { grid-template-columns: 78px minmax(40px, 1fr); }
+  .arm-num { grid-column: 2; }
+}
 
 /* Confirm dialog */
 .overlay {
