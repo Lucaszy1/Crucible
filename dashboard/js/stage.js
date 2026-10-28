@@ -446,6 +446,11 @@ export function initStage(canvas, opts) {
     fpsT: 0,
     blankFrames: 0,
     lastError: "",
+    blankRecoveries: 0,
+    recoveryNote: "",
+    lastProbe: 0,
+    lastRebuild: 0,
+    probeTick: 0,
     debugEl: null,
     debugInit: false,
     debugTick: 0,
@@ -498,6 +503,20 @@ export function initStage(canvas, opts) {
   if (typeof ResizeObserver === "function" && canvas) {
     refs.ro = new ResizeObserver(() => fitStage(refs));
     refs.ro.observe(canvas);
+  }
+  if (canvas && typeof canvas.addEventListener === "function") {
+    canvas.addEventListener("contextlost", (ev) => {
+      try {
+        if (ev && ev.preventDefault) ev.preventDefault();
+      } catch {
+        // Listener context only.
+      }
+      refs.contextLost = true;
+    });
+    canvas.addEventListener("contextrestored", () => {
+      refs.contextLost = false;
+      rebuildStage(refs, "context restored");
+    });
   }
   fitStage(refs);
   return refs;
@@ -1163,8 +1182,9 @@ function updateStageDebug(refs, force) {
   const p95 = frameP95(refs.samples || []);
   const avg = refs.frameAvg || 0;
   box.textContent = `stage ${refs.fps || 0}fps ${avg.toFixed(1)}ms p95 ${p95.toFixed(1)} ` +
-    `${refs.lowDetail ? "LOW" : "FULL"} blanks ${refs.blankFrames || 0}` +
-    (refs.lastError ? `\n! ${refs.lastError}` : "");
+    `${refs.lowDetail ? "LOW" : "FULL"} blanks ${refs.blankFrames || 0} rec ${refs.blankRecoveries || 0}` +
+    (refs.lastError ? `\n! ${refs.lastError}` : "") +
+    (refs.recoveryNote ? `\n! recovered: ${refs.recoveryNote}` : "");
 }
 
 // Event-to-effects map, pure: each real event names the beams it
@@ -1321,6 +1341,7 @@ function startStageLoop(refs) {
     if (refs.sparks.length > 0) refs.sparks = refs.sparks.filter((s) => s.life > 0);
     if (refs.fx.length > 0) refs.fx = refs.fx.filter((f) => refs.clock - f.t0 < f.dur + 200);
     drawStage(refs);
+    maybeProbeBlank(refs);
   };
   refs.raf = frames(tick);
 }
@@ -1415,6 +1436,56 @@ function notePaintError(refs, err) {
   const msg = err && err.message ? err.message : String(err);
   refs.lastError = String(msg).slice(0, 160);
   updateStageDebug(refs, true);
+}
+
+// Full rebuild after a blank probe or a lost context: drop every
+// cached surface and repaint from scratch.
+function rebuildStage(refs, why) {
+  if (!refs || !refs.stage) return;
+  refs.cache = {};
+  refs.frame = null;
+  refs.frameCtx = null;
+  refs.lastRebuild = refs.clock;
+  refs.blankRecoveries = (refs.blankRecoveries || 0) + 1;
+  refs.recoveryNote = String(why || "rebuild").slice(0, 80);
+  drawStage(refs);
+  updateStageDebug(refs, true);
+}
+
+// Expected-content probe: sample pixels where bright content must be
+// (entity cores, lane accents). True when every sample reads as the
+// empty background, meaning the presented frame went blank.
+export function probeStageContent(refs) {
+  const ctx = refs && refs.ctx;
+  const stage = refs && refs.stage;
+  if (!ctx || !stage || stage.mode !== "side") return false;
+  const { cw, ch, dpr } = refs.geom;
+  if (!cw || !ch) return false;
+  const pts = [
+    [stage.entities.intrusion.x, stage.entities.intrusion.y],
+    [stage.entities.guardian.x, stage.entities.guardian.y],
+    [stage.lanes.red.x + 2, stage.lanes.red.y + stage.lanes.red.h / 2],
+    [stage.lanes.blue.x + stage.lanes.blue.w - 2, stage.lanes.blue.y + stage.lanes.blue.h / 2],
+  ];
+  try {
+    for (const [x, y] of pts) {
+      const px = Math.max(0, Math.min(cw * dpr - 1, Math.round(x * dpr)));
+      const py = Math.max(0, Math.min(ch * dpr - 1, Math.round(y * dpr)));
+      const cell = ctx.getImageData(px, py, 1, 1).data;
+      // Empty background is INK (10, 12, 16); any lit pixel passes.
+      if (cell[0] > 28 || cell[1] > 28 || cell[2] > 34) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function maybeProbeBlank(refs) {
+  refs.probeTick = (refs.probeTick || 0) + 1;
+  if (refs.probeTick % 20 !== 0) return;
+  if (refs.clock - (refs.lastRebuild || 0) < 2000) return;
+  if (probeStageContent(refs)) rebuildStage(refs, "blank probe");
 }
 
 function paintFrame(refs, ctx) {

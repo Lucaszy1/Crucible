@@ -236,6 +236,14 @@ function setSceneActive(onArena) {
   if (stageRefs) setStageActive(stageRefs, !store.classic && onArena);
 }
 
+// Browsers may discard the canvas while hidden or between repaints;
+// on any return to the page, restart the loop and paint at once.
+function reviveScene() {
+  const onArena = !els.arenaView.hidden;
+  setSceneActive(onArena);
+  if (onArena) render(false);
+}
+
 function applyClassic(on) {
   store.classic = Boolean(on);
   saveBool("crucible-classic", store.classic);
@@ -1187,6 +1195,12 @@ async function boot() {
   els.arenaScrubber.addEventListener("input", () => jump(Number(els.arenaScrubber.value)));
   els.soundBtn.addEventListener("click", toggleSound);
   document.addEventListener("keydown", onShortcut);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) reviveScene();
+  });
+  window.addEventListener("focus", reviveScene);
+  window.addEventListener("pageshow", reviveScene);
+  window.addEventListener("resize", () => setSceneActive(!els.arenaView.hidden));
   switchTab("lobby");
   render(false);
   const params = new URLSearchParams(window.location.search);
