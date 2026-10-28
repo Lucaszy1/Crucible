@@ -9,7 +9,9 @@ Checks that a finished run is evidence, not artifact:
 - leak-grep: the frozen playbook contains no held-out scenario content
 - episodes: per-episode artifact scan (zero-cost model episodes, cached
   replays under --no-cache, degraded or dirty episodes, audit gaps,
-  sensors-on benches with zero alerts across all episodes)
+  sensors-on benches with zero alerts across all episodes; the two
+  void benches are marked void by name instead of failing on silence,
+  and duplicate exercise ids fail only within one bench)
 
 Exit 0 when every FAIL check passes (warnings allowed); exit 1 on any
 FAIL, or on warnings with --strict. Reads runs/, spend.jsonl, and the
@@ -38,6 +40,17 @@ FROZEN_JSON = STAGE3_DIR / "frozen-playbook.json"
 FROZEN_SHA = STAGE3_DIR / "frozen-playbook.sha256"
 SPEND_FILE = ROOT / "runs" / "spend.jsonl"
 DIFFICULTIES = ("easy", "medium", "hard")
+
+# Benches whose sensors-on silence is the documented collector bug,
+# not evidence: sensors read the classic host list on generated nets,
+# so every lookup missed (fixed in c9dd960; rerun as
+# bench-stage3-heldout-sensors). Zero-alert findings on these two are
+# marked void by name instead of failing; every other check still
+# applies to them, and silence still fails everywhere else.
+VOID_ZERO_ALERT_BENCHES = frozenset({
+    "bench-stage3-train-solver",
+    "bench-stage3-heldout",
+})
 
 FAIL = "FAIL"
 WARN = "WARN"
@@ -289,9 +302,14 @@ def _owed_alerts(events: list) -> bool:
 
 
 def check_episodes(report: Report, bench_dirs: list) -> None:
-    """Scan every episode for replay, cost, hygiene, and audit gaps."""
+    """Scan every episode for replay, cost, hygiene, and audit gaps.
+
+    Duplicate exercise ids fail only within one bench: reruns and
+    the cross-check intentionally reuse episode ids across benches
+    (same scenario, cell, and rep), so cross-bench reuse is not a
+    finding. Within-bench duplicates still fail everywhere.
+    """
     spend = _spend_index()
-    seen_ids: dict = {}
     for bench_dir in bench_dirs:
         try:
             summary = _bench_summary(bench_dir)
@@ -299,6 +317,8 @@ def check_episodes(report: Report, bench_dirs: list) -> None:
         except FileNotFoundError as exc:
             report.add(FAIL, str(exc))
             continue
+        seen_ids: set = set()
+        void_silence = bench_dir.name in VOID_ZERO_ALERT_BENCHES
         audit_cells = summary.get("audit_cells")
         audit_mode = summary.get("audit")
         unreached: dict = {}
@@ -309,9 +329,9 @@ def check_episodes(report: Report, bench_dirs: list) -> None:
             episode = row.get("episode", "")
             if episode in seen_ids:
                 report.add(FAIL, f"duplicate exercise id {episode} "
-                                 f"({seen_ids[episode]} and {bench_dir.name})")
+                                 f"(twice in {bench_dir.name})")
             else:
-                seen_ids[episode] = bench_dir.name
+                seen_ids.add(episode)
             try:
                 cost = float(row.get("cost", 0.0) or 0.0)
             except ValueError:
@@ -343,8 +363,9 @@ def check_episodes(report: Report, bench_dirs: list) -> None:
                 alert_total += shown
                 if not shown and _owed_alerts(events):
                     silent_owed.append(episode)
-                    report.add(FAIL, f"{episode}: sensors-on intrusion "
-                                     f"showed zero sensor alerts")
+                    if not void_silence:
+                        report.add(FAIL, f"{episode}: sensors-on intrusion "
+                                         f"showed zero sensor alerts")
             for event in events:
                 note = str(event.get("reasoning_summary", "") or "")
                 if "daily model spend cap reached" in note:
@@ -402,9 +423,15 @@ def check_episodes(report: Report, bench_dirs: list) -> None:
                              + ("..." if len(names) > 6 else ""))
         if silent_owed:
             noun = "episode" if len(silent_owed) == 1 else "episodes"
-            report.add(FAIL, f"{bench_dir.name}: {len(silent_owed)} "
-                             f"sensors-on {noun} with intrusions showed "
-                             f"zero sensor alerts: sensors never fired")
+            if void_silence:
+                report.add(OK, f"{bench_dir.name}: void by name: "
+                               f"{len(silent_owed)} sensors-on {noun} with "
+                               f"zero sensor alerts not failed (documented "
+                               f"sensor bug, fixed in c9dd960)")
+            else:
+                report.add(FAIL, f"{bench_dir.name}: {len(silent_owed)} "
+                                 f"sensors-on {noun} with intrusions showed "
+                                 f"zero sensor alerts: sensors never fired")
         elif sensors_on_eps:
             report.add(OK, f"{bench_dir.name}: {alert_total} sensor "
                            f"alerts across {sensors_on_eps} sensors-on "
