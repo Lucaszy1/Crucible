@@ -1,7 +1,7 @@
 // Thought truncation: sentence, word, short, and single-token cases.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { THOUGHT_MAX_CHARS, thoughtText, truncateThought } from "../dashboard/js/thoughts.js";
+import { THOUGHT_MAX_CHARS, holdMsForSpeed, thoughtText, truncateThought } from "../dashboard/js/thoughts.js";
 
 describe("truncateThought", () => {
   it("leaves short text unchanged", () => {
@@ -94,5 +94,19 @@ describe("thoughtText", () => {
   it("falls back to the event sentence when empty", () => {
     const ev = { actor: "blue", tool: "wait", args: {}, result: { ok: true } };
     assert.equal(thoughtText(ev, "blue"), "Blue waited this round.");
+  });
+});
+
+describe("holdMsForSpeed", () => {
+  it("holds bubbles longer when slow, shorter when fast", () => {
+    const normal = holdMsForSpeed(1);
+    assert.equal(holdMsForSpeed(0.5), normal * 2);
+    assert.equal(holdMsForSpeed(2), normal / 2);
+    assert.equal(holdMsForSpeed(4), normal / 4);
+  });
+
+  it("defaults to the normal hold without a speed", () => {
+    assert.equal(holdMsForSpeed(undefined), holdMsForSpeed(1));
+    assert.equal(holdMsForSpeed(0), holdMsForSpeed(1));
   });
 });

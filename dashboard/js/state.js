@@ -684,6 +684,18 @@ export function endCardStats(eventList, score, weights) {
 
 // Stored motion setting: auto follows the OS, full and reduced pin
 // the path. Anything unreadable falls back to auto.
+// Playback speeds for the stage strip and the Settings entry:
+// half, normal, double, quadruple. stepSpeed moves one notch,
+// clamping at both ends; an unknown speed steps from normal.
+export const SPEEDS = [0.5, 1, 2, 4];
+
+export function stepSpeed(current, dir) {
+  const at = SPEEDS.indexOf(Number(current));
+  const base = at < 0 ? SPEEDS.indexOf(1) : at;
+  const next = Math.max(0, Math.min(SPEEDS.length - 1, base + (dir > 0 ? 1 : -1)));
+  return SPEEDS[next];
+}
+
 export function motionSetting() {
   try {
     if (typeof window !== "undefined" && window.localStorage) {

@@ -8,6 +8,16 @@ const CLASSIC_REF_ID = /^(web|app|db|workstation):\d+$/;
 const TYPE_MS = 12;
 const TYPE_BUDGET_MS = 2600;
 
+// Thought hold time scales with playback speed: at half speed
+// the text stays up twice as long, at double speed half as long.
+// Missing or bad speeds hold the normal budget. Reduced motion
+// skips typing outright, so speed never changes that path.
+export function holdMsForSpeed(speed) {
+  const value = Number(speed);
+  if (!Number.isFinite(value) || value <= 0) return TYPE_BUDGET_MS;
+  return Math.round(TYPE_BUDGET_MS / value);
+}
+
 // Margin budget: longer thoughts truncate (sentence, else word)
 // and open full in the expander.
 export const THOUGHT_MAX_CHARS = 220;
@@ -79,7 +89,7 @@ function thoughtRefs(ev, hosts) {
   return ev.evidence_refs.filter((ref) => pattern.test(String(ref))).slice(0, 5);
 }
 
-function typeInto(textEl, text, reduced, state) {
+function typeInto(textEl, text, reduced, state, speed) {
   if (state.timer) {
     clearInterval(state.timer);
     state.timer = 0;
@@ -88,7 +98,8 @@ function typeInto(textEl, text, reduced, state) {
     textEl.textContent = text;
     return;
   }
-  const step = Math.max(1, Math.ceil(text.length / (TYPE_BUDGET_MS / TYPE_MS)));
+  const budget = holdMsForSpeed(speed);
+  const step = Math.max(1, Math.ceil(text.length / (budget / TYPE_MS)));
   let at = 0;
   textEl.textContent = "";
   state.timer = setInterval(() => {
@@ -133,7 +144,7 @@ function renderPanel(panel, slice, actor, opts, state) {
   panel.text.dataset.full = full;
   panel.root.classList.toggle("cut", shown.cut);
   wireExpander(panel, state, opts);
-  typeInto(panel.text, shown.text, opts.reduced, state);
+  typeInto(panel.text, shown.text, opts.reduced, state, opts.speed);
 }
 
 // One open expander at a time across both panels.

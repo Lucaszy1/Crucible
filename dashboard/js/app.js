@@ -4,7 +4,7 @@ import { renderLearning } from "./learn.js";
 import {
   acceptLiveTraffic, autoplayQueue, bootStale, bootTimedOut, displayOutcome, endCardStats, eventHost,
   errorRetryTarget, finishSide, followOpensLive, motionReduced, motionSetting, normalizeActor, outcomeLine,
-  phaseLabel, rankFeatured, reduceHostStates, runFlags, scoreEvents, streamDead,
+  phaseLabel, rankFeatured, reduceHostStates, runFlags, scoreEvents, SPEEDS, stepSpeed, streamDead,
 } from "./state.js";
 import { describeEvent, keyMoments, statusSentence } from "./story.js";
 import { jumpTarget, renderDebrief } from "./debrief.js";
@@ -158,6 +158,7 @@ const controls = {
   agents: document.getElementById("agentsSelect"),
   run: document.getElementById("runBtn"),
   speedSeg: document.getElementById("speedSeg"),
+  speedStrip: document.getElementById("speedStrip"),
   paceSeg: document.getElementById("paceSeg"),
   motionSeg: document.getElementById("motionSeg"),
   light: document.getElementById("serverLight"),
@@ -329,6 +330,7 @@ function setMode(mode, label) {
   els.mode.textContent = mode === "live" ? "Live" : mode === "replay" ? "Replay" : mode === "booting" ? "Starting" : "Idle";
   if (label) store.label = label;
   els.title.textContent = store.label;
+  if (els.speedStrip) els.speedStrip.hidden = mode !== "replay" && mode !== "live";
 }
 
 function latestLaneEvent(slice) {
@@ -434,6 +436,7 @@ function render(animate) {
     (pos) => jump(pos), store.mode !== "replay");
   store.thoughtState = renderThoughts(thoughtPanels(), slice, {
     reduced: reducedMotion(),
+    speed: store.speed,
     hosts,
     onFlash: (host) => {
       const flashView = sceneView();
@@ -1439,6 +1442,16 @@ function onShortcut(ev) {
     toggleSound();
     return;
   }
+  if (ev.key === "[") {
+    ev.preventDefault();
+    applySpeed(stepSpeed(store.speed, -1));
+    return;
+  }
+  if (ev.key === "]") {
+    ev.preventDefault();
+    applySpeed(stepSpeed(store.speed, 1));
+    return;
+  }
   if (store.mode !== "replay" || store.events.length === 0) return;
   if (ev.code === "Space") {
     ev.preventDefault();
@@ -1459,12 +1472,31 @@ function applySpeed(speed) {
   const value = Number(speed);
   if (!Number.isFinite(value) || value <= 0) return;
   store.speed = Math.min(16, value);
-  controls.speedSeg.querySelectorAll("button").forEach((btn) => {
-    const on = Number(btn.dataset.speed) === store.speed;
-    btn.classList.toggle("active", on);
-    btn.setAttribute("aria-pressed", String(on));
-  });
+  // Playback keeps running: the timer restarts at the new speed
+  // and the next render picks up the scaled thought hold.
+  for (const group of [controls.speedSeg, els.speedStrip]) {
+    if (!group) continue;
+    group.querySelectorAll("button").forEach((btn) => {
+      const on = Number(btn.dataset.speed) === store.speed;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-pressed", String(on));
+    });
+  }
+  try {
+    window.sessionStorage.setItem("crucible.speed", String(store.speed));
+  } catch {
+    // Private browsing: the speed simply does not persist.
+  }
   if (store.playing) playReplay();
+}
+
+function restoreSessionSpeed() {
+  try {
+    const saved = Number(window.sessionStorage.getItem("crucible.speed"));
+    if (SPEEDS.includes(saved)) applySpeed(saved);
+  } catch {
+    // Private browsing: start at normal speed.
+  }
 }
 
 // Finish pace: Quick shortens the ending to a social-clip beat,
@@ -1655,6 +1687,12 @@ async function boot() {
   const params = new URLSearchParams(window.location.search);
   const speed = params.get("speed");
   if (speed) applySpeed(speed);
+  else restoreSessionSpeed();
+  if (els.speedStrip) {
+    els.speedStrip.querySelectorAll("button").forEach((btn) => {
+      btn.addEventListener("click", () => applySpeed(btn.dataset.speed));
+    });
+  }
   const livePath = params.get("live");
   const wanted = params.get("run");
   const view = params.get("view");

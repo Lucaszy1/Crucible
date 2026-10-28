@@ -333,7 +333,13 @@ def test_debrief_endpoint_rejects_unknown_and_empty(client):
     assert client.get("/api/runs/empty/debrief").status_code == 422
 
 
-def test_debrief_endpoint_rewrite_falls_back_without_key(client, monkeypatch):
+def test_debrief_endpoint_rewrite_falls_back_without_key(
+        client, monkeypatch, tmp_path):
     monkeypatch.delenv("MODEL_API_KEY", raising=False)
+    # The client builder reloads .env, which would defeat the delenv
+    # above whenever the file holds a key; neutralize the reload and
+    # isolate the cache so the fallback is hermetic either way.
+    monkeypatch.setattr(llm, "_load_env_file", lambda path: False)
+    monkeypatch.setattr(llm, "CACHE_DIR", tmp_path / "cache")
     body = client.get("/api/runs/sample/debrief?rewrite=1").json()
     assert body["debrief"]["layer"] == 1

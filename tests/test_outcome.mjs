@@ -24,6 +24,8 @@ import {
   phaseLabel,
   rankFeatured,
   runFlags,
+  SPEEDS,
+  stepSpeed,
   streamDead,
 } from "../dashboard/js/state.js";
 import { stripModel } from "../dashboard/js/timeline.js";
@@ -214,6 +216,29 @@ describe("runFlags", () => {
         { reasoning_summary: "Early recon on web, checking likely next targets for probing." }),
     ];
     assert.deepEqual(runFlags("day3b-1", model), []);
+  });
+});
+
+describe("stepSpeed", () => {
+  it("offers four playback speeds", () => {
+    assert.deepEqual(SPEEDS, [0.5, 1, 2, 4]);
+  });
+
+  it("steps up and down one notch", () => {
+    assert.equal(stepSpeed(1, 1), 2);
+    assert.equal(stepSpeed(2, 1), 4);
+    assert.equal(stepSpeed(1, -1), 0.5);
+    assert.equal(stepSpeed(2, -1), 1);
+  });
+
+  it("clamps at both ends", () => {
+    assert.equal(stepSpeed(4, 1), 4);
+    assert.equal(stepSpeed(0.5, -1), 0.5);
+  });
+
+  it("treats an unknown speed as normal first", () => {
+    assert.equal(stepSpeed(3, 1), 2);
+    assert.equal(stepSpeed(3, -1), 0.5);
   });
 });
 
