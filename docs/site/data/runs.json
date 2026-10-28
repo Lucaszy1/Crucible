@@ -12,36 +12,36 @@
       "unsupported_count": 4
     },
     {
-      "blue_score": 0,
-      "events": 26,
-      "id": "static-hard-exposed",
+      "blue_score": 100.0,
+      "events": 61,
+      "id": "briefed-medium-contained",
       "invalid_refs_count": 0,
-      "justified_pct": 87.5,
-      "mean_audit_score": 7.12,
+      "justified_pct": null,
+      "mean_audit_score": null,
+      "mtime": "2026-10-28T12:00:00+00:00",
+      "outcome": "blue_held",
+      "unsupported_count": 0
+    },
+    {
+      "blue_score": 100.0,
+      "events": 54,
+      "id": "heldout-hard-contained",
+      "invalid_refs_count": 2,
+      "justified_pct": 85.0,
+      "mean_audit_score": 5.4,
+      "mtime": "2026-10-28T12:00:00+00:00",
+      "outcome": "blue_held",
+      "unsupported_count": 2
+    },
+    {
+      "blue_score": 0,
+      "events": 24,
+      "id": "sensorsoff-hard-exposed",
+      "invalid_refs_count": 0,
+      "justified_pct": null,
+      "mean_audit_score": null,
       "mtime": "2026-10-28T12:00:00+00:00",
       "outcome": "red_succeeded",
-      "unsupported_count": 1
-    },
-    {
-      "blue_score": 100.0,
-      "events": 20,
-      "id": "briefed-red-contained",
-      "invalid_refs_count": 0,
-      "justified_pct": 83.33,
-      "mean_audit_score": 7.5,
-      "mtime": "2026-10-28T12:00:00+00:00",
-      "outcome": "blue_held",
-      "unsupported_count": 1
-    },
-    {
-      "blue_score": 100.0,
-      "events": 14,
-      "id": "static-held-quick",
-      "invalid_refs_count": 0,
-      "justified_pct": 100.0,
-      "mean_audit_score": 8.0,
-      "mtime": "2026-10-28T12:00:00+00:00",
-      "outcome": "blue_held",
       "unsupported_count": 0
     }
   ]

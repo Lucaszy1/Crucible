@@ -820,7 +820,10 @@ async function fetchRun(runId) {
   const replay = (embedded().replays || {})[runId];
   if (!replay) throw new Error(`unknown run ${JSON.stringify(runId)}`);
   const events = (replay.events || []).map((ev) => normalizeActor(ev));
-  return { id: replay.id, events, score: replay.score || null };
+  return {
+    id: replay.id, events, score: replay.score || null,
+    provenance: replay.provenance || null,
+  };
 }
 
 function fetchStage3() {
@@ -8192,6 +8195,23 @@ function playButton(id, label, callbacks) {
   return play;
 }
 
+// One provenance line per card in the static bundle: a Real run
+// chip plus the source bench, episode, and seed. Live cards carry
+// no provenance and render exactly as before.
+function provenanceLine(model) {
+  const prov = model && model.provenance;
+  if (!prov || !prov.bench || !prov.episode) return null;
+  const line = document.createElement("p");
+  line.className = "lobby-meta lobby-prov";
+  const chip = document.createElement("span");
+  chip.className = "lobby-badge";
+  chip.textContent = "Real run";
+  const text = `${prov.bench} / ${prov.episode}, seed ${prov.seed ?? "?"}`;
+  line.append(chip, document.createTextNode(` ${text}`));
+  line.title = `Real run: ${text}`;
+  return line;
+}
+
 // Large featured card: thumbnail, outcome badge, story, duration.
 function featureCard(model, callbacks, env) {
   const el = document.createElement("article");
@@ -8228,6 +8248,8 @@ function featureCard(model, callbacks, env) {
   foot.className = "feature-foot";
   foot.append(playButton(model.id, "Watch", callbacks));
   body.append(head, story, meta);
+  const provLine = provenanceLine(model);
+  if (provLine) body.append(provLine);
   if (model.flags && model.flags.length > 0) body.append(badgesRow(model.flags));
   body.append(foot);
   el.append(thumb, body);
@@ -8299,6 +8321,8 @@ function archiveCard(model, callbacks, env) {
     upgrade();
   }
   el.append(head, meta);
+  const provLine = provenanceLine(model);
+  if (provLine) el.append(provLine);
   if (model.flags && model.flags.length > 0) el.append(badgesRow(model.flags));
   el.append(foot);
   return el;
@@ -11235,6 +11259,22 @@ function staticModeBoot() {
     actions.insertAdjacentElement("afterend", line);
   }
 }
+function updateProvBadge(prov) {
+  const badge = document.getElementById("provBadge");
+  if (!badge) return;
+  badge.textContent = "";
+  if (prov && prov.bench && prov.episode) {
+    badge.hidden = false;
+    const chip = document.createElement("span");
+    chip.className = "lobby-badge";
+    chip.textContent = "Real run";
+    badge.append(chip, document.createTextNode(
+      ` ${prov.bench} / ${prov.episode}, seed ${prov.seed ?? "?"}`));
+    badge.title = `Real run: ${prov.bench} / ${prov.episode}, seed ${prov.seed ?? "?"}`;
+  } else {
+    badge.hidden = true;
+  }
+}
 // Operations Center bootstrap: lobby, arena show flow, tabs, themes.
 const { fetchAttackMap, fetchCampaign, fetchCampaigns, fetchConfig, fetchFeatured, fetchPreview, fetchRun, fetchRuns, fetchStage3, fetchStatus, openLive, startExercise } = __mod_api__;
 const { renderLearning } = __mod_learn__;
@@ -11886,6 +11926,7 @@ async function openExercise(runId, opts) {
   // System events are harness notes, not moves: skip them everywhere.
   store.events = (data.events || []).filter((ev) => ev && ev.actor !== "system");
   store.replayScore = data.score || null;
+  if (window.CRUCIBLE_STATIC) updateProvBadge(data.provenance);
   store.cursor = 0;
   store.firstAuthIndex = store.events.findIndex(
     (ev) => ev.actor === "red" && ev.tool === "try_credential" && (ev.result || {}).authenticated === true,
@@ -12296,6 +12337,7 @@ async function classifyRun(run, armByEpisode) {
     for (const host of layout.hosts) roles[host.id] = host.role;
     return {
       id: run.id,
+      provenance: data.provenance || null,
       outcomeKey: out.key,
       outcome: { label: out.label, tone: out.tone },
       blueScore: typeof score.blue_score === "number" ? score.blue_score : null,

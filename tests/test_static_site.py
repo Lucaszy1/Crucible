@@ -2,9 +2,9 @@
 
 Builds docs/site/ into a temp folder and checks the export contract:
 no references to localhost or /api anywhere, relative URLs only,
-3 to 5 featured replays with events and scores, Learning data with
-the frozen playbook, and disabled live controls that point at a
-local run. No Docker, network, or model calls.
+3 to 5 featured replays with events, scores, and real provenance,
+Learning data with the frozen playbook, and disabled live controls
+that point at a local run. No Docker, network, or model calls.
 """
 
 from __future__ import annotations
@@ -79,6 +79,39 @@ def test_static_site_featured_replays(tmp_path):
     index = json.loads((out / "data" / "runs.json")
                        .read_text(encoding="utf-8"))["runs"]
     assert {entry["id"] for entry in index} == set(featured)
+
+
+def test_static_site_replays_have_real_sources(tmp_path):
+    out, _builder = build_to(tmp_path)
+    featured = json.loads((out / "data" / "featured.json")
+                          .read_text(encoding="utf-8"))["featured"]
+    assert len(featured) > 0
+    for run_id in featured:
+        replay = json.loads((out / "data" / "runs" / f"{run_id}.json")
+                            .read_text(encoding="utf-8"))
+        prov = replay.get("provenance")
+        assert prov is not None, f"{run_id} has no provenance"
+        assert prov.get("bench"), f"{run_id} has no source bench"
+        assert prov.get("episode"), f"{run_id} has no episode id"
+        assert prov.get("seed") is not None, f"{run_id} has no seed"
+
+
+def test_static_site_has_no_unlabeled_synthetic(tmp_path):
+    out, _builder = build_to(tmp_path)
+    hits = []
+    for path in text_files(out):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        if "synthetic" in text.lower():
+            hits.append(str(path.relative_to(out)))
+    assert hits == []
+    bundle = (out / "app.bundle.js").read_text(encoding="utf-8")
+    assert "provenanceLine" in bundle
+    assert "updateProvBadge" in bundle
+    html = (out / "index.html").read_text(encoding="utf-8")
+    assert 'id="provBadge"' in html
 
 
 def test_static_site_learning_data(tmp_path):

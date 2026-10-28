@@ -1,0 +1,661 @@
+{
+  "events": [
+    {
+      "actor": "system",
+      "args": {
+        "blue_reasoning_effort": "low",
+        "scenario_difficulty": "hard",
+        "scenario_id": "scn-9018-hard-a0",
+        "scenario_layout": {
+          "hosts": [
+            {
+              "id": "zephyr",
+              "links": [
+                "ember",
+                "thistle"
+              ],
+              "role": "web portal",
+              "segment": "dmz",
+              "weight": 3
+            },
+            {
+              "id": "ember",
+              "links": [
+                "gale",
+                "harborlight",
+                "juniper",
+                "magpie",
+                "willow",
+                "zephyr"
+              ],
+              "role": "file share",
+              "segment": "internal",
+              "weight": 2
+            },
+            {
+              "id": "juniper",
+              "links": [
+                "ember",
+                "flint",
+                "iris",
+                "thistle"
+              ],
+              "role": "backup",
+              "segment": "data",
+              "weight": 2
+            },
+            {
+              "id": "thistle",
+              "links": [
+                "gale",
+                "harborlight",
+                "juniper",
+                "zephyr"
+              ],
+              "role": "web portal",
+              "segment": "dmz",
+              "weight": 3
+            },
+            {
+              "id": "harborlight",
+              "links": [
+                "ember",
+                "magpie",
+                "thistle"
+              ],
+              "role": "backup",
+              "segment": "data",
+              "weight": 2
+            },
+            {
+              "id": "gale",
+              "links": [
+                "ember",
+                "thistle"
+              ],
+              "role": "backup",
+              "segment": "data",
+              "weight": 2
+            },
+            {
+              "id": "magpie",
+              "links": [
+                "ember",
+                "flint",
+                "harborlight"
+              ],
+              "role": "api",
+              "segment": "dmz",
+              "weight": 3
+            },
+            {
+              "id": "iris",
+              "links": [
+                "juniper"
+              ],
+              "role": "web portal",
+              "segment": "dmz",
+              "weight": 3
+            },
+            {
+              "id": "willow",
+              "links": [
+                "ember"
+              ],
+              "role": "app",
+              "segment": "internal",
+              "weight": 3
+            },
+            {
+              "id": "flint",
+              "links": [
+                "juniper",
+                "magpie"
+              ],
+              "role": "file share",
+              "segment": "internal",
+              "weight": 2
+            }
+          ],
+          "jewel_host": "juniper",
+          "scenario_id": "scn-9018-hard-a0"
+        },
+        "scenario_seed": 9018,
+        "seed": "stage3-heldout:gen-9018-hard:1",
+        "sensors": "off"
+      },
+      "evidence_refs": [],
+      "id": "evt-0001",
+      "reasoning_summary": "Clean-start check passed on attempt 1; log scope covers this exercise only.",
+      "result": {
+        "attempts": 1,
+        "checks": {
+          "failures": {},
+          "hosts": [
+            "zephyr",
+            "ember",
+            "juniper",
+            "thistle",
+            "harborlight",
+            "gale",
+            "magpie",
+            "iris",
+            "willow",
+            "flint"
+          ],
+          "ok": true
+        },
+        "ok": true
+      },
+      "timestamp": "2026-10-28T02:56:28.901271+00:00",
+      "tool": "clean_start_check"
+    },
+    {
+      "actor": "red",
+      "args": {
+        "host": "zephyr",
+        "path": "/admin/health"
+      },
+      "evidence_refs": [],
+      "id": "evt-0002",
+      "reasoning_summary": "Probe the exposed admin page for a lead.",
+      "result": {
+        "body": "{\"admin\": true, \"note\": \"toy misconfiguration: admin page left open\", \"hint\": \"internal host 'ember' runs reports as 'steward'\"}",
+        "host": "zephyr",
+        "ok": true,
+        "status": 200
+      },
+      "timestamp": "2026-10-28T02:56:29.448132+00:00",
+      "tool": "http_request"
+    },
+    {
+      "actor": "blue",
+      "args": {
+        "host": "juniper",
+        "n": 50
+      },
+      "evidence_refs": [],
+      "id": "evt-0003",
+      "reasoning_summary": "Model chose read_logs.",
+      "result": {
+        "host": "juniper",
+        "lines": [],
+        "ok": true
+      },
+      "timestamp": "2026-10-28T02:56:30.403587+00:00",
+      "tool": "read_logs"
+    },
+    {
+      "actor": "red",
+      "args": {
+        "host": "ember",
+        "password": "changeme",
+        "user": "steward"
+      },
+      "evidence_refs": [],
+      "id": "evt-0004",
+      "reasoning_summary": "Sign in with the known credential.",
+      "result": {
+        "authenticated": true,
+        "host": "ember",
+        "ok": true
+      },
+      "timestamp": "2026-10-28T02:56:30.715630+00:00",
+      "tool": "try_credential"
+    },
+    {
+      "actor": "blue",
+      "args": {
+        "host": "zephyr",
+        "n": 50
+      },
+      "evidence_refs": [],
+      "id": "evt-0005",
+      "reasoning_summary": "Model chose read_logs.",
+      "result": {
+        "host": "zephyr",
+        "lines": [
+          {
+            "id": "zephyr:0",
+            "line": "request from=172.19.0.3 method=GET path=/admin/health status=200"
+          }
+        ],
+        "ok": true
+      },
+      "timestamp": "2026-10-28T02:56:31.966706+00:00",
+      "tool": "read_logs"
+    },
+    {
+      "actor": "red",
+      "args": {
+        "host": "iris"
+      },
+      "evidence_refs": [],
+      "id": "evt-0006",
+      "reasoning_summary": "Decoy scan of one host.",
+      "result": {
+        "host": "iris",
+        "isolated": false,
+        "ok": true,
+        "ports": [
+          8000
+        ],
+        "reachable": true,
+        "running": true
+      },
+      "timestamp": "2026-10-28T02:56:32.159448+00:00",
+      "tool": "scan_host"
+    },
+    {
+      "actor": "blue",
+      "args": {
+        "host": "ember",
+        "n": 50
+      },
+      "evidence_refs": [],
+      "id": "evt-0007",
+      "reasoning_summary": "Model chose read_logs.",
+      "result": {
+        "host": "ember",
+        "lines": [
+          {
+            "id": "ember:0",
+            "line": "signin fail user=operator from=10.9.0.21"
+          },
+          {
+            "id": "ember:1",
+            "line": "signin ok user=steward from=controller"
+          }
+        ],
+        "ok": true
+      },
+      "timestamp": "2026-10-28T02:56:33.167656+00:00",
+      "tool": "read_logs"
+    },
+    {
+      "actor": "red",
+      "args": {
+        "host": "ember",
+        "path": "/srv/data"
+      },
+      "evidence_refs": [],
+      "id": "evt-0008",
+      "reasoning_summary": "List the directory before reading.",
+      "result": {
+        "files": [
+          "secrets-export.ini"
+        ],
+        "host": "ember",
+        "ok": true,
+        "path": "/srv/data"
+      },
+      "timestamp": "2026-10-28T02:56:33.412205+00:00",
+      "tool": "list_files"
+    },
+    {
+      "actor": "blue",
+      "args": {
+        "host": "thistle",
+        "n": 50
+      },
+      "evidence_refs": [],
+      "id": "evt-0009",
+      "reasoning_summary": "Model chose read_logs.",
+      "result": {
+        "host": "thistle",
+        "lines": [],
+        "ok": true
+      },
+      "timestamp": "2026-10-28T02:56:34.896836+00:00",
+      "tool": "read_logs"
+    },
+    {
+      "actor": "red",
+      "args": {
+        "host": "zephyr"
+      },
+      "evidence_refs": [],
+      "id": "evt-0010",
+      "reasoning_summary": "Decoy scan of one host.",
+      "result": {
+        "host": "zephyr",
+        "isolated": false,
+        "ok": true,
+        "ports": [
+          8000
+        ],
+        "reachable": true,
+        "running": true
+      },
+      "timestamp": "2026-10-28T02:56:35.048354+00:00",
+      "tool": "scan_host"
+    },
+    {
+      "actor": "blue",
+      "args": {
+        "host": "juniper",
+        "n": 50
+      },
+      "evidence_refs": [],
+      "id": "evt-0011",
+      "reasoning_summary": "Model chose read_logs.",
+      "result": {
+        "host": "juniper",
+        "lines": [],
+        "ok": true
+      },
+      "timestamp": "2026-10-28T02:56:36.713501+00:00",
+      "tool": "read_logs"
+    },
+    {
+      "actor": "red",
+      "args": {
+        "host": "ember",
+        "path": "/srv/data/secrets-export.ini"
+      },
+      "evidence_refs": [],
+      "id": "evt-0012",
+      "reasoning_summary": "Read the file for the next credential.",
+      "result": {
+        "content": "host=juniper user=metrics password=toy-drops-8460",
+        "host": "ember",
+        "ok": true,
+        "path": "/srv/data/secrets-export.ini"
+      },
+      "timestamp": "2026-10-28T02:56:37.019170+00:00",
+      "tool": "read_file"
+    },
+    {
+      "actor": "blue",
+      "args": {
+        "host": "zephyr",
+        "n": 50
+      },
+      "evidence_refs": [],
+      "id": "evt-0013",
+      "reasoning_summary": "Model chose read_logs.",
+      "result": {
+        "host": "zephyr",
+        "lines": [
+          {
+            "id": "zephyr:0",
+            "line": "request from=172.19.0.3 method=GET path=/admin/health status=200"
+          },
+          {
+            "id": "zephyr:1",
+            "line": "signin fail user=temp from=10.9.0.176"
+          }
+        ],
+        "ok": true
+      },
+      "timestamp": "2026-10-28T02:56:38.746558+00:00",
+      "tool": "read_logs"
+    },
+    {
+      "actor": "red",
+      "args": {
+        "text": "Continuing probes, nothing conclusive yet."
+      },
+      "evidence_refs": [],
+      "id": "evt-0014",
+      "reasoning_summary": "Idle note while probing.",
+      "result": {
+        "id": "finding-1",
+        "ok": true
+      },
+      "timestamp": "2026-10-28T02:56:38.747432+00:00",
+      "tool": "report_finding"
+    },
+    {
+      "actor": "blue",
+      "args": {
+        "host": "iris",
+        "n": 50
+      },
+      "evidence_refs": [],
+      "id": "evt-0015",
+      "reasoning_summary": "Model chose read_logs.",
+      "result": {
+        "host": "iris",
+        "lines": [],
+        "ok": true
+      },
+      "timestamp": "2026-10-28T02:56:39.718609+00:00",
+      "tool": "read_logs"
+    },
+    {
+      "actor": "red",
+      "args": {
+        "host": "juniper",
+        "password": "toy-drops-8460",
+        "user": "metrics"
+      },
+      "evidence_refs": [],
+      "id": "evt-0016",
+      "reasoning_summary": "Sign in with the known credential.",
+      "result": {
+        "authenticated": true,
+        "host": "juniper",
+        "ok": true
+      },
+      "timestamp": "2026-10-28T02:56:40.034317+00:00",
+      "tool": "try_credential"
+    },
+    {
+      "actor": "blue",
+      "args": {
+        "host": "magpie",
+        "n": 50
+      },
+      "evidence_refs": [],
+      "id": "evt-0017",
+      "reasoning_summary": "Model chose read_logs.",
+      "result": {
+        "host": "magpie",
+        "lines": [],
+        "ok": true
+      },
+      "timestamp": "2026-10-28T02:56:41.278619+00:00",
+      "tool": "read_logs"
+    },
+    {
+      "actor": "red",
+      "args": {
+        "host": "zephyr",
+        "path": "/status"
+      },
+      "evidence_refs": [],
+      "id": "evt-0018",
+      "reasoning_summary": "Decoy page probe.",
+      "result": {
+        "body": "{\"error\": \"not found\"}",
+        "host": "zephyr",
+        "ok": true,
+        "status": 404
+      },
+      "timestamp": "2026-10-28T02:56:41.857007+00:00",
+      "tool": "http_request"
+    },
+    {
+      "actor": "blue",
+      "args": {
+        "host": "gale",
+        "n": 50
+      },
+      "evidence_refs": [],
+      "id": "evt-0019",
+      "reasoning_summary": "Model chose read_logs.",
+      "result": {
+        "host": "gale",
+        "lines": [
+          {
+            "id": "gale:0",
+            "line": "signin fail user=guest from=10.9.0.237"
+          },
+          {
+            "id": "gale:1",
+            "line": "signin fail user=guest from=10.9.0.237"
+          },
+          {
+            "id": "gale:2",
+            "line": "signin fail user=guest from=10.9.0.237"
+          }
+        ],
+        "ok": true
+      },
+      "timestamp": "2026-10-28T02:56:43.021387+00:00",
+      "tool": "read_logs"
+    },
+    {
+      "actor": "red",
+      "args": {
+        "host": "juniper",
+        "path": "/secret"
+      },
+      "evidence_refs": [],
+      "id": "evt-0020",
+      "reasoning_summary": "List the protected directory before reading.",
+      "result": {
+        "files": [
+          "vault-secret.txt"
+        ],
+        "host": "juniper",
+        "ok": true,
+        "path": "/secret"
+      },
+      "timestamp": "2026-10-28T02:56:43.233412+00:00",
+      "tool": "list_files"
+    },
+    {
+      "actor": "blue",
+      "args": {
+        "host": "ember",
+        "n": 50
+      },
+      "evidence_refs": [],
+      "id": "evt-0021",
+      "reasoning_summary": "Model chose read_logs.",
+      "result": {
+        "host": "ember",
+        "lines": [
+          {
+            "id": "ember:0",
+            "line": "signin fail user=operator from=10.9.0.21"
+          },
+          {
+            "id": "ember:1",
+            "line": "signin ok user=steward from=controller"
+          },
+          {
+            "id": "ember:2",
+            "line": "dir list path=/srv/data entries=1 from=controller"
+          },
+          {
+            "id": "ember:3",
+            "line": "file read path=/srv/data/secrets-export.ini bytes=49 from=controller"
+          },
+          {
+            "id": "ember:4",
+            "line": "signin fail user=operator from=10.9.0.21"
+          }
+        ],
+        "ok": true
+      },
+      "timestamp": "2026-10-28T02:56:44.644842+00:00",
+      "tool": "read_logs"
+    },
+    {
+      "actor": "red",
+      "args": {
+        "host": "thistle"
+      },
+      "evidence_refs": [],
+      "id": "evt-0022",
+      "reasoning_summary": "Decoy scan of one host.",
+      "result": {
+        "host": "thistle",
+        "isolated": false,
+        "ok": true,
+        "ports": [
+          8000
+        ],
+        "reachable": true,
+        "running": true
+      },
+      "timestamp": "2026-10-28T02:56:44.766885+00:00",
+      "tool": "scan_host"
+    },
+    {
+      "actor": "blue",
+      "args": {
+        "host": "ember"
+      },
+      "evidence_refs": [
+        "ember:1",
+        "ember:2",
+        "ember:3"
+      ],
+      "id": "evt-0023",
+      "reasoning_summary": "Model chose isolate_host.",
+      "result": {
+        "host": "ember",
+        "isolated": true,
+        "ok": true
+      },
+      "timestamp": "2026-10-28T02:56:47.280853+00:00",
+      "tool": "isolate_host"
+    },
+    {
+      "actor": "red",
+      "args": {
+        "host": "juniper",
+        "path": "/secret/vault-secret.txt"
+      },
+      "evidence_refs": [],
+      "id": "evt-0024",
+      "reasoning_summary": "Read the protected file after signing in.",
+      "result": {
+        "content": "TOY-SECRET-scn-9018-hard-a0",
+        "host": "juniper",
+        "ok": true,
+        "path": "/secret/vault-secret.txt"
+      },
+      "timestamp": "2026-10-28T02:56:47.535214+00:00",
+      "tool": "read_file"
+    }
+  ],
+  "id": "sensorsoff-hard-exposed",
+  "provenance": {
+    "bench": "bench-stage3-heldout",
+    "difficulty": "hard",
+    "episode": "gen-9018-hard-solver-sensors-off-memory-off-1",
+    "scenario": "scn-9018-hard-a0",
+    "seed": 9018
+  },
+  "score": {
+    "assisted": false,
+    "blue_score": 0,
+    "compromised_hosts": [
+      "ember",
+      "juniper"
+    ],
+    "contained_after_intrusion": true,
+    "detection_delay": null,
+    "downtime_cost": 0,
+    "downtime_pct": 0.0,
+    "hosts_compromised": 2,
+    "intrusion": true,
+    "invalid_refs_count": 0,
+    "justified_pct": null,
+    "mean_audit_score": null,
+    "outcome": "red_succeeded",
+    "relevant_detection_delay": null,
+    "secret_exfiltrated": true,
+    "secret_read": true,
+    "sensors": "off",
+    "time_to_contain": 22,
+    "time_to_detect": null,
+    "total_events": 23,
+    "unsupported_count": 0
+  }
+}

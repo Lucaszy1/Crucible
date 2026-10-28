@@ -8,12 +8,12 @@ server, no Docker, and no model calls.
 
 What the build does:
 
-- Generates 4 featured replays (one contained easy run taken
-  verbatim from runs/sample.jsonl, one hard run, one briefed-red
-  run, one held run) using real scenario specs from
-  crucible.scenarios.generate. Crafted runs carry
-  "synthetic": true in their JSON for provenance; every run is
-  scored with orchestrator.score_events and outcome-checked.
+- Embeds 4 featured replays, all real episode logs: the easy
+  contained run from runs/sample.jsonl plus three bench episodes
+  (briefed red, hard held-out, sensors-off exposed) read from the
+  run folders. Each replay JSON stores its source bench, episode
+  id, and seed; every run is scored with
+  orchestrator.score_events and outcome-checked.
 - Writes the API replacements as static JSON under site/data/:
   runs index, one replay per run, featured list, attack map,
   config, stage3 Learning numbers (derived from
@@ -25,15 +25,21 @@ What the build does:
   (site/app.bundle.js) with a static api layer.
 - Rewrites absolute URLs to relative ones, disables the
   live-exercise and takeover controls with a "run locally to try
-  this" note, and shows a "Static replay" server state.
+  this" note, shows a "Static replay" server state, and shows a
+  "Real run" provenance badge on lobby cards and the replay
+  header for every featured replay.
 - Fails the build if any emitted text file still references
-  localhost or /api.
+  localhost or /api, or if any replay lacks real provenance.
 
 Usage:
   python scripts/build_static.py [--out docs/site]
+      [--source-runs PATH]
 
-Deterministic: fixed timestamps and sorted keys, so rebuilding
-produces identical bytes.
+Bench episodes are read from --source-runs (default: the runs/
+folders next to this checkout), plus runs/sample.jsonl locally.
+
+Deterministic: episode logs are fixed bytes and JSON keys are
+sorted, so rebuilding produces identical bytes.
 """
 
 from __future__ import annotations
@@ -44,7 +50,7 @@ import json
 import re
 import shutil
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -55,18 +61,31 @@ DEFAULT_OUT = ROOT / "docs" / "site"
 sys.path.insert(0, str(ROOT))
 
 from crucible import orchestrator  # noqa: E402
-from crucible import sandbox  # noqa: E402
-from crucible.scenarios.generate import generate  # noqa: E402
 
 BASE_TIME = datetime(2026, 10, 28, 12, 0, 0, tzinfo=timezone.utc)
-STEP = timedelta(seconds=7)
 
-RUN_IDS = [
-    "scn-0007-contained",
-    "static-hard-exposed",
-    "briefed-red-contained",
-    "static-held-quick",
+# Featured replays: all real episode logs. The sensors-off arm of
+# bench-stage3-heldout is valid; only that bench's sensors-on half
+# is void, and no pick comes from it.
+SOURCES = [
+    {"id": "scn-0007-contained",
+     "bench": "sample", "episode": "sample",
+     "local": "runs/sample.jsonl", "want": "contained"},
+    {"id": "briefed-medium-contained",
+     "bench": "bench-stage3-briefed-vs-open",
+     "episode": "gen-9008-medium-model-briefed-sensors-on-memory-off-1",
+     "want": "contained"},
+    {"id": "heldout-hard-contained",
+     "bench": "bench-stage3-heldout-sensors",
+     "episode": "gen-9019-hard-solver-sensors-on-memory-on-1",
+     "want": "contained"},
+    {"id": "sensorsoff-hard-exposed",
+     "bench": "bench-stage3-heldout",
+     "episode": "gen-9018-hard-solver-sensors-off-memory-off-1",
+     "want": "secret-exposed"},
 ]
+
+RUN_IDS = [source["id"] for source in SOURCES]
 
 FORBIDDEN_MARKERS = ("localhost", "/api")
 BINARY_SUFFIXES = {".png", ".webp", ".jpg", ".jpeg", ".gif",
@@ -81,419 +100,49 @@ VOID_NOTE = (
 
 
 # --------------------------------------------------------------------------
-# Event builders
+# Real episode logs
 # --------------------------------------------------------------------------
 
-class Script:
-    """Append events with sequential ids and fixed timestamps."""
-
-    def __init__(self, base: datetime):
-        self.base = base
-        self.events: list = []
-        self.findings = 0
-
-    def add(self, actor: str, tool: str, args: dict, result: dict,
-            summary: str) -> dict:
-        event = {
-            "id": f"evt-{len(self.events) + 1:04d}",
-            "timestamp": (self.base + STEP * len(self.events)).isoformat(),
-            "actor": actor,
-            "tool": tool,
-            "args": args,
-            "result": result,
-            "reasoning_summary": summary,
-            "evidence_refs": [],
-        }
-        self.events.append(event)
-        return event
-
-    def finding_id(self) -> str:
-        self.findings += 1
-        return f"finding-{self.findings}"
-
-    def audit(self, target_id: str, verdict: str, score: int,
-              rationale: str) -> dict:
-        return self.add(
-            "auditor", "audit", {"target_event_id": target_id},
-            {"ok": True, "target_event_id": target_id,
-             "verdict": verdict, "score": score,
-             "rationale": rationale, "evidence_checked": [],
-             "refs_valid": True, "model_used": "none",
-             "estimated_cost_usd": 0.0},
-            f"[{verdict} {score}/10] {rationale}",
-        )
+def resolve_source_runs(explicit: Path | None) -> Path:
+    """Return the bench run folder, defaulting to the main checkout."""
+    if explicit is not None:
+        return explicit
+    sibling = ROOT.parent / "Crucible" / "runs"
+    if sibling.is_dir():
+        return sibling
+    return ROOT / "runs"
 
 
-def system_event(script: Script, spec: dict, seed: int,
-                 difficulty: str) -> None:
-    layout = sandbox.layout_for_spec(spec)
-    hosts = [host["id"] for host in layout["hosts"]]
-    script.add(
-        "system", "clean_start_check",
-        {"sensors": "on", "blue_reasoning_effort": "default",
-         "scenario_id": spec["scenario_id"], "scenario_seed": seed,
-         "scenario_difficulty": difficulty,
-         "scenario_layout": {
-             "scenario_id": spec["scenario_id"], "hosts": [
-                 {"id": host["id"], "role": host["role"],
-                  "segment": host["segment"], "links": host["links"],
-                  "weight": host["weight"]}
-                 for host in layout["hosts"]],
-             "jewel_host": layout["jewel_host"]}},
-        {"ok": True, "attempts": 1,
-         "checks": {"ok": True, "failures": {}, "hosts": hosts}},
-        "Clean-start check passed on attempt 1; "
-        "log scope covers this exercise only.",
-    )
-
-
-def unreachable(host: str) -> dict:
-    return {"ok": False,
-            "error": f"host {host!r} is unreachable "
-                     "(isolated from the range)"}
-
-
-def log_lines(host: str, lines: list, start: int = 0) -> list:
-    return [{"id": f"{host}:{start + i}", "line": line}
-            for i, line in enumerate(lines)]
-
-
-def hint_body(host: str, account: str) -> str:
-    return json.dumps({
-        "admin": True,
-        "note": "toy misconfiguration: admin page left open",
-        "hint": f"internal host {host!r} runs reports as {account!r}",
-    })
-
-
-def spec_context(spec: dict) -> dict:
-    """Pull the names and path steps builders need from one spec."""
-    path = spec.get("path", [])
-    pages = [step for step in path if step["kind"] == "exposed_page"]
-    steps = {step["kind"]: step for step in path}
-    return {
-        "spec": spec,
-        "entry": spec.get("entry_host", ""),
-        "jewel_host": (spec.get("jewel", {}) or {}).get("host", ""),
-        "jewel_path": (spec.get("jewel", {}) or {}).get("path", ""),
-        "pages": pages,
-        "steps": steps,
-    }
-
-
-def build_hard_exposed() -> list:
-    """Hard run where red reads the protected file before blue reacts."""
-    seed, difficulty = 9019, "hard"
-    spec = generate(seed, difficulty)
-    ctx = spec_context(spec)
-    entry = ctx["entry"]
-    assert len(ctx["pages"]) == 1, "hard chain shape changed"
-    page = ctx["pages"][0]
-    weak = ctx["steps"]["weak_creds"]
-    backup = ctx["steps"]["backup_creds"]
-    known = ctx["steps"]["signin_known"]
-    jewel_host, jewel_path = ctx["jewel_host"], ctx["jewel_path"]
-    mid_host = weak["host"]
-    assert page["host"] == entry
-    assert backup["host"] == mid_host
-    assert known["host"] == jewel_host
-
-    script = Script(BASE_TIME)
-    system_event(script, spec, seed, difficulty)
-    script.add("red", "scan_host", {"host": entry},
-               {"ok": True, "host": entry, "running": True,
-                "reachable": True, "ports": [8000], "isolated": False},
-               f"Check whether the {entry} portal answers.")
-    script.add("blue", "read_logs", {"host": entry, "n": 50},
-               {"ok": True, "host": entry, "lines": []},
-               f"Skim recent {entry} logs for early probing.")
-    script.add("red", "http_request",
-               {"host": entry, "path": "/admin/dashboard"},
-               {"ok": True, "host": entry, "status": 404,
-                "body": "not found"},
-               "Enumerate the known admin endpoint list for a live page.")
-    script.add("blue", "list_processes", {"host": jewel_host},
-               {"ok": True, "host": jewel_host,
-                "processes": ["pid 1 toyhost", "pid 31 reports",
-                              "pid 44 fileshare"]},
-               f"Confirm the {jewel_host} data host runs clean.")
-    script.add("red", "http_request",
-               {"host": entry, "path": page["page_path"]},
-               {"ok": True, "host": entry, "status": 200,
-                "body": hint_body(page["leaks_host"],
-                                  page["leaks_account"])},
-               "Follow the exposed page hint to the next host.")
-    script.add("blue", "read_logs", {"host": entry, "n": 50},
-               {"ok": True, "host": entry, "lines": log_lines(entry, [
-                   "request from=172.18.0.5 method=GET "
-                   "path=/admin/dashboard status=404",
-                   f"request from=172.18.0.5 method=GET "
-                   f"path={page['page_path']} status=200",
-               ])},
-               "The portal took two admin page hits in a row.")
-    script.add("red", "try_credential",
-               {"host": mid_host, "user": weak["account"],
-                "password": weak["password"]},
-               {"ok": True, "host": mid_host, "authenticated": True},
-               f"Try the leaked sign-in on {mid_host}.")
-    script.add("blue", "wait", {"reason": "watch for lateral movement"},
-               {"ok": True, "waited": True,
-                "reason": "watch for lateral movement"},
-               "Hold one turn and watch for lateral movement.")
-    script.add("red", "list_files",
-               {"host": mid_host, "path": backup["dir"]},
-               {"ok": True, "host": mid_host, "path": backup["dir"],
-                "files": [backup["path"].rsplit("/", 1)[-1]]},
-               f"List the {mid_host} archive for stored sign-ins.")
-    script.add("blue", "report_finding",
-               {"text": f"Portal probing plus an archive listing on "
-                        f"{mid_host} looks like one intrusion."},
-               {"ok": True, "id": script.finding_id()},
-               "Record the intrusion pattern with log lines.")
-    script.add("red", "read_file",
-               {"host": mid_host, "path": backup["path"]},
-               {"ok": True, "host": mid_host, "path": backup["path"],
-                "content": "[logins]\n"
-                           f"host={known['host']}\n"
-                           f"user={known['account']}\n"
-                           "password=<redacted in replay>"},
-               "Read the exported sign-ins for the next hop.")
-    script.add("blue", "read_logs", {"host": mid_host, "n": 50},
-               {"ok": True, "host": mid_host, "lines": log_lines(mid_host, [
-                   f"signin ok user={weak['account']} from=controller",
-                   f"dir list path={backup['dir']} entries=1 "
-                   "from=controller",
-                   f"file read path={backup['path']} bytes=96 "
-                   "from=controller",
-               ])},
-               f"Pull {mid_host} logs to confirm the sign-in.")
-    script.add("red", "try_credential",
-               {"host": known["host"], "user": known["account"],
-                "password": known["password"]},
-               {"ok": True, "host": known["host"],
-                "authenticated": True},
-               f"Reuse the harvested sign-in on {known['host']}.")
-    script.add("blue", "isolate_host", {"host": known["host"]},
-               {"ok": True, "host": known["host"], "isolated": True},
-               f"Detach {known['host']} to cut off the session.")
-    script.add("red", "read_file",
-               {"host": jewel_host, "path": jewel_path},
-               {"ok": True, "host": jewel_host, "path": jewel_path,
-                "content": "CRUCIBLE-EXERCISE-SECRET (toy)"},
-               "Read the protected file before the cutoff lands.")
-    script.add("blue", "patch_service",
-               {"host": jewel_host, "service": "fileshare"},
-               {"ok": True, "host": jewel_host, "service": "fileshare",
-                "detail": "patch flag applied; "
-                          "sign-in rotated on the host"},
-               "Rotate the data host sign-in after the read.")
-    script.add("red", "report_finding",
-               {"text": "Protected file obtained from the data host."},
-               {"ok": True, "id": script.finding_id()},
-               "Record what the probe sequence obtained.")
-    blue_ids = [event["id"] for event in script.events
-                if event["actor"] == "blue"]
-    script.audit(blue_ids[0], "justified", 8,
-                 "Looking before acting is reasonable when nothing "
-                 "is confirmed yet.")
-    script.audit(blue_ids[1], "justified", 7,
-                 "Checking the data host early is proportionate.")
-    script.audit(blue_ids[2], "justified", 8,
-                 "The request lines support watching closely.")
-    script.audit(blue_ids[3], "unsupported", 3,
-                 "Waiting while an intruder moves laterally lacks "
-                 "evidence.")
-    script.audit(blue_ids[4], "justified", 7,
-                 "The finding matches the portal and archive lines.")
-    script.audit(blue_ids[5], "justified", 8,
-                 "Confirming the sign-in in logs is solid practice.")
-    script.audit(blue_ids[6], "justified", 9,
-                 "Detaching on a confirmed harvested sign-in is right, "
-                 "even though the read beat it.")
-    script.audit(blue_ids[7], "justified", 7,
-                 "Rotating the sign-in after exposure limits reuse.")
-    return script.events
-
-
-def build_briefed_contained() -> list:
-    """Briefed model red vs scripted blue: fast intrusion, contained."""
-    seed, difficulty = 9005, "medium"
-    spec = generate(seed, difficulty)
-    ctx = spec_context(spec)
-    entry = ctx["entry"]
-    assert len(ctx["pages"]) == 2, "medium chain shape changed"
-    first, second = ctx["pages"]
-    weak = ctx["steps"]["weak_creds"]
-    jewel_host, jewel_path = ctx["jewel_host"], ctx["jewel_path"]
-    target = weak["host"]
-    assert first["host"] == entry
-    assert second["host"] == first["leaks_host"]
-    assert target == second["leaks_host"] == jewel_host
-
-    script = Script(BASE_TIME + timedelta(hours=2))
-    system_event(script, spec, seed, difficulty)
-    script.add("red", "scan_host", {"host": entry},
-               {"ok": True, "host": entry, "running": True,
-                "reachable": True, "ports": [8000], "isolated": False},
-               "Per the engagement scope, confirm the dmz surface "
-               "answers before enumerating it.")
-    script.add("blue", "read_logs", {"host": entry, "n": 50},
-               {"ok": True, "host": entry, "lines": []},
-               f"Inspect recent {entry} logs for odd requests.")
-    script.add("red", "http_request",
-               {"host": entry, "path": first["page_path"]},
-               {"ok": True, "host": entry, "status": 200,
-                "body": hint_body(first["leaks_host"],
-                                  first["leaks_account"])},
-               "Enumerate the scoped endpoint list; the live page "
-               "names the next host and account.")
-    script.add("blue", "report_finding",
-               {"text": f"Scoped probing on {entry} matches the "
-                        "briefed red playbook."},
-               {"ok": True, "id": script.finding_id()},
-               "Record the detection with supporting log lines.")
-    script.add("red", "http_request",
-               {"host": second["host"], "path": second["page_path"]},
-               {"ok": True, "host": second["host"], "status": 200,
-                "body": hint_body(second["leaks_host"],
-                                  second["leaks_account"])},
-               "The scope names this host once the first page leaks "
-               "it; enumerate the same list there.")
-    script.add("blue", "read_logs", {"host": second["host"], "n": 50},
-               {"ok": True, "host": second["host"],
-                "lines": log_lines(second["host"], [
-                    f"request from=172.18.0.5 method=GET "
-                    f"path={second['page_path']} status=200",
-                ])},
-               f"Confirm the {second['host']} page hit in its logs.")
-    script.add("red", "try_credential",
-               {"host": target, "user": weak["account"],
-                "password": weak["password"]},
-               {"ok": True, "host": target, "authenticated": True},
-               "Per the weak-pool guidance, try the leaked account "
-               "only, then move to discovery.")
-    script.add("blue", "read_logs", {"host": target, "n": 50},
-               {"ok": True, "host": target, "lines": log_lines(target, [
-                   f"signin ok user={weak['account']} from=controller",
-               ])},
-               f"Confirm the {target} sign-in in its own logs.")
-    script.add("red", "list_files",
-               {"host": target, "path": "/secret"},
-               {"ok": True, "host": target, "path": "/secret",
-                "files": [jewel_path.rsplit("/", 1)[-1]]},
-               "List the secret directory before reading.")
-    script.add("blue", "isolate_host", {"host": target},
-               {"ok": True, "host": target, "isolated": True},
-               f"Detach the {target} host to stop further access.")
-    script.add("red", "read_file",
-               {"host": target, "path": jewel_path},
-               unreachable(target),
-               "Read the exercise secret after signing in.")
-    script.add("blue", "patch_service",
-               {"host": target, "service": "fileshare"},
-               {"ok": True, "host": target, "service": "fileshare",
-                "detail": "patch flag applied; "
-                          "sign-in rotated on the host"},
-               "Apply the toy fix so the leaked sign-in stops working.")
-    script.add("red", "report_finding",
-               {"text": "Containment landed before the file read."},
-               {"ok": True, "id": script.finding_id()},
-               "Record what the probe sequence obtained.")
-    blue_ids = [event["id"] for event in script.events
-                if event["actor"] == "blue"]
-    script.audit(blue_ids[0], "justified", 8,
-                 "Looking before acting is reasonable when nothing "
-                 "is confirmed yet.")
-    script.audit(blue_ids[1], "unsupported", 4,
-                 "The report ran ahead of the log lines blue had read.")
-    script.audit(blue_ids[2], "justified", 8,
-                 "Tracking the second scoped page hit is solid.")
-    script.audit(blue_ids[3], "justified", 9,
-                 "Confirming the sign-in before detaching is solid.")
-    script.audit(blue_ids[4], "justified", 9,
-                 "Detaching on a confirmed sign-in plus a restricted "
-                 "listing is exactly right.")
-    script.audit(blue_ids[5], "justified", 7,
-                 "Rotating the leaked sign-in closes the briefing path.")
-    return script.events
-
-
-def build_held_quick() -> list:
-    """Easy run where blue detaches the entry host before red gets in."""
-    seed, difficulty = 9003, "easy"
-    spec = generate(seed, difficulty)
-    ctx = spec_context(spec)
-    entry = ctx["entry"]
-    assert len(ctx["pages"]) == 1, "easy chain shape changed"
-    page = ctx["pages"][0]
-    weak = ctx["steps"]["weak_creds"]
-    target = weak["host"]
-    assert page["host"] == entry
-    assert target == page["leaks_host"] == ctx["jewel_host"]
-
-    script = Script(BASE_TIME + timedelta(hours=4))
-    system_event(script, spec, seed, difficulty)
-    script.add("red", "scan_host", {"host": entry},
-               {"ok": True, "host": entry, "running": True,
-                "reachable": True, "ports": [8000], "isolated": False},
-               f"Check whether the {entry} portal is reachable.")
-    script.add("blue", "read_logs", {"host": entry, "n": 50},
-               {"ok": True, "host": entry, "lines": []},
-               f"Inspect recent {entry} logs for odd requests.")
-    script.add("red", "http_request",
-               {"host": entry, "path": page["page_path"]},
-               {"ok": True, "host": entry, "status": 200,
-                "body": hint_body(page["leaks_host"],
-                                  page["leaks_account"])},
-               "Probe the exposed admin page for a lead.")
-    script.add("blue", "read_logs", {"host": entry, "n": 50},
-               {"ok": True, "host": entry, "lines": log_lines(entry, [
-                   f"request from=172.18.0.5 method=GET "
-                   f"path={page['page_path']} status=200",
-               ])},
-               "One admin page hit is enough to watch closely.")
-    script.add("red", "try_credential",
-               {"host": target, "user": weak["account"],
-                "password": "wrong-guess-1"},
-               {"ok": True, "host": target, "authenticated": False},
-               "Guess at the hinted account before the real leak.")
-    script.add("blue", "isolate_host", {"host": entry},
-               {"ok": True, "host": entry, "isolated": True},
-               f"Detach {entry} while the intruder is still outside.")
-    script.add("red", "http_request",
-               {"host": entry, "path": page["page_path"]},
-               unreachable(entry),
-               "Retry the admin page through the cutoff.")
-    script.add("blue", "patch_service",
-               {"host": entry, "service": "webapp"},
-               {"ok": True, "host": entry, "service": "webapp",
-                "detail": "patch flag applied"},
-               f"Close the exposed admin page on {entry}.")
-    script.add("red", "report_finding",
-               {"text": "No path past the detached portal."},
-               {"ok": True, "id": script.finding_id()},
-               "Record what the probe sequence obtained.")
-    blue_ids = [event["id"] for event in script.events
-                if event["actor"] == "blue"]
-    script.audit(blue_ids[0], "justified", 8,
-                 "Looking before acting is reasonable when nothing "
-                 "is confirmed yet.")
-    script.audit(blue_ids[1], "justified", 8,
-                 "The request line supports watching closely.")
-    script.audit(blue_ids[2], "justified", 9,
-                 "Detaching the probed portal before any sign-in "
-                 "held the range.")
-    script.audit(blue_ids[3], "justified", 7,
-                 "Closing the exposed page removes the entry.")
-    return script.events
-
-
-def load_sample_events() -> list:
-    """Read the real sample run verbatim (the easy contained replay)."""
-    path = ROOT / "runs" / "sample.jsonl"
+def load_episode_events(source_runs: Path, source: dict) -> list:
+    """Read one featured replay's episode log, verbatim."""
+    if "local" in source:
+        path = ROOT / source["local"]
+    else:
+        path = (source_runs / source["bench"]
+                / f"{source['episode']}.jsonl")
+        if not path.is_file():
+            local = (ROOT / "runs" / source["bench"]
+                     / f"{source['episode']}.jsonl")
+            if local.is_file():
+                path = local
+    if not path.is_file():
+        raise SystemExit(f"error: episode log missing: {path}")
     return [json.loads(line) for line in
             path.read_text(encoding="utf-8").splitlines()
             if line.strip()]
+
+
+def scenario_info(events: list) -> dict:
+    """Pull seed, scenario, and difficulty from the system event."""
+    for event in events:
+        args = event.get("args") or {}
+        if event.get("actor") == "system" and args.get("scenario_id"):
+            return {
+                "seed": args.get("scenario_seed"),
+                "scenario": args.get("scenario_id"),
+                "difficulty": args.get("scenario_difficulty"),
+            }
+    return {"seed": None, "scenario": None, "difficulty": None}
 
 
 def outcome_key(events: list) -> str:
@@ -529,49 +178,35 @@ def outcome_key(events: list) -> str:
     return "stalemate"
 
 
-def build_replays() -> dict:
-    """Build, score, and outcome-check every featured replay."""
-    runs = {
-        "scn-0007-contained": {
-            "events": load_sample_events(),
-            "synthetic": False,
-            "note": "Real scripted exercise on scn-0007-easy-a0, "
-                    "kept verbatim from runs/sample.jsonl.",
-            "want": "contained",
-        },
-        "static-hard-exposed": {
-            "events": build_hard_exposed(),
-            "synthetic": True,
-            "note": "Docker-free reconstruction on scn-9019-hard-a0: "
-                    "red reads the protected file before blue reacts.",
-            "want": "secret-exposed",
-        },
-        "briefed-red-contained": {
-            "events": build_briefed_contained(),
-            "synthetic": True,
-            "note": "Docker-free reconstruction of a briefed model red "
-                    "run (engagement scope briefing) vs scripted blue on "
-                    "a medium network: fast intrusion, contained.",
-            "want": "contained",
-        },
-        "static-held-quick": {
-            "events": build_held_quick(),
-            "synthetic": True,
-            "note": "Docker-free reconstruction on an easy network: "
-                    "blue detaches the portal before red gets in.",
-            "want": "held",
-        },
-    }
-    for run_id, run in runs.items():
-        events = run["events"]
+def build_replays(source_runs: Path) -> dict:
+    """Load, score, and outcome-check every featured replay."""
+    runs = {}
+    for source in SOURCES:
+        run_id = source["id"]
+        events = load_episode_events(source_runs, source)
+        if len(events) < 6:
+            raise SystemExit(f"error: {run_id} has too few events")
         score = orchestrator.score_events(events)
         if score is None:
             raise SystemExit(f"error: {run_id} could not be scored")
         got = outcome_key(events)
-        if got != run["want"]:
+        if got != source["want"]:
             raise SystemExit(
-                f"error: {run_id} came out {got}, want {run['want']}")
-        run["score"] = score
+                f"error: {run_id} came out {got}, want {source['want']}")
+        info = scenario_info(events)
+        if info["seed"] is None:
+            raise SystemExit(f"error: {run_id} has no scenario seed")
+        runs[run_id] = {
+            "events": events,
+            "score": score,
+            "provenance": {
+                "bench": source["bench"],
+                "episode": source["episode"],
+                "seed": info["seed"],
+                "scenario": info["scenario"],
+                "difficulty": info["difficulty"],
+            },
+        }
     return runs
 
 
@@ -687,8 +322,7 @@ def write_data_files(out: Path, runs: dict) -> dict:
     for run_id in RUN_IDS:
         payload = {"id": run_id, "events": runs[run_id]["events"],
                    "score": runs[run_id]["score"],
-                   "synthetic": runs[run_id]["synthetic"],
-                   "note": runs[run_id]["note"]}
+                   "provenance": runs[run_id]["provenance"]}
         write_json(data_dir / "runs" / f"{run_id}.json", payload)
         replays[run_id] = payload
 
@@ -771,7 +405,10 @@ export async function fetchRun(runId) {
   const replay = (embedded().replays || {})[runId];
   if (!replay) throw new Error(`unknown run ${JSON.stringify(runId)}`);
   const events = (replay.events || []).map((ev) => normalizeActor(ev));
-  return { id: replay.id, events, score: replay.score || null };
+  return {
+    id: replay.id, events, score: replay.score || null,
+    provenance: replay.provenance || null,
+  };
 }
 
 export function fetchStage3() {
@@ -868,6 +505,22 @@ function staticModeBoot() {
     actions.insertAdjacentElement("afterend", line);
   }
 }
+function updateProvBadge(prov) {
+  const badge = document.getElementById("provBadge");
+  if (!badge) return;
+  badge.textContent = "";
+  if (prov && prov.bench && prov.episode) {
+    badge.hidden = false;
+    const chip = document.createElement("span");
+    chip.className = "lobby-badge";
+    chip.textContent = "Real run";
+    badge.append(chip, document.createTextNode(
+      ` ${prov.bench} / ${prov.episode}, seed ${prov.seed ?? "?"}`));
+    badge.title = `Real run: ${prov.bench} / ${prov.episode}, seed ${prov.seed ?? "?"}`;
+  } else {
+    badge.hidden = true;
+  }
+}
 '''
 
 APP_PATCHES = [
@@ -875,6 +528,46 @@ APP_PATCHES = [
     ("  refreshRuns();\n  await pollStatus();\n  setInterval(pollStatus, 5000);",
      "  refreshRuns();\n  staticModeBoot();"),
     ("  if (livePath) {", "  if (livePath && !window.CRUCIBLE_STATIC) {"),
+    ("      id: run.id,\n      outcomeKey: out.key,",
+     "      id: run.id,\n      provenance: data.provenance || null,\n"
+     "      outcomeKey: out.key,"),
+    ("  store.replayScore = data.score || null;",
+     "  store.replayScore = data.score || null;\n"
+     "  if (window.CRUCIBLE_STATIC) updateProvBadge(data.provenance);"),
+]
+
+LOBBY_PROVENANCE = '''\
+// One provenance line per card in the static bundle: a Real run
+// chip plus the source bench, episode, and seed. Live cards carry
+// no provenance and render exactly as before.
+function provenanceLine(model) {
+  const prov = model && model.provenance;
+  if (!prov || !prov.bench || !prov.episode) return null;
+  const line = document.createElement("p");
+  line.className = "lobby-meta lobby-prov";
+  const chip = document.createElement("span");
+  chip.className = "lobby-badge";
+  chip.textContent = "Real run";
+  const text = `${prov.bench} / ${prov.episode}, seed ${prov.seed ?? "?"}`;
+  line.append(chip, document.createTextNode(` ${text}`));
+  line.title = `Real run: ${text}`;
+  return line;
+}
+
+'''
+
+LOBBY_PATCHES = [
+    ("// Large featured card: thumbnail, outcome badge, story, duration.",
+     LOBBY_PROVENANCE
+     + "// Large featured card: thumbnail, outcome badge, story, duration."),
+    ("  body.append(head, story, meta);",
+     "  body.append(head, story, meta);\n"
+     "  const provLine = provenanceLine(model);\n"
+     "  if (provLine) body.append(provLine);"),
+    ("  el.append(head, meta);",
+     "  el.append(head, meta);\n"
+     "  const provLine = provenanceLine(model);\n"
+     "  if (provLine) el.append(provLine);"),
 ]
 
 COMMANDBAR_STATIC_BAR = '''\
@@ -956,6 +649,7 @@ MODULE_PATCHES = {
     "app": APP_PATCHES,
     "commandbar": COMMANDBAR_PATCHES,
     "learn": LEARN_PATCHES,
+    "lobby": LOBBY_PATCHES,
     "thumbnail": THUMB_PATCHES,
 }
 
@@ -1098,6 +792,9 @@ HTML_PATCHES = [
      '<button id="liveBtn" class="btn primary hero-cta" disabled '
      'title="Live exercises need a local server — '
      'run locally to try this.">Run a live exercise</button>'),
+    ('<span id="eventCount" class="event-count">0 events</span>',
+     '<span id="eventCount" class="event-count">0 events</span>\n'
+     '    <span id="provBadge" class="prov-badge" hidden></span>'),
 ]
 
 STATIC_CSS = """
@@ -1106,6 +803,17 @@ STATIC_CSS = """
   margin: 10px 0 0;
   color: var(--muted);
   font-size: 0.9rem;
+}
+.lobby-prov {
+  overflow-wrap: anywhere;
+}
+.prov-badge {
+  font-size: 0.78rem;
+  color: var(--muted);
+  max-width: 44vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 """
 
@@ -1156,9 +864,9 @@ def enforce_no_server_refs(out: Path) -> None:
                          + "\n".join(hits))
 
 
-def build_site(out: Path) -> dict:
+def build_site(out: Path, source_runs: Path | None = None) -> dict:
     out.mkdir(parents=True, exist_ok=True)
-    runs = build_replays()
+    runs = build_replays(resolve_source_runs(source_runs))
     embedded = write_data_files(out, runs)
     copy.deepcopy(embedded)  # guard: payload must stay JSON-plain
     write_data_js(out, embedded)
@@ -1173,8 +881,10 @@ def main(argv=None) -> int:
         description="Export the static replay site.")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT,
                         help="output directory (default docs/site)")
+    parser.add_argument("--source-runs", type=Path, default=None,
+                        help="bench run folder (default: main checkout)")
     args = parser.parse_args(argv)
-    summary = build_site(args.out)
+    summary = build_site(args.out, args.source_runs)
     print(f"Static site: {summary['out']}")
     print(f"Featured replays ({len(summary['runs'])}): "
           f"{', '.join(summary['runs'])}")

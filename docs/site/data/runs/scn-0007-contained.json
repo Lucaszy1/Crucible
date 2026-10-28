@@ -410,7 +410,13 @@
     }
   ],
   "id": "scn-0007-contained",
-  "note": "Real scripted exercise on scn-0007-easy-a0, kept verbatim from runs/sample.jsonl.",
+  "provenance": {
+    "bench": "sample",
+    "difficulty": "easy",
+    "episode": "sample",
+    "scenario": "scn-0007-easy-a0",
+    "seed": 7
+  },
   "score": {
     "assisted": false,
     "blue_score": 100.0,
@@ -435,6 +441,5 @@
     "time_to_detect": 4,
     "total_events": 11,
     "unsupported_count": 4
-  },
-  "synthetic": false
+  }
 }
