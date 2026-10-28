@@ -338,62 +338,430 @@ export function clearThumbnailCache() {
   modelCache.clear();
 }
 
-// Rendered arena frames, one offscreen canvas per run id, capped
-// so a long archive cannot eat memory; evicted frames repaint.
-const frameCache = new Map();
-const FRAME_CACHE_MAX = 60;
+// ---- Lazy arena-frame scheduler ----
+// A full run shelf once painted every arena frame eagerly during
+// lobby load: ~90 synchronous stage renders, an 8-second stall.
+// Now card canvases mount empty and fill in later: renders run
+// only for visible cards, one card per idle slice, never more
+// than one render in flight. One shared offscreen canvas does
+// every render; snapshots live as small bitmaps in an LRU, and
+// featured frames persist in sessionStorage so a reload repaints
+// nothing.
+export const THUMB_W = 320;
+export const THUMB_H = 180;
+const RENDER_W = 480;
+const RENDER_H = 270;
+export const BITMAP_CACHE_MAX = 24;
+const IDLE_SLICE_MS = 8;
 
-export function clearArenaThumbCache() {
-  frameCache.clear();
+const bitmapCache = new Map();
+let bitmapGen = 0;
+const thumbJobs = new Map();
+let thumbInFlight = null;
+let thumbIdleQueued = false;
+let thumbScheduler = null;
+let renderCanvas = null;
+let snapCanvas = null;
+
+// Test hook: replace requestIdleCallback/setTimeout delivery.
+export function setThumbScheduler(fn) {
+  thumbScheduler = typeof fn === "function" ? fn : null;
 }
 
-// Mount a real arena frame: paint the episode's stage at its
-// poster event once per run, then blit the cached bitmap into
-// every card canvas. Eager on purpose: lobby re-renders churn
-// canvases faster than an observer would fire. Falls back to the
-// schematic miniature if the arena render throws.
+export function thumbPendingCount() {
+  return thumbJobs.size + (thumbInFlight ? 1 : 0);
+}
+
+export function thumbCacheSize() {
+  return bitmapCache.size;
+}
+
+// Test hook: offscreen canvases held by the scheduler itself.
+export function thumbCanvasCount() {
+  return (renderCanvas ? 1 : 0) + (snapCanvas ? 1 : 0);
+}
+
+function thumbNow() {
+  return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
+}
+
+function sharedCanvas(which) {
+  if (typeof document === "undefined") return null;
+  if (which === "snap") {
+    if (!snapCanvas) {
+      snapCanvas = document.createElement("canvas");
+      snapCanvas.width = THUMB_W;
+      snapCanvas.height = THUMB_H;
+    }
+    return snapCanvas;
+  }
+  if (!renderCanvas) renderCanvas = document.createElement("canvas");
+  return renderCanvas;
+}
+
+function closeBitmap(bmp) {
+  try {
+    if (bmp && typeof bmp.close === "function") bmp.close();
+  } catch {
+    // Unclosed bitmaps are GC'd with the entry.
+  }
+}
+
+export function clearArenaThumbCache() {
+  bitmapGen += 1;
+  for (const entry of bitmapCache.values()) {
+    if (entry) closeBitmap(entry.bmp);
+  }
+  bitmapCache.clear();
+  thumbJobs.clear();
+  thumbInFlight = null;
+  thumbIdleQueued = false;
+  // A render already in flight finishes into the void: its
+  // generation no longer matches, so its bitmap is dropped.
+  // Already-delivered idle callbacks pump an empty queue.
+}
+
+function cacheGet(key, moves) {
+  const entry = bitmapCache.get(key);
+  if (!entry || entry.moves !== moves) return null;
+  bitmapCache.delete(key);
+  bitmapCache.set(key, entry);
+  return entry;
+}
+
+function cacheSet(key, entry) {
+  if (bitmapCache.has(key)) bitmapCache.delete(key);
+  bitmapCache.set(key, entry);
+  while (bitmapCache.size > BITMAP_CACHE_MAX) {
+    const oldest = bitmapCache.keys().next().value;
+    closeBitmap(bitmapCache.get(oldest).bmp);
+    bitmapCache.delete(oldest);
+  }
+}
+
+function sessionGet(key) {
+  try {
+    if (typeof sessionStorage === "undefined") return null;
+    const raw = sessionStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function sessionSet(key, value) {
+  try {
+    if (typeof sessionStorage === "undefined") return;
+    sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Quota or privacy mode: the memory cache still holds it.
+  }
+}
+
+function artTag(env) {
+  const art = env && env.art;
+  return art && (art.backdrop || art.intrusionTex) ? "art" : "bare";
+}
+
+function sessionKey(id, env) {
+  return `crucible.thumb.v1.${artTag(env)}.${id}`;
+}
+
+function blitThumb(canvas, entry, force) {
+  if (!canvas || !entry || !entry.bmp) return false;
+  // Async completions skip canvases that left the document, but a
+  // mount-time blit must paint detached cards: featureCard blits
+  // before the article is appended, and the pixels persist.
+  if (!force && canvas.isConnected === false) return false;
+  const bmp = entry.bmp;
+  if (typeof bmp === "string") {
+    if (typeof Image === "undefined") return false;
+    const img = new Image();
+    img.onload = () => {
+      if (!force && canvas.isConnected === false) return;
+      const ctx = canvas.getContext && canvas.getContext("2d");
+      if (ctx) {
+        try {
+          ctx.drawImage(img, 0, 0, THUMB_W, THUMB_H);
+        } catch {
+          // A torn-down canvas never breaks the queue.
+        }
+      }
+    };
+    img.src = bmp;
+    return true;
+  }
+  const ctx = canvas.getContext && canvas.getContext("2d");
+  if (!ctx) return false;
+  try {
+    ctx.drawImage(bmp, 0, 0, THUMB_W, THUMB_H);
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+function requestThumbIdle() {
+  if (thumbIdleQueued) return;
+  thumbIdleQueued = true;
+  const run = () => {
+    thumbIdleQueued = false;
+    pumpThumbQueue();
+  };
+  if (thumbScheduler) {
+    try {
+      thumbScheduler(run);
+    } catch {
+      thumbIdleQueued = false;
+    }
+    return;
+  }
+  if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 3000 });
+  else setTimeout(run, 0);
+}
+
+// One card per idle slice: the 8ms budget covers queue scanning
+// and the single render owns its slice. Completion reschedules.
+function pumpThumbQueue() {
+  if (thumbInFlight) return;
+  const t0 = thumbNow();
+  for (const [key, job] of thumbJobs) {
+    if (thumbNow() - t0 > IDLE_SLICE_MS) break;
+    if (job.gen !== bitmapGen) {
+      thumbJobs.delete(key);
+      continue;
+    }
+    if (!job.visible) continue;
+    if (cacheGet(key, job.moves)) {
+      thumbJobs.delete(key);
+      continue;
+    }
+    thumbJobs.delete(key);
+    startThumbJob(job);
+    return;
+  }
+}
+
+function renderCardFrame(target, card, env) {
+  renderStageThumb(target, (card && card.events) || [], posterCursor(card && card.events), {
+    layout: card && card.layout,
+    art: (env && env.art) || {},
+    weights: (card && card.weights) || {},
+    attackMap: env && env.attackMap,
+    label: (card && card.id) || "thumbnail",
+  });
+}
+
+function paintSchematicFrame(target, card) {
+  const clean = card && card.layout && card.layout.hosts ? card.layout : classicLayout();
+  const state = card && card.tstate && card.tstate.hosts
+    ? card.tstate
+    : thumbnailState([], clean);
+  const ctx = target.getContext("2d");
+  if (!ctx) return false;
+  paintThumbnail(ctx, thumbnailModel(clean, state, target.width || RENDER_W, target.height || RENDER_H), 1);
+  return true;
+}
+
+// Attach a canvas to a job, dropping targets that left the
+// document first: lobby re-renders rebuild cards faster than
+// idle renders finish, and a capped set would fill with dead
+// canvases while the live one starves.
+function attachThumbTarget(job, canvas) {
+  for (const target of job.targets) {
+    if (target !== canvas && target.isConnected === false) job.targets.delete(target);
+  }
+  job.targets.add(canvas);
+  canvas._thumbKey = job.key;
+}
+
+function queueArenaThumb(canvas, card, env, featured) {
+  const key = (card && card.id) || "";
+  if (!key) return;
+  if (thumbInFlight && thumbInFlight.key === key) {
+    attachThumbTarget(thumbInFlight, canvas);
+    return;
+  }
+  let job = thumbJobs.get(key);
+  if (!job) {
+    job = {
+      key,
+      card,
+      env: env || {},
+      moves: card ? card.moves : 0,
+      featured: Boolean(featured),
+      visible: false,
+      gen: bitmapGen,
+      targets: new Set(),
+    };
+    thumbJobs.set(key, job);
+  }
+  attachThumbTarget(job, canvas);
+  if (typeof IntersectionObserver === "function") {
+    const seen = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          seen.unobserve(canvas);
+          const live = thumbJobs.get(key);
+          if (live) live.visible = true;
+          requestThumbIdle();
+        }
+      }
+    }, { rootMargin: "80px" });
+    seen.observe(canvas);
+    canvas._thumbSeen = seen;
+  } else {
+    job.visible = true;
+    requestThumbIdle();
+  }
+}
+
+function startThumbJob(job) {
+  thumbInFlight = job;
+  const done = (bmp, url) => finishThumbJob(job, bmp, url);
+  const shared = sharedCanvas("render");
+  let painted = false;
+  if (shared) {
+    try {
+      renderCardFrame(shared, job.card, job.env);
+      painted = true;
+    } catch {
+      painted = false;
+    }
+  }
+  const snap = sharedCanvas("snap");
+  if (painted && snap) {
+    try {
+      const sctx = snap.getContext("2d");
+      if (sctx) {
+        sctx.clearRect(0, 0, THUMB_W, THUMB_H);
+        sctx.drawImage(shared, 0, 0, THUMB_W, THUMB_H);
+      }
+    } catch {
+      painted = false;
+    }
+  }
+  if (!painted && snap) {
+    try {
+      painted = paintSchematicFrame(snap, job.card);
+    } catch {
+      painted = false;
+    }
+  }
+  if (!painted) {
+    done(null, null);
+    return;
+  }
+  let url = null;
+  if (job.featured) {
+    try {
+      url = snap.toDataURL("image/jpeg", 0.82);
+    } catch {
+      url = null;
+    }
+  }
+  if (typeof createImageBitmap === "function") {
+    createImageBitmap(snap).then(
+      (bmp) => done(bmp, url),
+      () => done(url, url),
+    );
+  } else {
+    if (!url) {
+      try {
+        url = snap.toDataURL();
+      } catch {
+        url = null;
+      }
+    }
+    done(url, url);
+  }
+}
+
+function finishThumbJob(job, bmp, url) {
+  if (thumbInFlight === job) thumbInFlight = null;
+  if (job.gen === bitmapGen && (bmp || url)) {
+    cacheSet(job.key, { bmp: bmp || url, moves: job.moves });
+    if (job.featured && url) sessionSet(sessionKey(job.key, job.env), { moves: job.moves, url });
+  }
+  const entry = job.gen === bitmapGen ? cacheGet(job.key, job.moves) : null;
+  for (const target of job.targets) {
+    if (entry) blitThumb(target, entry);
+    if (target && target._thumbKey === job.key) target._thumbKey = "";
+  }
+  job.targets.clear();
+  if (thumbJobs.size > 0) requestThumbIdle();
+}
+
+function decodeSessionThumb(canvas, card, env, featured, url) {
+  if (typeof Image === "undefined") {
+    queueArenaThumb(canvas, card, env, featured);
+    return;
+  }
+  const key = (card && card.id) || "";
+  const moves = card ? card.moves : 0;
+  const img = new Image();
+  img.onload = () => {
+    cacheSet(key, { bmp: img, moves });
+    blitThumb(canvas, { bmp: img, moves });
+  };
+  img.onerror = () => queueArenaThumb(canvas, card, env, featured);
+  img.src = url;
+}
+
+// Mount a real arena frame: the canvas stays empty until its
+// bitmap arrives from the idle queue, a memory hit, or the
+// session snapshot. Never renders synchronously: lobby load
+// mounts dozens of cards and must not paint any of them.
+// Falls back to the schematic miniature if the arena render
+// throws. opts: { w, h, featured }.
 export function mountArenaThumb(canvas, card, env, opts) {
   const options = opts || {};
-  const w = 480;
-  const h = 270;
-  canvas.width = w;
-  canvas.height = h;
+  canvas.width = THUMB_W;
+  canvas.height = THUMB_H;
   if (options.w) canvas.style.width = `${options.w}px`;
   if (options.h) canvas.style.height = `${options.h}px`;
   canvas.dataset.thumb = "1";
   const key = (card && card.id) || "";
-  let frame = (key && frameCache.get(key)) || null;
-  if (!frame && typeof document !== "undefined") {
-    frame = document.createElement("canvas");
+  const moves = card ? card.moves : 0;
+  const featured = Boolean(options.featured);
+  canvas._thumbPaint = () => forceThumbPaint(canvas, card, env);
+  if (!key) return canvas;
+  const hit = cacheGet(key, moves);
+  if (hit) {
+    blitThumb(canvas, hit, true);
+    return canvas;
+  }
+  const stored = sessionGet(sessionKey(key, env));
+  if (stored && stored.moves === moves && typeof stored.url === "string") {
+    decodeSessionThumb(canvas, card, env, featured, stored.url);
+    return canvas;
+  }
+  queueArenaThumb(canvas, card, env, featured);
+  return canvas;
+}
+
+// Synchronous force-paint for print and tests: renders now,
+// bypassing the idle queue, and blits straight from the shared
+// render canvas. Never used during lobby load.
+function forceThumbPaint(canvas, card, env) {
+  const shared = sharedCanvas("render");
+  if (!shared) return;
+  try {
+    renderCardFrame(shared, card, env);
+  } catch {
     try {
-      renderStageThumb(frame, (card && card.events) || [], posterCursor(card && card.events), {
-        layout: card && card.layout,
-        art: (env && env.art) || {},
-        weights: (card && card.weights) || {},
-        attackMap: env && env.attackMap,
-        label: key,
-      });
+      paintSchematicFrame(shared, card);
     } catch {
-      const clean = card && card.layout && card.layout.hosts ? card.layout : classicLayout();
-      const state = card && card.tstate && card.tstate.hosts
-        ? card.tstate
-        : thumbnailState([], clean);
-      paintThumbnail(frame.getContext("2d"), thumbnailModel(clean, state, w, h), 1);
-    }
-    if (key) {
-      frameCache.set(key, frame);
-      while (frameCache.size > FRAME_CACHE_MAX) {
-        frameCache.delete(frameCache.keys().next().value);
-      }
+      return;
     }
   }
-  canvas._thumbPaint = () => {
-    const ctx = canvas.getContext("2d");
-    const src = (key && frameCache.get(key)) || frame;
-    if (ctx && src) ctx.drawImage(src, 0, 0, w, h);
-  };
-  canvas._thumbPaint();
-  return canvas;
+  const ctx = canvas.getContext && canvas.getContext("2d");
+  if (!ctx) return;
+  try {
+    ctx.drawImage(shared, 0, 0, THUMB_W, THUMB_H);
+  } catch {
+    // A torn-down canvas never breaks the print path.
+  }
 }
 
 function drawOn(canvas, paintAt, durationMs) {
@@ -413,6 +781,22 @@ function drawOn(canvas, paintAt, durationMs) {
   };
   canvas._animating = true;
   frames(step);
+}
+
+// Static outcome glyph for archive rows: no canvas, no paint,
+// just a tone-colored diamond mark in the thumbnail slot. Rows
+// upgrade to a real arena frame on hover or focus.
+export function outcomeGlyph(outcome) {
+  const tone = (outcome && outcome.tone) || "gray";
+  const label = (outcome && outcome.label) || "Unknown";
+  const g = document.createElement("span");
+  g.className = "lobby-glyph";
+  g.dataset.tone = tone;
+  g.setAttribute("role", "img");
+  g.setAttribute("aria-label", `Outcome: ${label}`);
+  g.innerHTML = "<svg viewBox=\"0 0 16 16\" width=\"18\" height=\"18\" aria-hidden=\"true\">" +
+    "<path d=\"M8 1 L15 8 L8 15 L1 8 Z\"/></svg>";
+  return g;
 }
 
 // Mount one thumbnail canvas: size it, paint it lazily when it
