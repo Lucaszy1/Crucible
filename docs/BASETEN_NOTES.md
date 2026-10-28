@@ -83,3 +83,15 @@ treat the 0 as free; check the Baseten invoice for real dollars.
 - The blue turn investigated (`read_logs`) instead of isolating on a
   bare alert with no log evidence; whether it isolates with stronger
   evidence on this host is untested (no exercise was run).
+
+## Live exercise observation (2026-10-28)
+
+One model-driven live run (`runs/exercise-20261028T1936.jsonl`,
+20 blue turns, default effort, fresh hard network): blue spent
+48,399 prompt + 4,742 completion tokens on Baseten, of which 2,810
+were thinking (~140 per turn). All 20 turns returned tool calls
+with `content: null`, so every blue thought bubble showed the
+`Model chose <tool>.` fallback (quirk 3 above, now confirmed at
+exercise scale). Blue still isolated twice on real probing and the
+run ended Contained. The thinking itself is billed but never
+displayed; only red's text replies appeared as real model prose.
