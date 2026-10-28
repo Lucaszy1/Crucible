@@ -4,10 +4,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  applyCamera, blueLine, calloutForEvent, dollyTarget, FINISH_PACES, finishPlan, FLIGHT_MS,
-  flightLaneRect, frameBudget, frameP95, flightLane, fxForEvent, guardianPulse, initStage,
-  intrusionLevel, laneFeed, lanePoint, paintGuardian, paintIntrusion, redLine, setStageActive,
-  setStageReduced, stageLayout, stageWash, stepCamera,
+  applyCamera, auditorChrome, blueLine, calloutForEvent, dollyTarget, FINISH_PACES, finishPlan,
+  FLIGHT_MS, flightLaneRect, frameBudget, frameP95, flightLane, fxForEvent, guardianPulse,
+  initStage, intrusionLevel, laneFeed, lanePoint, paintGuardian, paintIntrusion, redLine,
+  setStageActive, setStageReduced, stageLayout, stageWash, stepCamera,
 } from "../dashboard/js/stage.js";
 import { arenaGeometry, classicLayout, normalizeLayout } from "../dashboard/js/layout.js";
 
@@ -572,5 +572,28 @@ describe("reduced-motion beat", () => {
     } finally {
       globalThis.setTimeout = realSetTimeout;
     }
+  });
+});
+
+describe("auditorChrome", () => {
+  it("ignores the auditor once it docks outside the wrap", () => {
+    // 1440x812: the wrap holds the canvas, the verdict card shows
+    // in the right rail beside it, vertically overlapping but
+    // horizontally clear. The canvas must ignore it entirely.
+    const frame = { left: 0, top: 0, right: 860, bottom: 484, width: 860, height: 484 };
+    const rail = { left: 876, top: 0, right: 1124, bottom: 484, width: 248, height: 484 };
+    assert.equal(auditorChrome(frame, rail, true), null);
+    assert.equal(auditorChrome(frame, rail, false), null);
+    assert.equal(auditorChrome(frame, null, true), null);
+    // A card overlapping the wrap still constrains the layout.
+    const over = { left: 700, top: 130, right: 950, bottom: 350, width: 250, height: 220 };
+    assert.equal(auditorChrome(frame, over, true), 350);
+    assert.equal(auditorChrome(frame, over, false), null);
+  });
+
+  it("lays the blue lane from the top when no card overlaps", () => {
+    const chrome = { hudBottom: 110, capTop: 420, audBottom: null };
+    const stage = stageLayout({ w: 860, h: 484 }, arenaGeometry(classicLayout()), chrome);
+    assert.equal(stage.lanes.blue.y, 110 + 10);
   });
 });

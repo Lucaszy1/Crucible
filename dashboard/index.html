@@ -160,12 +160,6 @@
           <div class="arena-meter" id="arenaBlueMeter"><i></i><i></i><i></i><i></i></div>
         </div>
       </div>
-      <div id="arenaAud" role="status">
-        <div class="k"><span>Auditor</span><span>Verdict</span></div>
-        <div class="n"><span id="arenaAudNum">-/10</span><span class="w" id="arenaAudWord">--</span></div>
-        <div class="c" id="arenaAudCite"></div>
-        <div class="t" id="arenaAudNote"></div>
-      </div>
       <div id="arenaCap" data-side="system">
         <div id="arenaCapTag" class="system">EXERCISE</div>
         <div id="arenaCapBody"><div id="arenaCapText">Hosts guard one secret.</div><div id="arenaCapSub"></div></div>
@@ -198,11 +192,19 @@
         <p class="end-skip">Esc closes</p>
       </div>
     </div>
-    <aside id="thoughtBlue" class="thought blue" aria-label="Blue thought stream">
-      <button id="thoughtBlueHead" class="thought-head" aria-expanded="true">Blue thought</button>
-      <p id="thoughtBlueText" class="thought-text"></p>
-      <div id="thoughtBlueChips" class="thought-chips"></div>
-    </aside>
+    <div class="arena-rail">
+      <aside id="thoughtBlue" class="thought blue" aria-label="Blue thought stream">
+        <button id="thoughtBlueHead" class="thought-head" aria-expanded="true">Blue thought</button>
+        <p id="thoughtBlueText" class="thought-text"></p>
+        <div id="thoughtBlueChips" class="thought-chips"></div>
+      </aside>
+      <div id="arenaAud" role="status">
+        <div class="k"><span>Auditor</span><span>Verdict</span></div>
+        <div class="n"><span id="arenaAudNum">-/10</span><span class="w" id="arenaAudWord">--</span></div>
+        <div class="c" id="arenaAudCite"></div>
+        <div class="t" id="arenaAudNote"></div>
+      </div>
+    </div>
    </div>
     <div class="arena-bottom">
       <div class="score-strip arena-scores" aria-label="Score summary">

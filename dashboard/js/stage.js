@@ -371,6 +371,17 @@ function el(id) {
   return (typeof document !== "undefined" && document.getElementById(id)) || null;
 }
 
+// Auditor chrome in wrap px, or null when the card is hidden or
+// sits outside the wrap (the right rail): only an overlapping
+// card constrains the canvas layout. Pure, for the harness.
+export function auditorChrome(frame, audBox, shown) {
+  if (!shown || !frame || !audBox) return null;
+  const overlaps = audBox.left < frame.right && audBox.right > frame.left &&
+    audBox.top < frame.bottom && audBox.bottom > frame.top;
+  if (!overlaps) return null;
+  return audBox.bottom - frame.top;
+}
+
 // Measured DOM chrome the canvas must stay clear of, in wrap px.
 export function measureChrome() {
   const wrap = el("arenaWrap");
@@ -381,16 +392,14 @@ export function measureChrome() {
   const frame = wrap.getBoundingClientRect();
   const midBox = mid ? mid.getBoundingClientRect() : null;
   const capBox = cap ? cap.getBoundingClientRect() : null;
-  let audBottom = null;
-  if (aud && aud.classList && aud.classList.contains("show") && aud.getBoundingClientRect) {
-    audBottom = aud.getBoundingClientRect().bottom - frame.top;
-  }
+  const shown = Boolean(aud && aud.classList && aud.classList.contains("show"));
+  const audBox = aud && shown && aud.getBoundingClientRect ? aud.getBoundingClientRect() : null;
   return {
     w: frame.width,
     h: frame.height,
     hudBottom: midBox ? midBox.bottom - frame.top : 0,
     capTop: capBox ? capBox.top - frame.top : frame.height,
-    audBottom,
+    audBottom: auditorChrome(frame, audBox, shown),
   };
 }
 

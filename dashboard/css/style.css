@@ -586,15 +586,21 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
 #arenaCapSub { font-size: clamp(10px, 1.15cqw, 15px); line-height: 1.4; color: #8791a3; max-width: 70ch; }
 #arenaCap.slam #arenaCapBody, #arenaCap.slam #arenaCapTag { animation: arenaSlam .32s cubic-bezier(.2,1.4,.4,1) both; }
 @keyframes arenaSlam { from { transform: translateY(34px) scale(1.08); opacity: 0; } to { transform: none; opacity: 1; } }
+/* Auditor verdict: docked in the right rail under the blue
+   thought panel, off the canvas by construction, so it can never
+   cover hosts or the Guardian. */
+.arena-rail {
+  flex: 0 0 248px; width: 248px; min-width: 0;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.arena-rail > .thought { flex: none; width: 100%; }
 #arenaAud {
-  position: absolute; right: clamp(12px, 2.4cqw, 40px); top: clamp(64px, 13cqh, 130px);
-  width: min(330px, calc(100% - 24px));
+  display: none;
   background: #f2efe8; color: #10131a; padding: 14px 16px 16px;
-  transform: translateX(120%) rotate(2deg); opacity: 0;
-  transition: transform .45s cubic-bezier(.2,1.3,.4,1), opacity .2s;
   box-shadow: 10px 10px 0 #ffc83d; pointer-events: none;
 }
-#arenaAud.show { transform: none; opacity: 1; }
+#arenaAud.show { display: block; animation: arenaAudIn .45s cubic-bezier(.2,1.3,.4,1); }
+@keyframes arenaAudIn { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }
 #arenaAud .k { font-size: 11px; font-weight: 700; line-height: 1; letter-spacing: .2em; text-transform: uppercase; display: flex; justify-content: space-between; }
 #arenaAud .n { font-family: Impact, 'Arial Narrow', sans-serif; font-size: 76px; font-weight: 900; line-height: .9; margin-top: 4px; display: flex; align-items: baseline; gap: 12px; }
 #arenaAud .w { font-family: Impact, 'Arial Narrow', sans-serif; font-size: 24px; font-weight: 900; line-height: 1; letter-spacing: .06em; padding: 3px 8px; background: #2fd27a; color: #04150b; }
@@ -606,14 +612,13 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
   .arena-team small, .arena-meter-l { display: none; }
   .arena-team.red { clip-path: polygon(0 0,100% 0,calc(100% - 18px) 100%,0 100%); }
   .arena-team.blue { clip-path: polygon(18px 0,100% 0,100% 100%,0 100%); }
-  #arenaAud { top: 64px; }
   #arenaReadout { display: none; }
   #arenaCapTag { width: 76px; clip-path: polygon(0 0,100% 0,calc(100% - 14px) 100%,0 100%); }
 }
 @media (prefers-reduced-motion: reduce) {
   #arenaCanvas.glitch { animation: none; }
   #arenaCap.slam #arenaCapBody, #arenaCap.slam #arenaCapTag { animation: none; }
-  #arenaAud { transition: none; }
+  #arenaAud.show { animation: none; }
   .arena-tug.hit { animation: none; }
   .arena-tug.tie em { animation: none; }
 }
@@ -832,6 +837,8 @@ canvas.lobby-thumb:focus-visible { outline: 2px solid #8fb8ff; outline-offset: 2
   .arena-row3 { flex-direction: column; align-items: stretch; }
   .arena-row3 > .arena-canvas-wrap { order: 0; width: 100%; }
   .arena-row3 > .thought { order: 1; flex: none; width: 100%; max-height: 30vh; }
+  .arena-row3 > .arena-rail { order: 2; flex: none; width: 100%; }
+  .arena-row3 > .arena-rail > .thought { max-height: 30vh; }
 }
 .thought.blue .thought-chips { justify-content: flex-end; }
 .thought.empty { display: none; }
@@ -964,8 +971,8 @@ canvas.lobby-thumb:focus-visible { outline: 2px solid #8fb8ff; outline-offset: 2
 .end-btns .btn.pri { background: #f2efe8; border-color: #f2efe8; color: #10131a; }
 .end-skip { margin: 0; font-size: 11px; color: #5d667a; }
 
-@container (max-width: 640px) {
-  #arenaAud { width: min(300px, calc(100% - 24px)); padding: 10px 12px 12px; }
+@media (max-width: 640px) {
+  #arenaAud { padding: 10px 12px 12px; }
   #arenaAud .n { font-size: 44px; }
   #arenaAud .w { font-size: 18px; }
   #arenaAud .c, #arenaAud .t { font-size: 11px; }
