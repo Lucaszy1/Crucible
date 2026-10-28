@@ -476,6 +476,66 @@ export function outcomeLine(key) {
   }
 }
 
+// Control bar value from real data: red progress notches lit over
+// total notches, minus blue containment share (successful isolate
+// or patch moves, two for a full share). Failed moves light no
+// notch and count no containment, so they never move the bar.
+// The settled outcome then pins the winning side: a secret read
+// parks the bar at the red end, and a decided blue outcome holds
+// it at least a toe over the blue line, so the final position can
+// never disagree with displayOutcome. Quiet stalemates sit center.
+export const BAR_SETTLE_MIN = 0.15;
+
+export function controlBar(fullEvents, sliceEvents) {
+  const slice = sliceEvents || [];
+  const out = displayOutcome(slice);
+  const prog = redNotches(fullEvents || [], slice);
+  const lit = prog.notches.filter(Boolean).length;
+  const redShare = prog.total > 0 ? lit / prog.total : 0;
+  let containments = 0;
+  for (const ev of slice) {
+    if (ev && ev.actor === "blue" && (ev.result || {}).ok === true &&
+        DISPLAY_CONTAINMENT.includes(ev.tool)) containments += 1;
+  }
+  const blueShare = Math.min(1, containments / 2);
+  const raw = redShare - blueShare;
+  let value = raw;
+  let settled = "open";
+  if (out.key === "secret-exposed") {
+    value = 1;
+    settled = "red";
+  } else if (out.key === "contained" || out.key === "held" || out.key === "no-intrusion") {
+    if (value > -BAR_SETTLE_MIN) {
+      value = -BAR_SETTLE_MIN;
+      settled = "blue";
+    }
+  } else if (out.key === "uncontained") {
+    if (value < BAR_SETTLE_MIN) {
+      value = BAR_SETTLE_MIN;
+      settled = "red";
+    }
+  }
+  return {
+    value, raw, redShare, blueShare, lit, total: prog.total,
+    containments, settled, key: out.key,
+  };
+}
+
+// One-line tooltip for the control bar, naming the exact inputs.
+export function controlBarTip(detail) {
+  const d = detail || {};
+  const lit = Number(d.lit) || 0;
+  const total = Number(d.total) || 0;
+  const n = Number(d.containments) || 0;
+  const side = (Number(d.value) || 0) > 0 ? "red" : (Number(d.value) || 0) < 0 ? "blue" : "even";
+  const moves = n === 1 ? "move" : "moves";
+  let tip = `Control: red holds ${lit} of ${total} progress notches, ` +
+    `blue has ${n} containment ${moves} (${side} side).`;
+  if (d.settled === "red") tip += " Settled red: the secret was read or red is uncontained.";
+  else if (d.settled === "blue") tip += " Settled blue: containment holds.";
+  return tip;
+}
+
 // Featured lobby order: Contained first, then Secret exposed for the
 // drama, then Held, then the quiet and unfinished cases, with No
 // intrusion last. Stable: input order wins inside each group.

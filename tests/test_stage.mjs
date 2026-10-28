@@ -4,7 +4,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  applyCamera, blueLine, calloutForEvent, clashOrbX, dollyTarget, FLIGHT_MS, frameBudget, frameP95,
+  applyCamera, blueLine, calloutForEvent, dollyTarget, FLIGHT_MS, frameBudget, frameP95,
   flightLane, fxForEvent, guardianPulse, intrusionLevel, laneFeed, lanePoint, paintGuardian,
   paintIntrusion, redLine, stageLayout, stageWash, stepCamera,
 } from "../dashboard/js/stage.js";
@@ -437,13 +437,16 @@ describe("entity levels", () => {
     assert.equal(calloutForEvent(null, map), null);
   });
 
-  it("slides the clash orb with the score tug", () => {
-    assert.equal(clashOrbX(300, 1100, 0), 700);
-    assert.ok(clashOrbX(300, 1100, 1) > 700, "red ahead pushes right");
-    assert.ok(clashOrbX(300, 1100, -1) < 700, "containment pushes left");
-    assert.equal(clashOrbX(300, 1100, 1), 300 + 800 * 0.88);
-    assert.equal(clashOrbX(300, 1100, -1), 300 + 800 * 0.12);
-    assert.equal(clashOrbX(300, 1100, 99), clashOrbX(300, 1100, 1), "clamped");
+  it("keeps the flight lane peak above every endpoint", () => {
+    for (const ends of [
+      [{ x: 100, y: 400 }, { x: 900, y: 400 }],
+      [{ x: 900, y: 380 }, { x: 100, y: 420 }],
+      [{ x: 40, y: 200 }, { x: 120, y: 210 }],
+    ]) {
+      const lane = flightLane(ends[0], ends[1]);
+      const mid = lanePoint(lane, 0.5).y;
+      assert.ok(mid < ends[0].y && mid < ends[1].y, `peak clears: ${mid}`);
+    }
   });
 
   it("recovers to full detail only when frames are fast again", () => {

@@ -8,6 +8,8 @@ import {
   acceptLiveTraffic,
   autoplayQueue,
   bootStale,
+  controlBar,
+  controlBarTip,
   displayOutcome,
   endCardStats,
   followOpensLive,
@@ -303,5 +305,82 @@ describe("stripModel", () => {
     assert.equal(followOpensLive(true, "idle", null, { running: false }), false);
     assert.equal(followOpensLive(true, "idle", null, { running: true }), false);
     assert.equal(followOpensLive(true, "idle", null, null), false);
+  });
+});
+
+describe("controlBar", () => {
+  it("sits center on a quiet exercise", () => {
+    const bar = controlBar([], []);
+    assert.equal(bar.value, 0);
+    assert.equal(bar.raw, 0);
+    assert.equal(bar.settled, "open");
+    assert.equal(bar.key, "stalemate");
+  });
+
+  it("pushes red on red progress and blue on containment", () => {
+    const full = [AUTH_APP(), ISOLATE("app")];
+    const red = controlBar(full, [AUTH_APP()]);
+    assert.ok(red.value > 0, `uncontained reads red, got ${red.value}`);
+    assert.equal(red.key, "uncontained");
+    const blue = controlBar(full, full);
+    assert.ok(blue.value < 0, `contained reads blue, got ${blue.value}`);
+    assert.equal(blue.key, "contained");
+    assert.equal(blue.lit, 0, "isolating the foothold drops the notch");
+  });
+
+  it("parks at the red end on a secret read", () => {
+    const full = [AUTH_APP(), ISOLATE("app"), AUTH_DB(), SECRET()];
+    const bar = controlBar(full, full);
+    assert.equal(bar.value, 1);
+    assert.equal(bar.settled, "red");
+    assert.equal(bar.key, "secret-exposed");
+  });
+
+  it("never moves on failed moves", () => {
+    const failScan = ev("red", "scan_host", { host: "web" }, { ok: false, host: "web" });
+    const failIso = ev("blue", "isolate_host", { host: "app" }, { ok: false, host: "app" });
+    const bar = controlBar([failScan, failIso, FAIL_AUTH()], [failScan, failIso, FAIL_AUTH()]);
+    assert.equal(bar.value, 0);
+    assert.equal(bar.lit, 0);
+    assert.equal(bar.containments, 0);
+  });
+
+  it("agrees with displayOutcome on every final", () => {
+    const cases = [
+      { events: [AUTH_APP(), ISOLATE("app")], side: -1 },
+      { events: [AUTH_DB(), SECRET()], side: 1 },
+      { events: [ISOLATE("web")], side: -1 },
+      { events: [REPORT()], side: -1 },
+      { events: [AUTH_APP()], side: 1 },
+      { events: [], side: 0 },
+    ];
+    for (const { events, side } of cases) {
+      const bar = controlBar(events, events);
+      const key = displayOutcome(events).key;
+      if (side === 0) assert.equal(bar.value, 0, key);
+      else if (side < 0) assert.ok(bar.value < 0, `${key} ends blue, got ${bar.value}`);
+      else assert.ok(bar.value > 0, `${key} ends red, got ${bar.value}`);
+    }
+  });
+
+  it("holds the blue side even when red leads on notches", () => {
+    const full = [AUTH_APP(), AUTH_DB(), ISOLATE("web")];
+    const bar = controlBar(full, full);
+    assert.equal(bar.key, "contained");
+    assert.ok(bar.raw > 0, `raw favors red, got ${bar.raw}`);
+    assert.ok(bar.value < 0, `settle pins blue, got ${bar.value}`);
+    assert.equal(bar.settled, "blue");
+  });
+
+  it("names its inputs in the tooltip", () => {
+    const full = [AUTH_APP(), AUTH_DB()];
+    const tip = controlBarTip(controlBar(full, [AUTH_APP()]));
+    assert.ok(tip.includes("1 of "), tip);
+    assert.ok(tip.includes("0 containment moves"), tip);
+    assert.ok(tip.includes("red side"), tip);
+    assertShowCopy(tip);
+    const settled = controlBarTip(controlBar([SECRET()], [SECRET()]));
+    assert.ok(settled.includes("Settled red"), settled);
+    assertShowCopy(settled);
   });
 });

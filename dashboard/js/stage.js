@@ -8,7 +8,7 @@
 // host on screen.
 import { arenaGeometry, classicLayout, nodeLabels, roleSub } from "./layout.js";
 import {
-  displayOutcome, eventHost, hostBlocks, pressureValue, redNotches,
+  controlBar, controlBarTip, displayOutcome, eventHost, hostBlocks, redNotches,
   reduceHostStates, scoreEvents,
 } from "./state.js";
 import { describeEvent } from "./story.js";
@@ -24,8 +24,8 @@ const DOLLY_ZOOM = 1.1;
 // Entity presence radius as a share of play height: each entity
 // spans roughly 30 to 35 percent of the stage height.
 const ENTITY_SHARE = 0.16;
-// Reserved rail under the HUD where the clash orb travels. Hosts
-// never enter it, so the orb can never cover a host.
+// Reserved rail under the HUD where the control bar's tie bursts
+// open. Hosts never enter it, so bursts can never cover a host.
 const ORB_RAIL = 30;
 
 function worldBounds(nodes) {
@@ -464,7 +464,11 @@ export function initStage(canvas, opts) {
     guardian: 0.15,
     surge: { red: 0, blue: 0 },
     knock: { red: 0, blue: 0 },
-    tug: 0,
+    barTarget: 0,
+    barShown: 0,
+    barArmed: false,
+    barRunKey: "",
+    barCursor: 0,
     fx: [],
     impacts: [],
     sparks: [],
@@ -481,6 +485,7 @@ export function initStage(canvas, opts) {
       exercise: el("arenaExercise"),
       move: el("arenaMove"),
       total: el("arenaTotal"),
+      tug: el("arenaTug"),
       tugR: el("arenaTugR"),
       tugM: el("arenaTugM"),
       score: el("arenaScore"),
@@ -853,7 +858,7 @@ export function renderStageStatic(refs, events, cursor, opts, instant) {
     const states = reduceHostStates(slice, hosts);
     const blocks = hostBlocks(slice, hosts);
     const prog = redNotches(list, slice);
-    const pressure = pressureValue(slice, clean);
+    const bar = controlBar(list, slice);
     const scoreInfo = scoreEvents(slice, weights);
     const ended = Boolean(o.finalScore) && at >= list.length && list.length > 0;
     const score = ended && typeof o.finalScore.blue_score === "number"
@@ -883,7 +888,7 @@ export function renderStageStatic(refs, events, cursor, opts, instant) {
     refs.states = states;
     refs.attackMap = o.attackMap || null;
     refs.snap = {
-      states, blocks, hostOrder: hosts, pressure,
+      states, blocks, hostOrder: hosts, bar,
       level: prog.level, notches: prog.notches, total: prog.total,
       score, moves: at, totalMoves: list.length, label: o.label || "Exercise",
       caption, sub, tag, tagTone: tone,
@@ -902,7 +907,7 @@ export function renderStageStatic(refs, events, cursor, opts, instant) {
     refs.exposed = exposed;
     refs.intrusion = intrusionLevel(list, slice);
     refs.guardian = guardianPulse(slice);
-    refs.tug = pressure;
+    refs.barTarget = bar.value;
     refs.fx = [];
     refs.impacts = [];
     refs.sparks = [];
@@ -931,12 +936,96 @@ export function renderStageStatic(refs, events, cursor, opts, instant) {
         blue: { at: -1, chars: Infinity },
       };
     }
+    // Tie tracking runs after the transient clears so its burst
+    // ring and sparks survive the rebuild.
+    trackBarTie(refs, bar, at, o.label || "Exercise", list.length, instant);
     updateStageHud(refs);
     hideStageAuditor(refs, true);
     drawStage(refs);
     return { states };
   }
   return { states: {} };
+}
+
+// Tie and start tracking for the control bar: a fresh run pops
+// the marker once at the start, and an exact return to center
+// after action on either side pops it again. Scrub rebuilds snap
+// the bar without effects.
+function trackBarTie(refs, bar, at, label, total, instant) {
+  const key = `${label}|${total}`;
+  if (key !== refs.barRunKey) {
+    refs.barRunKey = key;
+    refs.barArmed = false;
+    refs.barShown = bar.value;
+    refs.barCursor = at;
+    if (!instant && !refs.reduced) barTieBurst(refs);
+    return;
+  }
+  if (at === 0 && refs.barCursor > 0) {
+    refs.barCursor = 0;
+    refs.barArmed = false;
+    refs.barShown = bar.value;
+    if (!instant && !refs.reduced) barTieBurst(refs);
+    return;
+  }
+  refs.barCursor = at;
+  if (instant || refs.reduced) {
+    refs.barShown = bar.value;
+    return;
+  }
+  if (bar.raw === 0 && refs.barArmed) {
+    refs.barArmed = false;
+    barTieBurst(refs);
+  } else if (bar.raw !== 0) {
+    refs.barArmed = true;
+  }
+}
+
+// Marker position in canvas pixels, or null when the DOM rects
+// cannot be measured (software harness, hidden tab).
+function barMarkerCanvas(refs) {
+  const hud = refs.hud;
+  if (!hud || !hud.tugM || !refs.canvas) return null;
+  const getRect = (node) => (node && typeof node.getBoundingClientRect === "function"
+    ? node.getBoundingClientRect()
+    : null);
+  const c = getRect(refs.canvas);
+  const m = getRect(hud.tugM);
+  if (!c || !m || !(c.width > 0) || !(m.width > 0)) return null;
+  const x = m.left + m.width / 2 - c.left;
+  const y = m.bottom - c.top;
+  if (x < 0 || y < 0 || x > c.width || y > c.height) return null;
+  return { x, y };
+}
+
+// Tie burst: the marker pops (CSS) and a small cold explosion
+// opens under the bar (canvas ring plus sparks).
+function barTieBurst(refs) {
+  if (!refs || refs.reduced) return;
+  const hud = refs.hud;
+  if (hud && hud.tug && hud.tug.classList) {
+    hud.tug.classList.remove("tie");
+    void hud.tug.offsetWidth;
+    hud.tug.classList.add("tie");
+  }
+  const at = barMarkerCanvas(refs);
+  if (at) {
+    refs.fx.push({
+      kind: "ring", x: at.x, y: at.y, t0: refs.clock, dur: 600,
+      color: "255,255,255", r0: 6, r1: 70,
+    });
+    spawnSparks(refs, at.x, at.y, "white", 14);
+  }
+}
+
+// Every landed move thumps the bar marker (CSS pulse only; the
+// projectile it launched carries the canvas motion).
+function pulseBar(refs) {
+  const hud = refs && refs.hud;
+  if (!hud || !hud.tug || !hud.tug.classList || (refs && refs.reduced)) return;
+  hud.tug.classList.remove("hit");
+  void hud.tug.offsetWidth;
+  hud.tug.classList.add("hit");
 }
 
 export function stageNotify(refs, ev, states, speed) {
@@ -951,7 +1040,6 @@ export function stageNotify(refs, ev, states, speed) {
   refs.intrusion = intrusionLevel(refs.events, at);
   refs.guardian = guardianPulse(at);
   refs.wash = stageWash(at);
-  refs.tug = pressureValue(at, refs.layout && refs.layout.hosts ? refs.layout : null);
   if (ev.actor === "red") refs.surge.red = refs.clock + 900;
   if (ev.actor === "blue") refs.surge.blue = refs.clock + 900;
   const prevRed = refs.lastRedHost;
@@ -959,12 +1047,7 @@ export function stageNotify(refs, ev, states, speed) {
     refs.lastRedHost = eventHost(ev);
   }
   if (!refs.reduced && (ev.actor === "red" || ev.actor === "blue")) {
-    const orb = orbPoint(refs);
-    if (orb) {
-      refs.fx.push({ kind: "ring", x: orb.x, y: orb.y, t0: refs.clock, dur: 700,
-        color: ev.actor === "red" ? "255,90,80" : "127,212,255", r0: 8, r1: 64 });
-      spawnSparks(refs, orb.x, orb.y, ev.actor === "red" ? "red" : "blue", 10);
-    }
+    pulseBar(refs);
     for (const fx of fxForEvent(ev, { jewel: refs.jewel, lastRedHost: prevRed })) {
       const entry = { ...fx, t0: refs.clock };
       refs.fx.push(entry);
@@ -1005,9 +1088,12 @@ function updateStageHud(refs) {
   const hud = refs.hud;
   const snap = refs.snap;
   if (!hud || !snap) return;
-  const pc = `${((0.5 + Math.max(-1, Math.min(1, snap.pressure)) / 2) * 100).toFixed(1)}%`;
-  if (hud.tugR) hud.tugR.style.width = pc;
-  if (hud.tugM) hud.tugM.style.left = pc;
+  paintBarDom(refs);
+  if (hud.tug && snap.bar) {
+    const tip = controlBarTip(snap.bar);
+    hud.tug.setAttribute("title", tip);
+    hud.tug.setAttribute("aria-label", `Control bar. ${tip}`);
+  }
   if (hud.redMeter && typeof document !== "undefined") {
     const segs = ensureSegs(hud.redMeter, snap.notches.length);
     for (let i = 0; i < segs.length; i += 1) segs[i].className = snap.notches[i] ? "on" : "";
@@ -1038,11 +1124,44 @@ function updateStageHud(refs) {
     if (hud.capSub) hud.capSub.textContent = snap.sub;
   }
   if (hud.readout) {
-    const link = snap.pressure > 0.3 ? "CONTESTED" : snap.pressure < -0.3 ? "HELD" : "OPEN";
+    const shown = Number(refs.barShown) || 0;
+    const link = shown > 0.3 ? "CONTESTED" : shown < -0.3 ? "HELD" : "OPEN";
     hud.readout.textContent =
       `${snap.label || "EX"}  MOVE ${snap.moves}/${snap.totalMoves}\n` +
       `LANES R${refs.lanes.red.length} B${refs.lanes.blue.length}\n` +
       `LINK ${link}`;
+  }
+}
+
+// Control bar DOM paint from the eased value: red fill grows from
+// the left, the marker rides the boundary.
+function paintBarDom(refs) {
+  const hud = refs.hud;
+  if (!hud) return;
+  const pc = `${((0.5 + Math.max(-1, Math.min(1, Number(refs.barShown) || 0)) / 2) * 100).toFixed(1)}%`;
+  if (hud.tugR) hud.tugR.style.width = pc;
+  if (hud.tugM) hud.tugM.style.left = pc;
+}
+
+// One eased step of the shown bar toward its target. A lead change
+// mid-slide crosses center and pops the marker like an exact tie.
+function stepBarShown(refs, dtMs) {
+  const target = Math.max(-1, Math.min(1, Number(refs.barTarget) || 0));
+  if (refs.reduced) {
+    refs.barShown = target;
+    paintBarDom(refs);
+    return;
+  }
+  const prev = Number(refs.barShown) || 0;
+  const k = 1 - Math.exp(-Math.max(0, dtMs || 16) / 1000 * 6);
+  let next = prev + (target - prev) * k;
+  if (Math.abs(target - next) < 0.002) next = target;
+  refs.barShown = next;
+  paintBarDom(refs);
+  // A sign flip mid-slide is a lead change through center; an
+  // exact landing on zero belongs to the tie tracker instead.
+  if (prev !== 0 && next !== 0 && Math.sign(prev) !== Math.sign(next)) {
+    barTieBurst(refs);
   }
 }
 
@@ -1296,13 +1415,6 @@ export function calloutForEvent(ev, attackMap) {
   return { tech, line: describeEvent(ev), side: ev.actor, failed: (ev.result || {}).ok === false };
 }
 
-// Clash orb position on the rail: red pressure pushes it toward the
-// Guardian's side, containment pushes it back toward the Intrusion.
-export function clashOrbX(x0, x1, pressure) {
-  const p = Math.max(-1, Math.min(1, Number(pressure) || 0));
-  return x0 + (x1 - x0) * (0.5 + (p / 2) * 0.76);
-}
-
 // Projectile flight lane between the entities: a quadratic arc that
 // lifts over the network so the exchange reads above the hosts.
 // Pure: endpoints in, lane out; lanePoint samples it.
@@ -1387,6 +1499,7 @@ function startStageLoop(refs) {
     }
     refs.clock += dt;
     refs.cam = stepCamera(refs.cam, refs.camTarget, dt);
+    stepBarShown(refs, dt);
     if (refs.idleUntil && refs.clock > refs.idleUntil) {
       refs.idleUntil = 0;
       refs.camTarget = { dx: 0, dy: 0, z: 1 };
@@ -1448,17 +1561,6 @@ function hostScreen(refs, id) {
   if (!node) return null;
   const at = applyCamera(refs.stage, refs.cam, node.x, node.y);
   return { x: at.x, y: at.y, r: node.r * refs.stage.view.scale * refs.cam.z, kind: node.kind || "standard" };
-}
-
-// Clash orb anchor on its rail, or null on narrow stages.
-function orbPoint(refs) {
-  const stage = refs.stage;
-  if (!stage || stage.mode !== "side") return null;
-  const top = stage.chrome.hudBottom + stage.gap;
-  return {
-    x: clashOrbX(stage.band.x0, stage.band.x1, refs.tug),
-    y: top + ORB_RAIL / 2,
-  };
 }
 
 function spawnSparks(refs, x, y, color, count) {
@@ -1662,7 +1764,6 @@ function paintFrame(refs, ctx) {
   paintLinks(refs, ctx);
   paintHosts(refs, ctx);
   paintEntities(refs, ctx);
-  paintClash(refs, ctx);
   paintFx(refs, ctx);
   paintLanes(refs, ctx);
   paintParticles(refs, ctx);
@@ -2227,59 +2328,7 @@ export function paintGuardian(ctx, env, x, y, r, energy, t) {
   ctx.restore();
 }
 
-// The clash orb rides its rail between the entities: red pressure
-// pushes it toward the Guardian, containment pushes it back. A beam
-// strand from each entity feeds it; sparks and rings fire on events.
-function paintClash(refs, ctx) {
-  const orb = orbPoint(refs);
-  if (!orb) return;
-  const slots = refs.stage.entities;
-  const t = refs.clock / 1000;
-  const tug = Math.max(-1, Math.min(1, refs.tug || 0));
-  ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-  ctx.lineCap = "round";
-  const strands = [
-    { from: { x: slots.intrusion.x + slots.intrusion.r * 0.9, y: slots.intrusion.y }, color: "255,70,60" },
-    { from: { x: slots.guardian.x - slots.guardian.r * 0.9, y: slots.guardian.y }, color: "90,170,255" },
-  ];
-  for (const [i, s] of strands.entries()) {
-    const wob = Math.sin(t * 6 + i * 2.4) * 10;
-    const mx = (s.from.x + orb.x) / 2;
-    const my = (s.from.y + orb.y) / 2 + wob - 30;
-    ctx.strokeStyle = `rgba(${s.color},0.5)`;
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.moveTo(s.from.x, s.from.y);
-    ctx.quadraticCurveTo(mx, my, orb.x, orb.y);
-    ctx.stroke();
-    ctx.strokeStyle = `rgba(${s.color},0.2)`;
-    ctx.lineWidth = 6;
-    ctx.stroke();
-  }
-  ctx.restore();
-  const hot = tug > 0.15 ? "red" : tug < -0.15 ? "blue" : null;
-  const sprites = refs.sprites || {};
-  drawGlow(ctx, sprites.white, orb.x, orb.y, 26, 0.7);
-  if (hot) drawGlow(ctx, hot === "red" ? sprites.red : sprites.blue, orb.x, orb.y, 20, 0.8);
-  ctx.save();
-  ctx.fillStyle = hot === "red" ? "#ffd9d4" : hot === "blue" ? "#d9e9ff" : "#f2f4fa";
-  ctx.beginPath();
-  ctx.arc(orb.x, orb.y, 8 + Math.sin(t * 9) * 1.5, 0, 6.283);
-  ctx.fill();
-  // Crackle arcs around the orb.
-  ctx.strokeStyle = hot === "blue" ? "rgba(127,212,255,0.8)" : "rgba(255,110,100,0.8)";
-  ctx.lineWidth = 1.5;
-  for (let i = 0; i < 3; i += 1) {
-    const a0 = t * (2 + i) + i * 2.1;
-    ctx.beginPath();
-    ctx.arc(orb.x, orb.y, 12 + ((i * 5 + t * 7) % 8), a0, a0 + 1.4);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
-// Transient event effects: rings, sparks, beams, callouts. Entries
+// Transient event effects: rings, sparks, projectiles, callouts. Entries
 // resolve host positions at paint time so the camera carries them.
 function paintFx(refs, ctx) {
   for (const fx of refs.fx) {
