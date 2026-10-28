@@ -1,0 +1,15 @@
+{
+  "business_weights": {
+    "app": 3,
+    "db": 5,
+    "web": 3,
+    "workstation": 1
+  },
+  "daily_limit": 5.0,
+  "hosts": [
+    "web",
+    "app",
+    "db",
+    "workstation"
+  ]
+}
