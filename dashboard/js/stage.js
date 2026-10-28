@@ -1064,20 +1064,55 @@ export function renderStageThumb(canvas, lane, cursor, opts) {
   const o = opts || {};
   const refs = initStage(canvas, { art: o.art || {}, reduced: true });
   refs.hud = {};
-  refs.geom = { cw: 480, ch: 270, dpr: 1 };
-  canvas.width = 480;
-  canvas.height = 270;
+  // 800x450 keeps the wide side composition (big entities facing
+  // off across the network); 480 wide would fall into the stacked
+  // narrow layout where the clash reads as specks.
+  refs.geom = { cw: 800, ch: 450, dpr: 1 };
+  canvas.width = 800;
+  canvas.height = 450;
   refs.chromeOverride = { w: 0, h: 0 };
   setStageLayout(refs, o.layout || classicLayout());
   const list = lane || [];
   const at = Math.max(0, Math.min(list.length, cursor || 0));
-  renderStageStatic(refs, list, at, {
-    weights: o.weights || {},
-    label: o.label || "thumbnail",
-    display: null,
-    layout: refs.layout,
-    attackMap: o.attackMap,
-  }, true);
+  // The static build always clears staged fx and paints once, so
+  // the context hides during the build: layout and states compute,
+  // the paint waits for the staged clash below. One paint total.
+  const ctx = refs.ctx;
+  refs.ctx = null;
+  try {
+    renderStageStatic(refs, list, at, {
+      weights: o.weights || {},
+      label: o.label || "thumbnail",
+      display: null,
+      layout: refs.layout,
+      attackMap: o.attackMap,
+    }, true);
+  } finally {
+    refs.ctx = ctx;
+  }
+  // Poster staging: the poster event's own effects freeze
+  // mid-flight, so the still shows the clash, not the calm after.
+  // No impact ledger: sparks and hit-stop stay live-only.
+  const poster = list[at - 1];
+  if (poster && (poster.actor === "red" || poster.actor === "blue")) {
+    let lastRed = null;
+    for (const ev of list.slice(0, Math.max(0, at - 1))) {
+      if (ev && ev.actor === "red" && ev.tool === "try_credential" &&
+          (ev.result || {}).authenticated === true) {
+        lastRed = eventHost(ev);
+      }
+    }
+    const jewel = refs.layout ? refs.layout.jewel_host : null;
+    for (const fx of fxForEvent(poster, { jewel, lastRedHost: lastRed })) {
+      const span = Number(fx.flight) || Number(fx.dur) || 800;
+      refs.fx.push({ ...fx, t0: refs.clock - span * 0.45 });
+    }
+  }
+  drawStage(refs);
+  const slots = refs.stage ? refs.stage.entities : null;
+  refs.thumbCrop = slots
+    ? clashCrop(slots.intrusion, slots.guardian, 800, 450)
+    : { sx: 0, sy: 0, sw: 800, sh: 450 };
   return refs;
 }
 
@@ -1563,6 +1598,42 @@ export function flightLaneRect(intrusion, guardian, pad) {
   const x0 = Math.min(...xs) - margin;
   const y0 = Math.min(...ys) - margin;
   return { x: x0, y: y0, w: Math.max(...xs) - x0 + margin, h: Math.max(...ys) - y0 + margin };
+}
+
+// Clash crop for thumbnails: the tightest 16:9 box holding both
+// entities and the full projectile lane between them, so a card
+// reads as red versus blue with the hosts behind. Clamped to the
+// frame. Pure, for tests.
+export function clashCrop(red, blue, W, H) {
+  const w = Math.max(48, Number(W) || 480);
+  const h = Math.max(27, Number(H) || 270);
+  const r = red || { x: w * 0.22, y: h * 0.55, r: 40 };
+  const b = blue || { x: w * 0.78, y: h * 0.55, r: 40 };
+  const lane = flightLaneRect(r, b, 0);
+  const m = Math.max(20, ((Number(r.r) || 40) + (Number(b.r) || 40)) / 2 * 0.9);
+  const x0 = Math.min(lane.x, r.x - r.r, b.x - b.r) - m;
+  const x1 = Math.max(lane.x + lane.w, r.x + r.r, b.x + b.r) + m;
+  const y0 = Math.min(lane.y, r.y - r.r, b.y - b.r) - m;
+  const y1 = Math.max(lane.y + lane.h, r.y + r.r, b.y + b.r) + m;
+  let cw = x1 - x0;
+  let ch = (cw * 9) / 16;
+  if (ch < y1 - y0) {
+    ch = y1 - y0;
+    cw = (ch * 16) / 9;
+  }
+  if (cw > w) {
+    cw = w;
+    ch = (cw * 9) / 16;
+  }
+  if (ch > h) {
+    ch = h;
+    cw = (ch * 16) / 9;
+  }
+  cw = Math.round(cw);
+  ch = Math.round(ch);
+  const sx = Math.round(Math.min(Math.max(0, (x0 + x1) / 2 - cw / 2), Math.max(0, w - cw)));
+  const sy = Math.round(Math.min(Math.max(0, (y0 + y1) / 2 - ch / 2), Math.max(0, h - ch)));
+  return { sx, sy, sw: cw, sh: ch };
 }
 
 // Flight times in ms by projectile size: travel runs about half a
