@@ -10,6 +10,7 @@ import {
   meltChar, meltDrift, meltGlyphAlpha, meltGlyphPx, meltHaloAlpha, meltSpriteAlpha, meltStride, moveSpanMs, paintGuardian,
   paintIntrusion, projBody, redLine, renderStageStatic, renderStageThumb, sampleMeltMask,
   setStageActive, setStageReduced, stageLayout, stageNotify, stageWash, stepCamera, trailSpan,
+  winnerBeatTarget,
 } from "../dashboard/js/stage.js";
 import { arenaGeometry, classicLayout, normalizeLayout } from "../dashboard/js/layout.js";
 
@@ -478,15 +479,44 @@ describe("entity levels", () => {
     assert.equal(plan.charge, 600);
     assert.equal(plan.gap, 2000);
     assert.ok(plan.titanFlight > 0, `titan flight ${plan.titanFlight}`);
-    assert.ok(plan.total >= 9000 && plan.total <= 10000, `standard total ${plan.total}`);
+    assert.ok(plan.total >= 7500 && plan.total <= 8500, `standard total ${plan.total}`);
     const quick = finishPlan("quick");
-    assert.ok(quick.total >= 5500 && quick.total <= 6500, `quick total ${quick.total}`);
+    assert.ok(quick.total >= 4800 && quick.total <= 5600, `quick total ${quick.total}`);
     assert.ok(quick.gap < plan.gap, "quick gaps shrink");
     const slow = finishPlan("slow");
-    assert.ok(slow.total >= 16500 && slow.total <= 18000, `slow total ${slow.total}`);
+    assert.ok(slow.total >= 13900 && slow.total <= 14900, `slow total ${slow.total}`);
     assert.ok(slow.gap > plan.gap, "slow gaps stretch");
     assert.deepEqual(finishPlan("bogus"), plan, "unknown pace falls back to standard");
     assert.equal(FINISH_PACES.standard, 1);
+  });
+
+  it("ends the card about a second after the explosion", () => {
+    // The dissolve keeps its own timing and finishes behind the
+    // card; the tail after the blast stays near one second.
+    for (const pace of ["quick", "standard", "slow"]) {
+      const plan = finishPlan(pace);
+      const tail = plan.explodeDur + plan.cardDelay;
+      const want = Math.round(1000 * (FINISH_PACES[pace] || 1));
+      assert.ok(Math.abs(tail - want) <= 60, `${pace} tail ${tail}`);
+    }
+  });
+
+  it("cuts the tail camera toward the winner", () => {
+    const stage = {
+      band: { x0: 100, x1: 900 },
+      area: { top: 60, bottom: 660 },
+      entities: {
+        intrusion: { x: 250, y: 360, r: 80 },
+        guardian: { x: 750, y: 360, r: 80 },
+      },
+    };
+    const blue = winnerBeatTarget(stage, "blue");
+    assert.equal(blue.z, 1);
+    assert.ok(blue.dx < 0, "blue wins shift the frame left");
+    assert.ok(Math.abs(blue.dx) <= 70, `beat drift ${blue.dx}`);
+    const red = winnerBeatTarget(stage, "red");
+    assert.ok(red.dx > 0, "red wins shift the frame right");
+    assert.deepEqual(winnerBeatTarget(null, "blue"), { dx: 0, dy: 0, z: 1 });
   });
 
   it("keeps the flight lane peak above every endpoint", () => {

@@ -198,6 +198,28 @@ export function dollyTarget(layout, nodes, hostId) {
   return { dx, dy, z };
 }
 
+// Winner beat: after the blast the tail plays on the winner
+// instead of the empty spot where the loser stood. A short pan
+// toward the winner's side at rest zoom; capped so no host
+// leaves the frame. Pure.
+export function winnerBeatTarget(stage, winner) {
+  const rest = { dx: 0, dy: 0, z: 1 };
+  const slots = stage && stage.entities;
+  const slot = slots
+    ? (winner === "blue" ? slots.guardian : slots.intrusion)
+    : null;
+  if (!stage || !slot || !stage.band || !stage.area) return rest;
+  const bandCx = (stage.band.x0 + stage.band.x1) / 2;
+  const bandCy = (stage.area.top + stage.area.bottom) / 2;
+  const cap = 70;
+  const clamp = (value) => Math.max(-cap, Math.min(cap, value));
+  return {
+    dx: clamp((bandCx - slot.x) * 0.25),
+    dy: clamp((bandCy - slot.y) * 0.25),
+    z: 1,
+  };
+}
+
 // One exponential smoothing step toward the target. Converges
 // without overshoot, so the camera never jitters; snaps when close.
 export function stepCamera(cam, target, dtMs) {
@@ -1747,8 +1769,10 @@ export function moveSpanMs(size) {
 
 // Finish pace scales every beat of the ending: a short charge,
 // one giant projectile, then three beams two seconds apart at
-// standard pace; the whole finish runs under ten seconds, quick
-// lands near six, slow near seventeen for narration.
+// standard pace; the card lands about a second after the blast
+// (the dissolve keeps its own timing and finishes behind it),
+// so the whole finish runs eight seconds, quick near five,
+// slow near fourteen for narration.
 export const FINISH_PACES = { quick: 0.65, standard: 1, slow: 1.8 };
 
 export function finishPlan(pace) {
@@ -1758,8 +1782,8 @@ export function finishPlan(pace) {
   const gap = Math.round(2000 * m);
   const beamDur = Math.round(1400 * m);
   const postBeam = Math.round(1500 * m);
-  const explodeDur = Math.round(1800 * m);
-  const cardDelay = Math.round(800 * m);
+  const explodeDur = Math.round(600 * m);
+  const cardDelay = Math.round(400 * m);
   return {
     mult: m, charge, titanFlight, gap, beamDur, postBeam, explodeDur, cardDelay,
     total: charge + titanFlight + 2 * gap + postBeam + explodeDur + cardDelay,
@@ -2147,7 +2171,8 @@ function fireImpacts(refs) {
         mode: hit.side === "red" ? "dissolve" : "shatter",
       };
       if (hit.side === "blue") refs.desatTarget = 0.85;
-      refs.camTarget = { dx: 0, dy: 0, z: 1 };
+      refs.camTarget = winnerBeatTarget(
+        refs.stage, hit.side === "red" ? "blue" : "red");
       continue;
     }
     const size = hit.size || "standard";

@@ -280,7 +280,9 @@ export function arenaGeometry(layout) {
 }
 
 // Small-map geometry for the Story view SVG: same segment columns,
-// tighter rows. Classic coordinates reproduce exactly.
+// tighter rows. Classic coordinates reproduce exactly. Rows carry
+// a name label above and a state label below, so a three-high
+// column spreads pitch 107 and taller columns split in two.
 export const MAP_VIEW = { w: 640, h: 360 };
 
 export function mapGeometry(layout) {
@@ -291,7 +293,7 @@ export function mapGeometry(layout) {
   let crowded = false;
   SEGMENTS.forEach((segment, index) => {
     const ids = columns[index];
-    const groups = ids.length > 5
+    const groups = ids.length > 3
       ? [ids.slice(0, Math.ceil(ids.length / 2)), ids.slice(Math.ceil(ids.length / 2))]
       : [ids];
     if (groups.length > 1) crowded = true;
@@ -300,7 +302,8 @@ export function mapGeometry(layout) {
       group.forEach((id, i) => {
         let y = 140;
         if (group.length === 2) y = i === 0 ? 140 : 285;
-        else if (group.length > 2) y = 85 + (i * 195) / (group.length - 1);
+        else if (group.length === 3) y = 86 + i * 107;
+        else if (group.length > 3) y = 86 + (i * 214) / (group.length - 1);
         positions[id] = { x, y };
       });
     });

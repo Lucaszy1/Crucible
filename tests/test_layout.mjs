@@ -214,6 +214,51 @@ describe("map geometry", () => {
       assert.ok(pos.y + geo.radius + 25 <= MAP_VIEWBOX.h, `${id} bottom`);
     }
   });
+
+  it("spaces a three-high column so labels clear", () => {
+    // scn-0007 shape: vetch, ember, wren share the internal column.
+    const layout = normalizeLayout({
+      scenario_id: "scn-0007-easy-a0",
+      hosts: [
+        { id: "nimbus", role: "web portal", segment: "dmz", links: [], weight: 3 },
+        { id: "vetch", role: "file share", segment: "internal", links: [], weight: 2 },
+        { id: "ember", role: "jump host", segment: "internal", links: [], weight: 2 },
+        { id: "wren", role: "app", segment: "internal", links: [], weight: 3 },
+        { id: "grove", role: "database", segment: "data", links: [], weight: 5 },
+      ],
+      jewel_host: "grove",
+    });
+    const geo = mapGeometry(layout);
+    assert.equal(geo.crowded, false);
+    const ys = ["vetch", "ember", "wren"].map((id) => geo.positions[id].y).sort((a, b) => a - b);
+    // Name above plus state below need daylight between centers.
+    for (let i = 1; i < ys.length; i += 1) {
+      assert.ok(ys[i] - ys[i - 1] >= 100, `pitch ${ys[i] - ys[i - 1]}`);
+    }
+    for (const y of ys) {
+      assert.ok(y - geo.radius - 55 >= 0, "name label fits");
+      assert.ok(y + geo.radius + 25 <= MAP_VIEWBOX.h, "state label fits");
+    }
+  });
+
+  it("splits columns past three hosts into sub-columns", () => {
+    const layout = normalizeLayout({
+      scenario_id: "tall",
+      hosts: [
+        { id: "a", role: "app", segment: "dmz", links: [], weight: 1 },
+        { id: "b", role: "app", segment: "internal", links: [], weight: 1 },
+        { id: "c", role: "app", segment: "internal", links: [], weight: 1 },
+        { id: "d", role: "app", segment: "internal", links: [], weight: 1 },
+        { id: "e", role: "app", segment: "internal", links: [], weight: 1 },
+        { id: "f", role: "database", segment: "data", links: [], weight: 1 },
+      ],
+      jewel_host: "f",
+    });
+    const geo = mapGeometry(layout);
+    assert.equal(geo.crowded, true);
+    const xs = new Set(["b", "c", "d", "e"].map((id) => geo.positions[id].x));
+    assert.equal(xs.size, 2, "four-high column splits in two");
+  });
 });
 
 describe("red notches", () => {

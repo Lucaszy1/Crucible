@@ -702,7 +702,26 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
   background: #10131a; color: #f2efe8;
   border: 1px solid #2a3140; border-radius: 14px;
   padding: clamp(20px, 4vw, 44px);
-  display: flex; flex-direction: column; gap: 12px;
+  display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: 12px 28px; align-items: center;
+}
+.hero-copy { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+/* Entity diptych fills the right half: intrusion beside guardian. */
+.hero-art {
+  display: flex; min-height: 230px; align-self: stretch;
+  border: 1px solid #2a3140; border-radius: 12px; overflow: hidden;
+  background: #0a0d13;
+}
+.hero-splash { flex: 1; background-size: cover; background-position: center; }
+.hero-splash.left { background-image: url("/assets/art/intrusion-splash.webp"); }
+.hero-splash.right {
+  background-image: url("/assets/art/guardian-splash.webp");
+  border-left: 1px solid #2a3140;
+}
+.hero .advanced, .hero #dealSlot { grid-column: 1 / -1; }
+@media (max-width: 900px) {
+  .hero { grid-template-columns: 1fr; }
+  .hero-art { min-height: 170px; }
 }
 .hero-eyebrow {
   margin: 0; font-family: var(--mono);
