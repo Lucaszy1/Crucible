@@ -35,10 +35,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-CELL_A = "model-sensors-off-memory-off"
-CELL_B = "model-sensors-on-memory-off"
-CELL_C = "model-sensors-on-memory-on"
-CELL_BONUS = "model-sensors-off-memory-on"
+CELL_A = "solver-sensors-off-memory-off"
+CELL_B = "solver-sensors-on-memory-off"
+CELL_C = "solver-sensors-on-memory-on"
+CELL_BONUS = "solver-sensors-off-memory-on"
 
 
 def _read_json(path: Path):
@@ -269,7 +269,7 @@ def render_markdown(payload: dict) -> str:
              "two-sided (McNemar for binary outcomes, sign test for delays "
              "and downtime). p >= 0.05 is reported as within noise.",
              "",
-             "## Held-out cells (model red, paired scenarios)",
+             "## Held-out cells (solver red, paired scenarios)",
              "",
              "| arm | n | intrusions | secret reads | contained | "
              "med delay | med contain | downtime | audit just |",
@@ -361,8 +361,13 @@ NON_CLAIMS = [
     "with 20 pairs only large asymmetries can reach p < 0.05.",
     "Held episodes can still reflect red failing on its own rather than "
     "blue defending; read wins beside intrusion and containment rates.",
-    "Model-red pairs are matched on scenario and rep index, not on red's "
-    "random draws: red re-samples every episode by design.",
+    "Solver-red pairs are exactly matched: the same scenario and rep "
+    "index replays identical red moves across arms by design, so arm "
+    "differences isolate blue, not red sampling.",
+    "Model red achieved no intrusion in 18 train episodes, so the "
+    "defense comparison uses a solver red with seeded imperfection: "
+    "results show blue contains a known-path intruder, not that blue "
+    "stops an adaptive attacker.",
     "Audit justified rates cover the B and C cells only; no other cell "
     "was audited.",
 ]
@@ -411,7 +416,7 @@ def main(argv=None) -> int:
                 reference[key] = cell
     xcheck = Path(args.xcheck)
     if (xcheck / "summary.csv").exists():
-        key = "model-sensors-on-memory-off"
+        key = "solver-sensors-on-memory-off"
         cell = summarize_cell(xcheck, key)
         if cell["n"]:
             reference[f"spark-blue:{key}"] = cell

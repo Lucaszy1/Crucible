@@ -3,7 +3,8 @@
 
 Red profiles: chain runs the full intrusion chain with fixed moves and
 no model calls; noisy runs the same chain with seeded decoy probes
-mixed in; model is the existing model red team. Blue arms vary memory
+mixed in; solver runs the spec-derived chain with seeded imperfection
+and no model calls; model is the existing model red team. Blue arms vary memory
 on or off and sensors on or off. Cells interleave round-robin so time
 effects spread
 evenly, episodes carry fixed seeds, and every episode gets the same
@@ -34,12 +35,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from crucible import events, llm, orchestrator, run_exercise, sandbox, tools
+from crucible.solver_red import SolverRed
 from crucible.agents import ModelBlue, ModelRed
 from crucible.agents import referee
 from crucible.scenarios import select, stack
 from crucible.scenarios.schema import DIFFICULTIES
 
-RED_PROFILES = ("chain", "noisy", "model")
+RED_PROFILES = ("chain", "noisy", "model", "solver")
 SENSOR_MODES = ("on", "off")
 MEMORY_MODES = ("on", "off")
 
@@ -273,7 +275,8 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Run a controlled benchmark.")
     parser.add_argument("--name", required=True, help="Benchmark name")
     parser.add_argument("--red", default="chain,noisy",
-                        help="Comma-separated red profiles: chain, noisy, model")
+                        help="Comma-separated red profiles: chain, noisy, "
+                        "model, solver")
     parser.add_argument("--sensors", default="on,off",
                         help="Comma-separated blue sensor modes: on, off")
     parser.add_argument("--memory", default="off",
@@ -523,6 +526,8 @@ def _run_episode(bench: dict, cell: dict, rep: int, args, client,
         red = ChainRed()
     elif cell["red"] == "noisy":
         red = NoisyRed(seed)
+    elif cell["red"] == "solver":
+        red = SolverRed(seed)
     else:
         red = ModelRed(exercise_id=exercise_id,
                        use_cache=not args.no_cache, seed=seed)
