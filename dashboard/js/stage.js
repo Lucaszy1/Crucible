@@ -1607,14 +1607,29 @@ function projectileEntry(kind, side, size, fail) {
   };
 }
 
-// Rolling frame-time budget with hysteresis: slow machines drop to a
-// lower-detail pass (fewer particles, no grain) and recover cleanly.
-export function frameBudget(avg, low, dtMs) {
+// Hit-stop freeze in frames by move size: small volleys land
+// without freezing, standard hits hold 3 frames, heavy ones 5.
+// The finish sequence keeps its own longer beats. Pure.
+export function hitstopFor(size) {
+  if (size === "heavy" || size === "large") return 5;
+  if (size === "small") return 0;
+  return 3;
+}
+
+// Frames of sustained slowness before the stage drops detail.
+export const LOW_STREAK = 8;
+
+// Rolling frame-time budget with hysteresis: LOW detail engages
+// only after sustained slowness (a streak of slow frames, never
+// one spike) and recovers when the average settles. Pure; the
+// streak counts consecutive frames over 26ms.
+export function frameBudget(avg, low, dtMs, streak) {
   const dt = Math.min(100, Math.max(1, Number(dtMs) || 16));
   const next = avg + (dt - avg) * 0.06;
-  if (!low && next > 26) return { avg: next, low: true };
-  if (low && next < 17) return { avg: next, low: false };
-  return { avg: next, low: Boolean(low) };
+  const slow = dt > 26 ? (Number(streak) || 0) + 1 : 0;
+  if (!low && slow >= LOW_STREAK) return { avg: next, low: true, slow };
+  if (low && next < 17) return { avg: next, low: false, slow };
+  return { avg: next, low: Boolean(low), slow };
 }
 
 function startStageLoop(refs) {
@@ -1631,9 +1646,10 @@ function startStageLoop(refs) {
     const t = typeof now === "number" ? now : refs.clock + 16;
     const dt = Math.max(1, Math.min(100, t - (refs.lastT || t - 16)));
     refs.lastT = t;
-    const budget = frameBudget(refs.frameAvg || 16, refs.lowDetail, dt);
+    const budget = frameBudget(refs.frameAvg || 16, refs.lowDetail, dt, refs.slowStreak);
     refs.frameAvg = budget.avg;
     refs.lowDetail = budget.low;
+    refs.slowStreak = budget.slow;
     refs.samples.push(dt);
     if (refs.samples.length > 120) refs.samples.shift();
     sampleFps(refs, t);
@@ -1877,7 +1893,7 @@ function fireImpacts(refs) {
     spawnSparks(refs, ends.to.x, ends.to.y, hit.side === "red" ? "blue" : "red", heavy ? 26 : size === "small" ? 10 : 16);
     refs.trauma = Math.min(1, refs.trauma + (heavy ? 0.5 : size === "small" ? 0.15 : 0.3));
     refs.knock[hit.side] = refs.clock + (KNOCK_MS[hit.side] || 500);
-    if (size !== "small") refs.hitstopFrames = Math.max(refs.hitstopFrames || 0, heavy ? 9 : 6);
+    refs.hitstopFrames = Math.max(refs.hitstopFrames || 0, hitstopFor(size));
   }
   if (dirty) refs.impacts = due.filter((hit) => !hit.fired || refs.clock - hit.at < 500);
 }
@@ -2025,14 +2041,22 @@ function paintBeams(refs, ctx) {
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
   const bandW = stage.band.x1 - stage.band.x0;
+  // One cached vertical fade for all three beams: the stops never
+  // change, so rebuilding it per beam per frame is pure waste.
+  // The gradient lives in user space, so it survives the shake
+  // translate; it only rebuilds when the height changes.
+  if (!refs.beamGrad || refs.beamGradH !== ch) {
+    const grad = ctx.createLinearGradient(0, 0, 0, ch);
+    grad.addColorStop(0, "rgba(127,212,255,0.10)");
+    grad.addColorStop(1, "rgba(127,212,255,0)");
+    refs.beamGrad = grad;
+    refs.beamGradH = ch;
+  }
   for (let i = 0; i < 3; i += 1) {
     const fx = stage.band.x0 + bandW * (0.22 + i * 0.28);
     const sway = Math.sin(t * 0.24 + i * 2.1) * 24;
     const topW = 40 + i * 14;
-    const grad = ctx.createLinearGradient(0, 0, 0, ch);
-    grad.addColorStop(0, "rgba(127,212,255,0.10)");
-    grad.addColorStop(1, "rgba(127,212,255,0)");
-    ctx.fillStyle = grad;
+    ctx.fillStyle = refs.beamGrad;
     ctx.beginPath();
     ctx.moveTo(fx - topW + sway, -20);
     ctx.lineTo(fx + topW + sway, -20);
@@ -2102,6 +2126,7 @@ function paintLinks(refs, ctx) {
 
 function paintHosts(refs, ctx) {
   const t = refs.clock / 1000;
+  const sprites = refs.sprites || {};
   for (const id of refs.hosts) {
     const node = refs.nodes[id];
     const at = hostScreen(refs, id);
@@ -2115,17 +2140,21 @@ function paintHosts(refs, ctx) {
     ctx.beginPath();
     ctx.ellipse(at.x, at.y + r * 1.35, r * 1.25, r * 0.34, 0, 0, 6.283);
     ctx.fill();
-    const glowColor = state === "compromised" ? "255,59,47"
-      : state === "isolated" ? "47,123,255"
-      : state === "probed" ? "232,236,244"
-      : state === "signed-in" ? "199,154,59" : "127,212,255";
-    const mirror = ctx.createRadialGradient(at.x, at.y + r * 1.5, 2, at.x, at.y + r * 1.5, r * 1.6);
-    mirror.addColorStop(0, `rgba(${glowColor},0.30)`);
-    mirror.addColorStop(1, `rgba(${glowColor},0)`);
-    ctx.fillStyle = mirror;
-    ctx.beginPath();
-    ctx.ellipse(at.x, at.y + r * 1.5, r * 1.6, r * 0.5, 0, 0, 6.283);
-    ctx.fill();
+    // State-tinted floor reflection from a cached glow sprite,
+    // squashed flat: no per-host radial gradient per frame.
+    const mirrorSprite = state === "compromised" ? sprites.red
+      : state === "isolated" ? sprites.blue
+      : state === "probed" ? sprites.white
+      : state === "signed-in" ? sprites.gold : sprites.cyan;
+    if (mirrorSprite) {
+      ctx.save();
+      ctx.translate(at.x, at.y + r * 1.5);
+      ctx.scale(1, 0.31);
+      ctx.globalAlpha = 0.55;
+      const mr = r * 1.6;
+      ctx.drawImage(mirrorSprite, -mr, -mr, mr * 2, mr * 2);
+      ctx.restore();
+    }
     if (node.kind === "vault") {
       paintVault(ctx, refs.sprites || {}, at.x, at.y, r, t, state, exposed);
     } else {
@@ -3494,6 +3523,25 @@ function paintLanes(refs, ctx) {
   paintLane(refs, ctx, "blue", lanes.blue);
 }
 
+// Truncated feed lines, cached: truncation depends only on the
+// texts and the feed width, so remeasuring every frame wastes the
+// text pass. The cache keys on the full texts plus width and font.
+function fittedFeed(refs, ctx, side, shown, maxW) {
+  const key = `${ctx.font}|${Math.round(maxW)}|${shown.map((line) => line.text).join("\n")}`;
+  const cache = (refs.feedCache = refs.feedCache || {});
+  const hit = cache[side];
+  if (hit && hit.key === key) return hit.lines;
+  const lines = shown.map((line) => {
+    let text = line.text;
+    while (text.length > 4 && ctx.measureText(text).width > maxW) {
+      text = `${text.slice(0, -5)}…`;
+    }
+    return { text, tone: line.tone };
+  });
+  cache[side] = { key, lines };
+  return lines;
+}
+
 function paintLane(refs, ctx, side, lane) {
   const accent = side === "red" ? RED : BLUE;
   const slim = refs.stage.mode === "side";
@@ -3520,16 +3568,13 @@ function paintLane(refs, ctx, side, lane) {
   const maxLines = Math.max(1, Math.floor((feed.h - 14) / lineH));
   const shown = lines.slice(-maxLines);
   ctx.font = `400 ${slim ? 10 : 11}px ${MONO}`;
+  const fitted = fittedFeed(refs, ctx, side, shown, feed.w);
   const typed = refs.typed[side] || { chars: Infinity };
-  shown.forEach((line, i) => {
+  fitted.forEach((line, i) => {
     const y = feed.y + 14 + i * lineH;
     let text = line.text;
-    if (i === shown.length - 1 && typed.chars !== Infinity) {
+    if (i === fitted.length - 1 && typed.chars !== Infinity) {
       text = text.slice(0, Math.max(0, Math.floor(typed.chars)));
-    }
-    const maxW = feed.w;
-    while (text.length > 4 && ctx.measureText(text).width > maxW) {
-      text = `${text.slice(0, -5)}…`;
     }
     ctx.fillStyle = tones[line.tone] || tones.cmd;
     const fresh = (i + 1) / shown.length;
@@ -3537,9 +3582,9 @@ function paintLane(refs, ctx, side, lane) {
     ctx.fillText(text, feed.x, y);
   });
   ctx.globalAlpha = 1;
-  if (typed.chars !== Infinity && shown.length > 0) {
-    const y = feed.y + 14 + (shown.length - 1) * lineH;
-    const last = shown[shown.length - 1].text.slice(0, Math.max(0, Math.floor(typed.chars)));
+  if (typed.chars !== Infinity && fitted.length > 0) {
+    const y = feed.y + 14 + (fitted.length - 1) * lineH;
+    const last = fitted[fitted.length - 1].text.slice(0, Math.max(0, Math.floor(typed.chars)));
     const cx = feed.x + ctx.measureText(last).width + 2;
     if (Math.floor(refs.clock / 400) % 2 === 0) {
       ctx.fillStyle = tones.cmd;
@@ -3572,10 +3617,15 @@ function paintOverlays(refs, ctx) {
   const { cw, ch, dpr } = refs.geom;
   void dpr;
   if (refs.wash === "calm") {
-    const wash = ctx.createLinearGradient(0, 0, 0, ch);
-    wash.addColorStop(0, "rgba(47,123,255,0.10)");
-    wash.addColorStop(1, "rgba(47,123,255,0.02)");
-    ctx.fillStyle = wash;
+    // Cached like the beam fade: same stops every frame.
+    if (!refs.washGrad || refs.washGradH !== ch) {
+      const grad = ctx.createLinearGradient(0, 0, 0, ch);
+      grad.addColorStop(0, "rgba(47,123,255,0.10)");
+      grad.addColorStop(1, "rgba(47,123,255,0.02)");
+      refs.washGrad = grad;
+      refs.washGradH = ch;
+    }
+    ctx.fillStyle = refs.washGrad;
     ctx.fillRect(0, 0, cw, ch);
   } else if (refs.wash === "alert") {
     ctx.save();

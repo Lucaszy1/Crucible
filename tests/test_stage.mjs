@@ -6,7 +6,8 @@ import assert from "node:assert/strict";
 import {
   applyCamera, auditorChrome, blueLine, calloutForEvent, dollyTarget, FINISH_PACES, finishPlan,
   flashHold, FLIGHT_MS, flightLaneRect, frameBudget, frameP95, flightLane, fxForEvent,
-  guardianPulse, initStage, intrusionLevel, laneFeed, lanePoint, moveSpanMs, paintGuardian,
+  guardianPulse, hitstopFor, initStage, intrusionLevel, laneFeed, lanePoint, LOW_STREAK,
+  moveSpanMs, paintGuardian,
   paintIntrusion, projBody, redLine, renderStageStatic, setStageActive, setStageReduced,
   stageLayout, stageNotify, stageWash, stepCamera, trailSpan,
 } from "../dashboard/js/stage.js";
@@ -305,10 +306,12 @@ describe("entity levels", () => {
   it("drops to low detail on sustained slow frames", () => {
     let avg = 16;
     let low = false;
+    let slow = 0;
     for (let i = 0; i < 120; i += 1) {
-      const next = frameBudget(avg, low, 50);
+      const next = frameBudget(avg, low, 50, slow);
       avg = next.avg;
       low = next.low;
+      slow = next.slow;
     }
     assert.equal(low, true);
   });
@@ -665,5 +668,37 @@ describe("move flow", () => {
     assert.ok(refs.fx.length > 0, "effects exist before the scrub");
     renderStageStatic(refs, [red], 1, { layout: null }, true);
     assert.equal(refs.fx.length, 0, "scrub rebuilds with no effects");
+  });
+});
+
+describe("smoothness", () => {
+  it("caps hit-stop at 3 frames standard and 5 heavy", () => {
+    assert.equal(hitstopFor("small"), 0);
+    assert.equal(hitstopFor("standard"), 3);
+    assert.equal(hitstopFor("heavy"), 5);
+    assert.equal(hitstopFor("large"), 5);
+    assert.equal(hitstopFor("unknown"), 3);
+  });
+
+  it("ignores a lone slow spike when full detail", () => {
+    let next = frameBudget(16, false, 100, 0);
+    assert.equal(next.low, false);
+    assert.equal(next.slow, 1);
+    next = frameBudget(next.avg, next.low, 16, next.slow);
+    assert.equal(next.low, false);
+    assert.equal(next.slow, 0);
+  });
+
+  it("needs a full streak of slow frames to drop detail", () => {
+    let avg = 16;
+    let low = false;
+    let slow = 0;
+    for (let i = 0; i < LOW_STREAK - 1; i += 1) {
+      const next = frameBudget(avg, low, 50, slow);
+      avg = next.avg; low = next.low; slow = next.slow;
+    }
+    assert.equal(low, false);
+    const last = frameBudget(avg, low, 50, slow);
+    assert.equal(last.low, true);
   });
 });
