@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   HELDOUT_MAX, HELDOUT_MIN, drawLiveScenario, formatDuration, hostNoun,
-  partitionLobby, provText, storyLine,
+  partitionLobby, provText, storyLine, titleOutcomeKey,
 } from "../dashboard/js/lobby.js";
 
 function ev(id, actor, tool, args, result) {
@@ -148,5 +148,18 @@ describe("provText", () => {
     assert.equal(provText(null), "");
     assert.equal(provText({}), "");
     assert.equal(provText({ bench: "x" }), "");
+  });
+});
+
+describe("titleOutcomeKey", () => {
+  it("reads the promised outcome from curated titles", () => {
+    assert.equal(titleOutcomeKey("Easy exercise, contained"), "contained");
+    assert.equal(titleOutcomeKey("Hard exercise, file exposed"), "secret-exposed");
+  });
+
+  it("promises nothing without outcome words", () => {
+    assert.equal(titleOutcomeKey("Hard exercise"), null);
+    assert.equal(titleOutcomeKey(null), null);
+    assert.equal(titleOutcomeKey(""), null);
   });
 });

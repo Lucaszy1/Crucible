@@ -7,7 +7,17 @@ import { classicLayout } from "./layout.js";
 import { eventHost, motionReduced, rankFeatured } from "./state.js";
 import { mountArenaThumb, mountThumbnail, outcomeGlyph, thumbnailState } from "./thumbnail.js";
 
-const FLAG_LABEL = { test: "test", fallback: "fallback", scripted: "scripted" };
+const FLAG_LABEL = { test: "test", fallback: "fallback", scripted: "scripted", mismatch: "title mismatch" };
+
+// Outcome key a curated card title promises, from its plain words:
+// "contained" titles promise Contained, "exposed" titles promise a
+// secret read. Anything else promises nothing (null).
+export function titleOutcomeKey(title) {
+  const text = String(title || "").toLowerCase();
+  if (text.includes("exposed")) return "secret-exposed";
+  if (text.includes("contained")) return "contained";
+  return null;
+}
 
 export const HELDOUT_MIN = 9001;
 export const HELDOUT_MAX = 9020;

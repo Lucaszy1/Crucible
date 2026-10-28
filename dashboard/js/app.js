@@ -19,7 +19,7 @@ import { focusEvidenceRef, renderEvidence } from "./evidence.js";
 import { initControls, serverStatus, setServer, showConfirm } from "./controls.js";
 import {
   HELDOUT_MAX, HELDOUT_MIN, arenaThumb, drawLiveScenario, formatDuration, hideDeal, partitionLobby,
-  renderDeal, renderLobby, storyLine,
+  renderDeal, renderLobby, storyLine, titleOutcomeKey,
 } from "./lobby.js";
 import { playOpening } from "./opening.js";
 import { initThoughtHeads, renderThoughts, setThoughtsCollapsed } from "./thoughts.js";
@@ -688,6 +688,19 @@ function destroyOpening() {
   }
 }
 
+// Runtime title check: a featured title promises an outcome, so
+// an opened episode that came out otherwise says so out loud
+// instead of playing under a wrong name.
+function assertFeaturedTitle(runId, eventList) {
+  const title = (store.lobby.titles || {})[runId];
+  const want = titleOutcomeKey(title);
+  if (!want) return;
+  const got = displayOutcome(eventList || []).key;
+  if (got !== want) {
+    notice(`Title says "${title}" but the episode came out ${got}.`, true);
+  }
+}
+
 // Opening an exercise for playback: slate, countdown, then motion.
 // Scrub and jump never pass through here, so the slate plays once.
 async function openExercise(runId, opts) {
@@ -730,6 +743,7 @@ async function openExercise(runId, opts) {
   store.events = (data.events || []).filter((ev) => ev && ev.actor !== "system");
   store.replayScore = data.score || null;
   store.runBench = data.bench || o.bench || null;
+  assertFeaturedTitle(runId, store.events);
   loadDebrief(runId, store.runBench);
   store.cursor = 0;
   store.firstAuthIndex = store.events.findIndex(
@@ -1140,6 +1154,16 @@ function armLabel(memory) {
   return null;
 }
 
+// Card flags plus the featured title check: a curated title names
+// an outcome, so a card whose exercise came out otherwise carries
+// a visible mismatch flag instead of a quiet wrong badge.
+function cardFlags(runId, eventList, outcomeKey) {
+  const flags = runFlags(runId, eventList);
+  const want = titleOutcomeKey((store.lobby.titles || {})[runId]);
+  if (want && want !== outcomeKey) flags.push("mismatch");
+  return flags;
+}
+
 async function classifyRun(run, armByEpisode) {
   try {
     const data = await fetchRun(run.id, run.bench);
@@ -1171,7 +1195,7 @@ async function classifyRun(run, armByEpisode) {
       arm: armLabel(armByEpisode.get(run.id)),
       blocks: reduceHostStates(events, hosts),
       tstate: thumbnailState(events, layout),
-      flags: runFlags(run.id, events),
+      flags: cardFlags(run.id, events, out.key),
       layout,
       weights,
       events,

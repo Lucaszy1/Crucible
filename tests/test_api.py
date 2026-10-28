@@ -18,7 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import crucible.api as api
-from crucible import events, llm
+from crucible import events, llm, orchestrator
 
 FIXTURE = Path(__file__).parent / "fixtures" / "cap_test_events.jsonl"
 
@@ -171,6 +171,33 @@ def test_featured_curation_is_complete():
         prov = featured["provenance"][run_id]
         assert prov["bench"] and prov["episode"]
         assert prov["seed"] is not None
+
+
+def _title_score_outcome(title):
+    """Score outcome a curated title promises, from its plain words."""
+    text = str(title or "").lower()
+    if "exposed" in text:
+        return "red_succeeded"
+    if "contained" in text:
+        return "blue_held"
+    return None
+
+
+def test_featured_titles_match_episode_outcomes():
+    featured = json.loads(
+        (api.DASHBOARD_DIR / "featured.json").read_text(encoding="utf-8"))
+    for run_id in featured["featured"]:
+        prov = featured["provenance"][run_id]
+        path = events.RUNS_DIR / prov["bench"] / f"{prov['episode']}.jsonl"
+        assert path.is_file(), f"{run_id} provenance points nowhere: {path}"
+        score = orchestrator.score_events(events.read_events(path))
+        assert score is not None, f"{run_id} could not be scored"
+        want = _title_score_outcome(featured["titles"][run_id])
+        assert want is not None, f"{run_id} title promises no outcome"
+        assert score["outcome"] == want, (
+            f"{run_id} title says {featured['titles'][run_id]!r} "
+            f"but {prov['bench']}/{prov['episode']} scored {score['outcome']}"
+        )
 
 
 def test_runs_list_reports_outcome_and_score(client):

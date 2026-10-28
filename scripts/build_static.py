@@ -183,8 +183,31 @@ def outcome_key(events: list) -> str:
     return "stalemate"
 
 
+def featured_curation() -> dict:
+    """Read the live lobby curation for static cross-checks."""
+    return json.loads(
+        (DASHBOARD_DIR / "featured.json").read_text(encoding="utf-8"))
+
+
+def title_outcome_key(title: str) -> str | None:
+    """Outcome key a curated title promises, from its plain words."""
+    low = str(title or "").lower()
+    if "exposed" in low:
+        return "secret-exposed"
+    if "contained" in low:
+        return "contained"
+    return None
+
+
 def build_replays(source_runs: Path) -> dict:
     """Load, score, and outcome-check every featured replay."""
+    curated = featured_curation()
+    live_ids = sorted(curated.get("featured") or [])
+    static_ids = sorted(source["episode"] for source in SOURCES)
+    if static_ids != live_ids:
+        raise SystemExit(
+            "error: static SOURCES episodes drifted from "
+            "dashboard/featured.json")
     runs = {}
     for source in SOURCES:
         run_id = source["id"]
@@ -198,6 +221,15 @@ def build_replays(source_runs: Path) -> dict:
         if got != source["want"]:
             raise SystemExit(
                 f"error: {run_id} came out {got}, want {source['want']}")
+        titled = title_outcome_key(
+            (curated.get("titles") or {}).get(source["episode"]))
+        if titled is None:
+            raise SystemExit(
+                f"error: {run_id} episode has no featured title")
+        if got != titled:
+            raise SystemExit(
+                f"error: {run_id} title promises {titled}, "
+                f"episode came out {got}")
         info = scenario_info(events)
         if info["seed"] is None:
             raise SystemExit(f"error: {run_id} has no scenario seed")
