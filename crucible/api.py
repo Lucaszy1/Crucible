@@ -24,10 +24,12 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from crucible import events, llm, orchestrator, sandbox, tools
+from crucible import events, llm, orchestrator, sandbox, tools, voice_api
 from crucible.agents import ModelBlue, ModelRed, ScriptedBlue, ScriptedRed
+from crucible.human_blue import AIWithOverride, CommandQueue, HumanBlue
 from crucible.scenarios import generate, select, stack
 from crucible.run_exercise import SPEND_CAP_MARKER
+from crucible.voice_api import router as voice_router
 
 ROOT = Path(__file__).resolve().parent.parent
 DASHBOARD_DIR = ROOT / "dashboard"
@@ -47,6 +49,7 @@ REPLAY_INTERVAL_S = 1.2
 DEFAULT_EXERCISE_ESTIMATE_USD = 0.35
 
 app = FastAPI(title="Crucible Operations Center")
+app.include_router(voice_router)
 
 
 def _runs_dir() -> Path:
@@ -168,7 +171,10 @@ def _cap_warning_text() -> str:
 
 
 class ExerciseStart(BaseModel):
-    agents: str = Field(description='Agent set: "scripted" or "model"')
+    agents: str = Field(
+        description='Agent set: "scripted", "model", "human", or '
+        '"ai_with_override"'
+    )
     exercise_id: str | None = Field(
         default=None, description="Optional name for the jsonl log under runs/"
     )
@@ -251,6 +257,29 @@ class _LiveWriter(events.EventWriter):
         return event
 
 
+def _build_agents(agents: str, exercise_id: str) -> tuple:
+    """Build one exercise's red/blue pair.
+
+    Human modes pair scripted red (free, predictable) with the human
+    blue agent, and bind the shared command queue for the voice
+    routes; ai_with_override wraps model blue instead. Pure scripted
+    and model pairs are exactly as before.
+    """
+    if agents == "model":
+        return (ModelRed(exercise_id=exercise_id),
+                ModelBlue(exercise_id=exercise_id))
+    if agents in ("human", "ai_with_override"):
+        cmd_queue = CommandQueue()
+        voice_api.attach_queue(cmd_queue, exercise_id)
+        if agents == "human":
+            return ScriptedRed(), HumanBlue(cmd_queue,
+                                            exercise_id=exercise_id)
+        return (ScriptedRed(),
+                AIWithOverride(ModelBlue(exercise_id=exercise_id),
+                               cmd_queue, exercise_id=exercise_id))
+    return ScriptedRed(), ScriptedBlue()
+
+
 def _run_live_exercise(
     agents: str, exercise_id: str, run_path: Path, publish,
     scenario_key="classic",
@@ -258,18 +287,13 @@ def _run_live_exercise(
     """Run one exercise through the orchestrator, publishing live events.
 
     Mirrors run_exercise.main: activates the scenario, boots the
-    sandbox, runs the turn loop with scripted or model agents, then
-    stops the range. Each event reaches subscribers through the
+    sandbox, runs the turn loop with scripted, model, or human-driven
+    agents, then stops the range. Each event reaches subscribers through the
     patched writer, including live auditor verdicts on every blue
     action. Tests replace this function with a fake runner;
     production always uses this real one.
     """
-    if agents == "model":
-        red = ModelRed(exercise_id=exercise_id)
-        blue = ModelBlue(exercise_id=exercise_id)
-    else:
-        red = ScriptedRed()
-        blue = ScriptedBlue()
+    red, blue = _build_agents(agents, exercise_id)
 
     try:
         info = stack.activate(scenario_key)
@@ -302,6 +326,7 @@ def _run_live_exercise(
             publish({"type": "note", "text": f"sandbox stop noted: {exc}"})
         tools.reset_state()
         stack.deactivate()
+        voice_api.detach_queue()
     result["exercise_cost"] = _cost_since(spend_start)
     result["spend_cap_hit"] = _spend_cap_hit(result.get("events", []))
     return result
@@ -473,9 +498,11 @@ def live_events() -> StreamingResponse:
 def start_exercise(body: ExerciseStart) -> dict:
     """Start one exercise in a background thread (only one at a time)."""
     agents = (body.agents or "").strip().lower()
-    if agents not in ("scripted", "model"):
+    if agents not in ("scripted", "model", "human", "ai_with_override"):
         raise HTTPException(
-            status_code=422, detail='agents must be "scripted" or "model"'
+            status_code=422,
+            detail='agents must be "scripted", "model", "human", or '
+            '"ai_with_override"',
         )
     try:
         scenario_key = select.parse_token((body.scenario or "").strip() or "classic")
@@ -502,7 +529,7 @@ def start_exercise(body: ExerciseStart) -> dict:
         exercise_id = f"exercise-{stamp}"
 
     warning = None
-    if agents == "model":
+    if agents in ("model", "ai_with_override"):
         try:
             llm.check_spend_guard()
         except llm.SpendLimitError:
