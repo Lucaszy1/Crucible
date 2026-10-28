@@ -390,3 +390,54 @@ def test_scenario_preview_rejects_classic_and_garbage(client):
     assert res.status_code == 422
     res = client.get("/api/scenario/preview", params={"scenario": "nope"})
     assert res.status_code == 422
+
+
+def _stage3_episode(scenario, sensors, memory, contained, secret):
+    return {
+        "scenario": scenario,
+        "sensors": sensors,
+        "memory": memory,
+        "contained_after_intrusion": contained,
+        "secret_read": secret,
+    }
+
+
+def test_stage3_reports_cells_pairs_and_playbook(client, tmp_runs):
+    heldout = tmp_runs / "bench-stage3-heldout"
+    (heldout / "playbooks").mkdir(parents=True)
+    (tmp_runs / "bench-stage3-heldout-sensors").mkdir()
+    (heldout / "summary.json").write_text(json.dumps({"episodes": [
+        _stage3_episode("s1", "off", "on", True, False),
+        _stage3_episode("s1", "off", "off", False, True),
+        _stage3_episode("s2", "off", "on", True, False),
+        _stage3_episode("s2", "off", "off", True, False),
+    ]}))
+    (tmp_runs / "bench-stage3-heldout-sensors" / "summary.json").write_text(
+        json.dumps({"episodes": [
+            _stage3_episode("s1", "on", "on", True, False),
+            _stage3_episode("s1", "on", "off", True, False),
+        ]})
+    )
+    (heldout / "playbooks" / "solver-sensors-on-memory-on.json").write_text(
+        json.dumps({"rules": [{"rule": "Isolate fast.", "episode": "e1"}]})
+    )
+    data = client.get("/api/bench/stage3").json()
+    off = data["sensorsOff"]
+    assert off["rerun"] is False
+    assert off["on"] == {"n": 2, "contained": 2, "secretRead": 0}
+    assert off["off"] == {"n": 2, "contained": 1, "secretRead": 1}
+    assert off["pairs"] == {"n": 2, "contained": {"b": 1, "c": 0}, "secret": {"b": 0, "c": 1}}
+    on = data["sensorsOn"]
+    assert on["rerun"] is True
+    assert on["pairs"] == {"n": 1, "contained": {"b": 0, "c": 0}, "secret": {"b": 0, "c": 0}}
+    assert "void" in data["voidNote"].lower()
+    assert data["playbook"]["frozen"] is True
+    assert data["playbook"]["rules"] == [{"rule": "Isolate fast.", "episode": "e1"}]
+
+
+def test_stage3_missing_files_yield_null_sections(client, tmp_runs):
+    data = client.get("/api/bench/stage3").json()
+    assert data["sensorsOn"] is None
+    assert data["sensorsOff"] is None
+    assert data["playbook"] is None
+    assert data["voidNote"]

@@ -691,6 +691,107 @@ def get_campaign(name: str) -> dict:
     }
 
 
+_STAGE3_VOID_NOTE = (
+    "The sensors-on half of the first held-out run is void because of a "
+    "collector bug, so it is not shown. Sensors-on numbers come from the "
+    "corrected rerun (runs/bench-stage3-heldout-sensors); sensors-off numbers "
+    "come from the valid half of the first run (runs/bench-stage3-heldout)."
+)
+
+
+def _stage3_episodes(name: str) -> list | None:
+    """Read one bench summary's episodes, or None when missing."""
+    try:
+        state = json.loads((_runs_dir() / name / "summary.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(state, dict):
+        return None
+    episodes = state.get("episodes", [])
+    return episodes if isinstance(episodes, list) else None
+
+
+def _stage3_cell(rows: list) -> dict:
+    return {
+        "n": len(rows),
+        "contained": sum(1 for row in rows if row.get("contained_after_intrusion") is True),
+        "secretRead": sum(1 for row in rows if row.get("secret_read") is True),
+    }
+
+
+def _stage3_pairs(on_rows: list, off_rows: list) -> dict:
+    """Discordant counts over scenarios present in both arms."""
+    on = {row.get("scenario"): row for row in on_rows if row.get("scenario")}
+    off = {row.get("scenario"): row for row in off_rows if row.get("scenario")}
+    both = sorted(set(on) & set(off))
+    contained = {"b": 0, "c": 0}
+    secret = {"b": 0, "c": 0}
+    for scenario in both:
+        if bool(on[scenario].get("contained_after_intrusion")) != bool(
+            off[scenario].get("contained_after_intrusion")
+        ):
+            slot = "b" if on[scenario].get("contained_after_intrusion") else "c"
+            contained[slot] += 1
+        if bool(on[scenario].get("secret_read")) != bool(off[scenario].get("secret_read")):
+            slot = "b" if on[scenario].get("secret_read") else "c"
+            secret[slot] += 1
+    return {"n": len(both), "contained": contained, "secret": secret}
+
+
+def _stage3_section(name: str, sensors: str, rerun: bool) -> dict | None:
+    episodes = _stage3_episodes(name)
+    if episodes is None:
+        return None
+    on_rows = [row for row in episodes
+               if row.get("sensors") == sensors and row.get("memory") == "on"]
+    off_rows = [row for row in episodes
+                if row.get("sensors") == sensors and row.get("memory") == "off"]
+    if not on_rows and not off_rows:
+        return None
+    return {
+        "source": f"runs/{name}/summary.json",
+        "rerun": rerun,
+        "on": _stage3_cell(on_rows),
+        "off": _stage3_cell(off_rows),
+        "pairs": _stage3_pairs(on_rows, off_rows),
+    }
+
+
+def _stage3_playbook() -> dict | None:
+    try:
+        saved = json.loads(
+            (_runs_dir() / "bench-stage3-heldout" / "playbooks"
+             / "solver-sensors-on-memory-on.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return None
+    if not isinstance(saved, dict):
+        return None
+    rules = [
+        {"rule": entry["rule"], "episode": entry.get("episode", "")}
+        for entry in saved.get("rules", []) or []
+        if isinstance(entry, dict) and entry.get("rule")
+    ]
+    if not rules:
+        return None
+    return {
+        "source": "runs/bench-stage3-heldout/playbooks/solver-sensors-on-memory-on.json",
+        "frozen": True,
+        "rules": rules,
+    }
+
+
+@app.get("/api/bench/stage3")
+def get_stage3() -> dict:
+    """Stage 3 memory experiment: honest per-cell counts plus the frozen playbook."""
+    return {
+        "sensorsOn": _stage3_section("bench-stage3-heldout-sensors", "on", True),
+        "sensorsOff": _stage3_section("bench-stage3-heldout", "off", False),
+        "voidNote": _STAGE3_VOID_NOTE,
+        "playbook": _stage3_playbook(),
+    }
+
+
 @app.get("/api/config")
 def get_config() -> dict:
     """Return dashboard config: hosts, business weights, spend limit."""
