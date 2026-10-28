@@ -92,8 +92,8 @@
   <section class="hero" aria-label="Start here">
     <div class="hero-copy">
       <p class="hero-eyebrow">Crucible</p>
-      <h2 class="hero-title"><span class="r">Red</span> attacks. <span class="b">Blue</span> defends. The auditor keeps score.</h2>
-      <p class="hero-line">An AI red team attacks a simulated company network while an AI blue team defends and an independent auditor checks every decision.</p>
+      <h2 class="hero-title"><span class="r">Red</span> probes. <span class="b">Blue</span> contains. The auditor keeps score.</h2>
+      <p class="hero-line">An AI red team probes a simulated company network while an AI blue team contains the intrusion and an independent auditor checks every decision.</p>
       <div class="hero-actions">
         <button id="liveBtn" class="btn primary hero-cta" disabled title="Live exercises need a local server — run locally to try this.">Run a live exercise</button>
         <button id="replayBtn" class="btn hero-secondary" title="Open a random featured replay">Watch a replay</button>
@@ -171,6 +171,12 @@
       <div id="arenaCap" data-side="system">
         <div id="arenaCapTag" class="system">EXERCISE</div>
         <div id="arenaCapBody"><div id="arenaCapText">Hosts guard one secret.</div><div id="arenaCapSub"></div></div>
+      </div>
+      <div id="speedStrip" class="speed-strip" role="group" aria-label="Playback speed" hidden>
+        <button data-speed="0.5" aria-pressed="false" title="Half speed ([)">0.5x</button>
+        <button data-speed="1" aria-pressed="true" class="active" title="Normal speed">1x</button>
+        <button data-speed="2" aria-pressed="false" title="Double speed (])">2x</button>
+        <button data-speed="4" aria-pressed="false" title="Quadruple speed">4x</button>
       </div>
       <div id="slate" class="slate" hidden>
         <div class="slate-art left" aria-hidden="true"></div>

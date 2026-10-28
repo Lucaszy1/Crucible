@@ -1476,15 +1476,15 @@
   },
   "score": {
     "assisted": false,
-    "blue_score": 100.0,
+    "blue_score": 92.34,
     "compromised_hosts": [
       "harbor",
       "zephyr"
     ],
     "contained_after_intrusion": true,
     "detection_delay": null,
-    "downtime_cost": 0,
-    "downtime_pct": 0.0,
+    "downtime_cost": 96,
+    "downtime_pct": 7.66,
     "hosts_compromised": 2,
     "intrusion": true,
     "invalid_refs_count": 2,

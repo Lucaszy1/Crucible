@@ -1,7 +1,7 @@
 {
   "runs": [
     {
-      "blue_score": 100.0,
+      "blue_score": 94.89,
       "events": 17,
       "id": "scn-0007-contained",
       "invalid_refs_count": 0,
@@ -12,7 +12,7 @@
       "unsupported_count": 4
     },
     {
-      "blue_score": 100.0,
+      "blue_score": 96.93,
       "events": 61,
       "id": "briefed-medium-contained",
       "invalid_refs_count": 0,
@@ -23,7 +23,7 @@
       "unsupported_count": 0
     },
     {
-      "blue_score": 100.0,
+      "blue_score": 92.34,
       "events": 54,
       "id": "heldout-hard-contained",
       "invalid_refs_count": 2,

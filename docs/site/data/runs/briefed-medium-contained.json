@@ -1720,15 +1720,15 @@
   },
   "score": {
     "assisted": false,
-    "blue_score": 100.0,
+    "blue_score": 96.93,
     "compromised_hosts": [
       "jade",
       "pine"
     ],
     "contained_after_intrusion": true,
     "detection_delay": 21,
-    "downtime_cost": 0,
-    "downtime_pct": 0.0,
+    "downtime_cost": 59,
+    "downtime_pct": 3.07,
     "hosts_compromised": 2,
     "intrusion": true,
     "invalid_refs_count": 0,

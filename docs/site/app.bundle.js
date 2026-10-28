@@ -611,6 +611,9 @@ const BASELINE_TEMPLATES = new Set([
   "List the secret directory before reading.",
   "Read the exercise secret after signing in.",
   "Record what the probe sequence obtained.",
+  "Record that the data host was unreachable.",
+  "Record that the protected read was blocked.",
+  "Record that the protected file was never read.",
   "Inspect recent web host logs for odd requests.",
   "Record the detection with supporting log lines.",
   "Detach the data host to stop further access.",
@@ -684,6 +687,18 @@ function endCardStats(eventList, score, weights) {
 
 // Stored motion setting: auto follows the OS, full and reduced pin
 // the path. Anything unreadable falls back to auto.
+// Playback speeds for the stage strip and the Settings entry:
+// half, normal, double, quadruple. stepSpeed moves one notch,
+// clamping at both ends; an unknown speed steps from normal.
+const SPEEDS = [0.5, 1, 2, 4];
+
+function stepSpeed(current, dir) {
+  const at = SPEEDS.indexOf(Number(current));
+  const base = at < 0 ? SPEEDS.indexOf(1) : at;
+  const next = Math.max(0, Math.min(SPEEDS.length - 1, base + (dir > 0 ? 1 : -1)));
+  return SPEEDS[next];
+}
+
 function motionSetting() {
   try {
     if (typeof window !== "undefined" && window.localStorage) {
@@ -796,7 +811,7 @@ function hostBlocks(eventList, hosts) {
   return blocks;
 }
 
-return { isBlueTeam, normalizeActor, reduceHostStates, eventHost, secretRead, scoreEvents, shortResult, formatArgs, pressureValue, redNotches, displayOutcome, finishSide, outcomeLine, controlBar, controlBarTip, rankFeatured, runFlags, autoplayQueue, endCardStats, motionSetting, motionReduced, acceptLiveTraffic, bootStale, followOpensLive, phaseLabel, bootTimedOut, streamDead, errorRetryTarget, hostBlocks, HOSTS, CONTAINMENT_TOOLS, DEFAULT_WEIGHTS, RECON_TOOLS, DISPLAY_OUTCOMES, DISPLAY_CONTAINMENT, BAR_SETTLE_MIN };
+return { isBlueTeam, normalizeActor, reduceHostStates, eventHost, secretRead, scoreEvents, shortResult, formatArgs, pressureValue, redNotches, displayOutcome, finishSide, outcomeLine, controlBar, controlBarTip, rankFeatured, runFlags, autoplayQueue, endCardStats, stepSpeed, motionSetting, motionReduced, acceptLiveTraffic, bootStale, followOpensLive, phaseLabel, bootTimedOut, streamDead, errorRetryTarget, hostBlocks, HOSTS, CONTAINMENT_TOOLS, DEFAULT_WEIGHTS, RECON_TOOLS, DISPLAY_OUTCOMES, DISPLAY_CONTAINMENT, BAR_SETTLE_MIN, SPEEDS };
 })();
 const __mod_api__ = (() => {
 "use strict";
@@ -2637,6 +2652,10 @@ function figures(events, cursor, weights, finalScore) {
   const ended = Boolean(finalScore);
   const shown = ended ? finalScore : live;
   if (slice.length === 0) return { live, ended, shown, outcome: "--", tone: "" };
+  // A mid-run slice has no verdict yet: Stalemate at move 3 of a
+  // run that ends Contained reads as a final call. Show
+  // In progress until the exercise ends and the outcome is known.
+  if (!ended) return { live, ended, shown, outcome: "In progress", tone: "" };
   const display = displayOutcome(slice);
   return { live, ended, shown, outcome: display.label, tone: display.tone };
 }
@@ -8374,21 +8393,32 @@ function playButton(id, label, callbacks) {
   return play;
 }
 
-// One provenance line per card in the static bundle: a Real run
-// chip plus the source bench, episode, and seed. Live cards carry
-// no provenance and render exactly as before.
+// Provenance line for real runs: "bench / episode, seed N".
+// Pure; provenanceLine renders it into a card.
+function provText(prov) {
+  if (!prov || !prov.bench || !prov.episode) return "";
+  return `${prov.bench} / ${prov.episode}, seed ${prov.seed ?? "?"}`;
+}
+
 function provenanceLine(model) {
-  const prov = model && model.provenance;
-  if (!prov || !prov.bench || !prov.episode) return null;
+  const text = provText(model && model.provenance);
+  if (!text) return null;
   const line = document.createElement("p");
   line.className = "lobby-meta lobby-prov";
   const chip = document.createElement("span");
   chip.className = "lobby-badge";
   chip.textContent = "Real run";
-  const text = `${prov.bench} / ${prov.episode}, seed ${prov.seed ?? "?"}`;
   line.append(chip, document.createTextNode(` ${text}`));
   line.title = `Real run: ${text}`;
   return line;
+}
+
+function cardTitle(model) {
+  return model.title || model.id;
+}
+
+function cardTitleAttr(model) {
+  return model.title ? `${model.title} (${model.id})` : model.id;
 }
 
 // Large featured card: thumbnail, outcome badge, story, duration.
@@ -8408,8 +8438,8 @@ function featureCard(model, callbacks, env) {
   head.className = "feature-head";
   const id = document.createElement("h3");
   id.className = "lobby-id";
-  id.textContent = model.id;
-  id.title = model.id;
+  id.textContent = cardTitle(model);
+  id.title = cardTitleAttr(model);
   head.append(id, outcomeBadge(model.outcome));
   const story = document.createElement("p");
   story.className = "feature-story";
@@ -8448,8 +8478,8 @@ function archiveCard(model, callbacks, env) {
   head.className = "lobby-card-head";
   const id = document.createElement("h3");
   id.className = "lobby-id";
-  id.textContent = model.id;
-  id.title = model.id;
+  id.textContent = cardTitle(model);
+  id.title = cardTitleAttr(model);
   head.append(id, outcomeBadge(model.outcome));
   const meta = document.createElement("p");
   meta.className = "lobby-meta";
@@ -8610,7 +8640,7 @@ function hideDeal(slot) {
   slot.hidden = true;
 }
 
-return { drawLiveScenario, hostNoun, storyLine, formatDuration, partitionLobby, thumbnail, arenaThumb, renderLobby, renderDeal, hideDeal, HELDOUT_MIN, HELDOUT_MAX, MAX_FEATURED };
+return { drawLiveScenario, hostNoun, storyLine, formatDuration, partitionLobby, thumbnail, arenaThumb, provText, renderLobby, renderDeal, hideDeal, HELDOUT_MIN, HELDOUT_MAX, MAX_FEATURED };
 })();
 const __mod_opening__ = (() => {
 "use strict";
@@ -8683,6 +8713,16 @@ const CLASSIC_REF_ID = /^(web|app|db|workstation):\d+$/;
 const TYPE_MS = 12;
 const TYPE_BUDGET_MS = 2600;
 
+// Thought hold time scales with playback speed: at half speed
+// the text stays up twice as long, at double speed half as long.
+// Missing or bad speeds hold the normal budget. Reduced motion
+// skips typing outright, so speed never changes that path.
+function holdMsForSpeed(speed) {
+  const value = Number(speed);
+  if (!Number.isFinite(value) || value <= 0) return TYPE_BUDGET_MS;
+  return Math.round(TYPE_BUDGET_MS / value);
+}
+
 // Margin budget: longer thoughts truncate (sentence, else word)
 // and open full in the expander.
 const THOUGHT_MAX_CHARS = 220;
@@ -8754,7 +8794,7 @@ function thoughtRefs(ev, hosts) {
   return ev.evidence_refs.filter((ref) => pattern.test(String(ref))).slice(0, 5);
 }
 
-function typeInto(textEl, text, reduced, state) {
+function typeInto(textEl, text, reduced, state, speed) {
   if (state.timer) {
     clearInterval(state.timer);
     state.timer = 0;
@@ -8763,7 +8803,8 @@ function typeInto(textEl, text, reduced, state) {
     textEl.textContent = text;
     return;
   }
-  const step = Math.max(1, Math.ceil(text.length / (TYPE_BUDGET_MS / TYPE_MS)));
+  const budget = holdMsForSpeed(speed);
+  const step = Math.max(1, Math.ceil(text.length / (budget / TYPE_MS)));
   let at = 0;
   textEl.textContent = "";
   state.timer = setInterval(() => {
@@ -8808,7 +8849,7 @@ function renderPanel(panel, slice, actor, opts, state) {
   panel.text.dataset.full = full;
   panel.root.classList.toggle("cut", shown.cut);
   wireExpander(panel, state, opts);
-  typeInto(panel.text, shown.text, opts.reduced, state);
+  typeInto(panel.text, shown.text, opts.reduced, state, opts.speed);
 }
 
 // One open expander at a time across both panels.
@@ -8920,7 +8961,7 @@ function initThoughtHeads(panels) {
   }
 }
 
-return { truncateThought, thoughtText, renderThoughts, setThoughtsCollapsed, initThoughtHeads, THOUGHT_MAX_CHARS };
+return { holdMsForSpeed, truncateThought, thoughtText, renderThoughts, setThoughtsCollapsed, initThoughtHeads, THOUGHT_MAX_CHARS };
 })();
 const __mod_endcard__ = (() => {
 "use strict";
@@ -11570,7 +11611,7 @@ function updateProvBadge(prov) {
 // Operations Center bootstrap: lobby, arena show flow, tabs, themes.
 const { fetchAttackMap, fetchCampaign, fetchCampaigns, fetchConfig, fetchDebrief, fetchFeatured, fetchPreview, fetchRun, fetchRuns, fetchStage3, fetchStatus, openLive, startExercise } = __mod_api__;
 const { renderLearning } = __mod_learn__;
-const { acceptLiveTraffic, autoplayQueue, bootStale, bootTimedOut, displayOutcome, endCardStats, eventHost, errorRetryTarget, finishSide, followOpensLive, motionReduced, motionSetting, normalizeActor, outcomeLine, phaseLabel, rankFeatured, reduceHostStates, runFlags, scoreEvents, streamDead } = __mod_state__;
+const { acceptLiveTraffic, autoplayQueue, bootStale, bootTimedOut, displayOutcome, endCardStats, eventHost, errorRetryTarget, finishSide, followOpensLive, motionReduced, motionSetting, normalizeActor, outcomeLine, phaseLabel, rankFeatured, reduceHostStates, runFlags, scoreEvents, SPEEDS, stepSpeed, streamDead } = __mod_state__;
 const { describeEvent, keyMoments, statusSentence } = __mod_story__;
 const { jumpTarget, renderDebrief } = __mod_debrief__;
 const { initMap, updateMap } = __mod_network__;
@@ -11711,6 +11752,7 @@ const controls = {
   agents: document.getElementById("agentsSelect"),
   run: document.getElementById("runBtn"),
   speedSeg: document.getElementById("speedSeg"),
+  speedStrip: document.getElementById("speedStrip"),
   paceSeg: document.getElementById("paceSeg"),
   motionSeg: document.getElementById("motionSeg"),
   light: document.getElementById("serverLight"),
@@ -11767,7 +11809,7 @@ const store = {
   presentLoop: false,
   classic: false,
   thoughtState: null,
-  lobby: { runs: [], cards: [], featuredIds: [], autoplay: false, armByEpisode: new Map(), loading: true },
+  lobby: { runs: [], cards: [], featuredIds: [], titles: {}, provenance: {}, autoplay: false, armByEpisode: new Map(), loading: true },
 };
 
 function thoughtPanels() {
@@ -11882,6 +11924,7 @@ function setMode(mode, label) {
   els.mode.textContent = mode === "live" ? "Live" : mode === "replay" ? "Replay" : mode === "booting" ? "Starting" : "Idle";
   if (label) store.label = label;
   els.title.textContent = store.label;
+  if (els.speedStrip) els.speedStrip.hidden = mode !== "replay" && mode !== "live";
 }
 
 function latestLaneEvent(slice) {
@@ -11987,6 +12030,7 @@ function render(animate) {
     (pos) => jump(pos), store.mode !== "replay");
   store.thoughtState = renderThoughts(thoughtPanels(), slice, {
     reduced: reducedMotion(),
+    speed: store.speed,
     hosts,
     onFlash: (host) => {
       const flashView = sceneView();
@@ -12694,6 +12738,7 @@ async function classifyRun(run, armByEpisode) {
     for (const host of layout.hosts) roles[host.id] = host.role;
     return {
       id: run.id,
+      title: (store.lobby.titles || {})[run.id] || null,
       provenance: data.provenance || null,
       outcomeKey: out.key,
       outcome: { label: out.label, tone: out.tone },
@@ -12750,8 +12795,12 @@ async function refreshRuns() {
   try {
     const feat = await fetchFeatured();
     store.lobby.featuredIds = Array.isArray(feat.featured) ? feat.featured : [];
+    store.lobby.titles = feat.titles && typeof feat.titles === "object" ? feat.titles : {};
+    store.lobby.provenance = feat.provenance && typeof feat.provenance === "object" ? feat.provenance : {};
   } catch {
     store.lobby.featuredIds = [];
+    store.lobby.titles = {};
+    store.lobby.provenance = {};
   }
   paintLobby();
   let runs = [];
@@ -12783,11 +12832,22 @@ async function refreshRuns() {
   }
   store.lobby.armByEpisode = armByEpisode;
   const queue = [...runs];
+  // Featured runs may live outside the top-level listing (bench
+  // episodes sit one level down): classify the missing ones so the
+  // curated set shows, skipping ids that resolve nowhere.
+  const seen = new Set(runs.map((run) => run.id));
+  for (const id of store.lobby.featuredIds) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      queue.push({ id, featuredExtra: true });
+    }
+  }
   const workers = [];
   const pump = async () => {
     while (queue.length > 0) {
       const run = queue.shift();
       const card = await classifyRun(run, armByEpisode);
+      if (run.featuredExtra && card.moves === 0) continue;
       store.lobby.cards.push(card);
       paintLobby();
     }
@@ -12977,6 +13037,16 @@ function onShortcut(ev) {
     toggleSound();
     return;
   }
+  if (ev.key === "[") {
+    ev.preventDefault();
+    applySpeed(stepSpeed(store.speed, -1));
+    return;
+  }
+  if (ev.key === "]") {
+    ev.preventDefault();
+    applySpeed(stepSpeed(store.speed, 1));
+    return;
+  }
   if (store.mode !== "replay" || store.events.length === 0) return;
   if (ev.code === "Space") {
     ev.preventDefault();
@@ -12997,12 +13067,31 @@ function applySpeed(speed) {
   const value = Number(speed);
   if (!Number.isFinite(value) || value <= 0) return;
   store.speed = Math.min(16, value);
-  controls.speedSeg.querySelectorAll("button").forEach((btn) => {
-    const on = Number(btn.dataset.speed) === store.speed;
-    btn.classList.toggle("active", on);
-    btn.setAttribute("aria-pressed", String(on));
-  });
+  // Playback keeps running: the timer restarts at the new speed
+  // and the next render picks up the scaled thought hold.
+  for (const group of [controls.speedSeg, els.speedStrip]) {
+    if (!group) continue;
+    group.querySelectorAll("button").forEach((btn) => {
+      const on = Number(btn.dataset.speed) === store.speed;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-pressed", String(on));
+    });
+  }
+  try {
+    window.sessionStorage.setItem("crucible.speed", String(store.speed));
+  } catch {
+    // Private browsing: the speed simply does not persist.
+  }
   if (store.playing) playReplay();
+}
+
+function restoreSessionSpeed() {
+  try {
+    const saved = Number(window.sessionStorage.getItem("crucible.speed"));
+    if (SPEEDS.includes(saved)) applySpeed(saved);
+  } catch {
+    // Private browsing: start at normal speed.
+  }
 }
 
 // Finish pace: Quick shortens the ending to a social-clip beat,
@@ -13193,6 +13282,12 @@ async function boot() {
   const params = new URLSearchParams(window.location.search);
   const speed = params.get("speed");
   if (speed) applySpeed(speed);
+  else restoreSessionSpeed();
+  if (els.speedStrip) {
+    els.speedStrip.querySelectorAll("button").forEach((btn) => {
+      btn.addEventListener("click", () => applySpeed(btn.dataset.speed));
+    });
+  }
   const livePath = params.get("live");
   const wanted = params.get("run");
   const view = params.get("view");
