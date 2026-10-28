@@ -15,12 +15,16 @@ export function serverStatus(spend) {
   return { state: "ok", label: "Server ready", runDisabled: false };
 }
 
-export function showConfirm(els, spend, capped, onConfirm) {
+export function showConfirm(els, spend, capped, onConfirm, note) {
   els.cost.textContent = `$${Number(spend?.estimated_exercise_cost || 0).toFixed(2)} (estimate)`;
   els.spent.textContent = `$${Number(spend?.spent_today || 0).toFixed(2)}`;
   els.limit.textContent = `$${Number(spend?.daily_limit || 0).toFixed(2)}`;
   els.warn.hidden = !capped;
   if (capped) els.warn.textContent = capped;
+  if (els.note) {
+    els.note.hidden = !note;
+    if (note) els.note.textContent = note;
+  }
   els.overlay.hidden = false;
   const close = (ok) => {
     els.overlay.hidden = true;

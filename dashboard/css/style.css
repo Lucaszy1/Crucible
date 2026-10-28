@@ -408,6 +408,7 @@ select {
 .dialog p { color: var(--muted); }
 .dialog .warn { color: var(--text); border: 1px solid var(--amber); border-radius: 8px; padding: 8px 10px; background: var(--amber-soft); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
+#confirmNote { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
 .score-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 10px; }
 .score-grid > div { background: var(--panel-2); border-radius: 8px; padding: 8px 12px; }
 .score-grid dt { font-size: 12px; color: var(--muted); }

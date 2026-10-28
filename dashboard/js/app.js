@@ -169,6 +169,7 @@ const confirm = {
   spent: document.getElementById("confirmSpent"),
   limit: document.getElementById("confirmLimit"),
   warn: document.getElementById("confirmWarn"),
+  note: document.getElementById("confirmNote"),
   ok: document.getElementById("confirmOk"),
   cancel: document.getElementById("confirmCancel"),
 };
@@ -935,13 +936,16 @@ function onLiveError() {
 }
 
 function onRunRequest(agents) {
-  if (agents === "model") {
+  if (agents === "model" || agents === "model_open") {
     fetchStatus()
       .then((spend) => {
         const capped = spend.spent_today >= spend.daily_limit
           ? "Spend cap already reached: this exercise would run on the scripted baseline."
           : null;
-        showConfirm(confirm, spend, capped, () => dealLive(agents));
+        const note = agents === "model_open"
+          ? "Briefed red plus open-weights blue. Hard cap $2.00 this run on the Meta side; Baseten bills its own invoice."
+          : null;
+        showConfirm(confirm, spend, capped, () => dealLive(agents), note);
       })
       .catch((err) => notice(`Could not check spend: ${err.message}`, true, {
         label: "Try again",

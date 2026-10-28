@@ -9,6 +9,7 @@ time; live events stream over GET /api/live while it proceeds.
 from __future__ import annotations
 
 import json
+import os
 import queue
 import re
 import sys
@@ -26,6 +27,7 @@ from pydantic import BaseModel, Field
 
 from crucible import events, llm, orchestrator, sandbox, tools, voice_api
 from crucible.agents import ModelBlue, ModelRed, ScriptedBlue, ScriptedRed
+from crucible.agents.briefed_red import ModelBriefedRed
 from crucible.human_blue import AIWithOverride, CommandQueue, HumanBlue
 from crucible.scenarios import generate, select, stack
 from crucible.run_exercise import SPEND_CAP_MARKER
@@ -44,6 +46,13 @@ SKIP_FILES = {"spend.jsonl"}
 
 # Replay pacing: one event per 1.2 seconds at speed 1.
 REPLAY_INTERVAL_S = 1.2
+
+# Model-driven live variant: briefed red on the Meta API, open blue
+# on Baseten, both behind the same $2 run budget as the daily guard.
+MODEL_OPEN_BLUE_MODEL = "meta-models/muse-spark-open-1026"
+MODEL_OPEN_BLUE_BASE_URL = "https://inference.baseten.co/v1"
+MODEL_OPEN_BLUE_KEY_ENV = "BASETEN_API_KEY"
+MODEL_OPEN_RUN_CAP_USD = 2.0
 
 # Fallback estimate for one model exercise when no spend history exists.
 DEFAULT_EXERCISE_ESTIMATE_USD = 0.35
@@ -172,8 +181,9 @@ def _cap_warning_text() -> str:
 
 class ExerciseStart(BaseModel):
     agents: str = Field(
-        description='Agent set: "scripted", "model", "human", or '
-        '"ai_with_override"'
+        description='Agent set: "scripted", "model", "human", '
+        '"ai_with_override", or "model_open" (briefed red plus '
+        "open-weights blue)"
     )
     exercise_id: str | None = Field(
         default=None, description="Optional name for the jsonl log under runs/"
@@ -264,7 +274,9 @@ def _build_agents(agents: str, exercise_id: str) -> tuple:
     run inside the override wrapper (which delegates untouched while
     nothing is queued), human mode waits on orders entirely, and
     ai_with_override pairs scripted red with model blue plus orders.
-    The shared command queue binds for the voice routes in all modes.
+    model_open pairs briefed model red with open-weights model blue
+    on Baseten. The shared command queue binds for the voice routes
+    in all modes.
     """
     cmd_queue = CommandQueue()
     voice_api.attach_queue(cmd_queue, exercise_id, agents)
@@ -278,6 +290,14 @@ def _build_agents(agents: str, exercise_id: str) -> tuple:
     if agents == "ai_with_override":
         return (ScriptedRed(),
                 AIWithOverride(ModelBlue(exercise_id=exercise_id),
+                               cmd_queue, exercise_id=exercise_id))
+    if agents == "model_open":
+        blue_client = llm.custom_client(MODEL_OPEN_BLUE_BASE_URL,
+                                        MODEL_OPEN_BLUE_KEY_ENV)
+        return (ModelBriefedRed(exercise_id=exercise_id),
+                AIWithOverride(ModelBlue(exercise_id=exercise_id,
+                                         client=blue_client,
+                                         model=MODEL_OPEN_BLUE_MODEL),
                                cmd_queue, exercise_id=exercise_id))
     return ScriptedRed(), AIWithOverride(ScriptedBlue(), cmd_queue,
                                          exercise_id=exercise_id)
@@ -345,8 +365,11 @@ def _exercise_thread(
 ) -> None:
     """Background body for one exercise: run, score, publish the outcome."""
     try:
-        result = _run_live_exercise(
-            agents, exercise_id, run_path, _publish, scenario_key)
+        try:
+            result = _run_live_exercise(
+                agents, exercise_id, run_path, _publish, scenario_key)
+        finally:
+            llm.clear_run_budget()
     except Exception as exc:  # noqa: BLE001 - failure must reach the UI
         with _state_lock:
             _live_state["running"] = False
@@ -502,16 +525,38 @@ def live_events() -> StreamingResponse:
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
+def _preflight_model_open() -> None:
+    """Check model keys before the range boots, then arm the run cap.
+
+    Raises 409 naming the missing keys (never their values) so the
+    lobby can say so and Docker never starts.
+    """
+    llm.refresh_env()
+    missing = [name for name in ("MODEL_API_KEY", MODEL_OPEN_BLUE_KEY_ENV)
+               if not (os.environ.get(name) or "").strip()]
+    if missing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"model keys missing ({', '.join(missing)}): add them "
+                   f"to .env (never paste keys into chat) and retry; "
+                   f"the range was not booted",
+        )
+    llm.set_run_budget(llm.spent_today(), MODEL_OPEN_RUN_CAP_USD)
+
+
 @app.post("/api/exercise/start", status_code=202)
 def start_exercise(body: ExerciseStart) -> dict:
     """Start one exercise in a background thread (only one at a time)."""
     agents = (body.agents or "").strip().lower()
-    if agents not in ("scripted", "model", "human", "ai_with_override"):
+    if agents not in ("scripted", "model", "human", "ai_with_override",
+                      "model_open"):
         raise HTTPException(
             status_code=422,
-            detail='agents must be "scripted", "model", "human", or '
-            '"ai_with_override"',
+            detail='agents must be "scripted", "model", "human", '
+            '"ai_with_override", or "model_open"',
         )
+    if agents == "model_open":
+        _preflight_model_open()
     try:
         scenario_key = select.parse_token((body.scenario or "").strip() or "classic")
     except ValueError as exc:
@@ -537,7 +582,7 @@ def start_exercise(body: ExerciseStart) -> dict:
         exercise_id = f"exercise-{stamp}"
 
     warning = None
-    if agents in ("model", "ai_with_override"):
+    if agents in ("model", "ai_with_override", "model_open"):
         try:
             llm.check_spend_guard()
         except llm.SpendLimitError:

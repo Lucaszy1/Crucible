@@ -201,6 +201,62 @@ def test_start_rejects_bad_agents_value(client):
     assert res.status_code == 422
 
 
+def test_start_model_open_needs_both_keys(client, monkeypatch):
+    def boom(*args, **kwargs):
+        raise AssertionError("the range must not boot without keys")
+
+    monkeypatch.setattr(api, "_run_live_exercise", boom)
+    monkeypatch.delenv("MODEL_API_KEY", raising=False)
+    monkeypatch.delenv("BASETEN_API_KEY", raising=False)
+    monkeypatch.setattr(llm, "refresh_env", lambda: None)
+    res = client.post("/api/exercise/start", json={"agents": "model_open"})
+    assert res.status_code == 409
+    assert "MODEL_API_KEY" in res.json()["detail"]
+    assert "BASETEN_API_KEY" in res.json()["detail"]
+    assert "was not booted" in res.json()["detail"]
+    assert client.get("/api/status").json()["running"] is False
+
+
+def test_start_model_open_boots_with_keys(client, monkeypatch):
+    seen = []
+
+    def fake(agents, exercise_id, run_path, publish, scenario_key="classic"):
+        seen.append(agents)
+        return {"events": [], "score": {"outcome": "stalemate"},
+                "run_path": str(run_path), "exercise_cost": 0.0,
+                "spend_cap_hit": False}
+
+    monkeypatch.setattr(api, "_run_live_exercise", fake)
+    monkeypatch.setenv("MODEL_API_KEY", "test-meta-key")
+    monkeypatch.setenv("BASETEN_API_KEY", "test-baseten-key")
+    monkeypatch.setattr(llm, "refresh_env", lambda: None)
+    res = client.post("/api/exercise/start", json={"agents": "model_open"})
+    assert res.status_code == 202
+    assert res.json()["agents"] == "model_open"
+    assert _wait_idle(client)
+    assert seen == ["model_open"]
+    assert llm._run_budget is None
+
+
+def test_build_agents_model_open_wiring(monkeypatch):
+    from crucible import voice_api
+    from crucible.agents.blue import ModelBlue
+    from crucible.agents.briefed_red import ModelBriefedRed
+    from crucible.human_blue import AIWithOverride
+
+    monkeypatch.setenv("MODEL_API_KEY", "test-meta-key")
+    monkeypatch.setenv("BASETEN_API_KEY", "test-baseten-key")
+    try:
+        red, blue = api._build_agents("model_open", "x-open")
+        assert isinstance(red, ModelBriefedRed)
+        assert isinstance(blue, AIWithOverride)
+        assert isinstance(blue._inner, ModelBlue)
+        assert blue._inner._model == api.MODEL_OPEN_BLUE_MODEL
+        assert str(blue._inner._client.base_url) == "https://inference.baseten.co/v1/"
+    finally:
+        voice_api.detach_queue()
+
+
 def test_only_one_exercise_at_a_time(client, monkeypatch):
     release = threading.Event()
 

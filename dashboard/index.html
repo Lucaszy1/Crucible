@@ -29,6 +29,7 @@
           <select id="agentsSelect">
             <option value="scripted" selected>Scripted (no cost)</option>
             <option value="model">Model (metered)</option>
+            <option value="model_open">Model-driven: briefed red, open blue (metered)</option>
           </select>
         </div>
         <div class="control-group">
@@ -370,6 +371,7 @@
       <div><dt>Daily limit</dt><dd id="confirmLimit">--</dd></div>
     </dl>
     <p id="confirmWarn" class="warn" hidden></p>
+    <p id="confirmNote" class="muted" hidden></p>
     <div class="dialog-actions">
       <button id="confirmCancel" class="btn">Cancel</button>
       <button id="confirmOk" class="btn primary">Start exercise</button>

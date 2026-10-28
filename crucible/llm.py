@@ -31,6 +31,11 @@ def _load_env_file(path) -> bool:
     return True
 
 
+def refresh_env() -> None:
+    """Re-read .env so keys added after import still count."""
+    _load_env_file(ROOT / ".env")
+
+
 _load_env_file(ROOT / ".env")
 
 BASE_URL = os.environ.get("MODEL_API_BASE", "https://api.meta.ai/v1")
@@ -257,11 +262,30 @@ def record_spend(
     return entry
 
 
+# Optional one-run budget for live exercises: (baseline, cap) in USD
+# of Meta spend. Only one live exercise runs per server process, so a
+# module slot is enough; cleared when the exercise ends.
+_run_budget: tuple | None = None
+
+
+def set_run_budget(baseline_usd: float, cap_usd: float) -> None:
+    """Cap one live run's Meta spend on top of the daily guard."""
+    global _run_budget
+    _run_budget = (float(baseline_usd), float(cap_usd))
+
+
+def clear_run_budget() -> None:
+    """Release the one-run budget (the exercise ended)."""
+    global _run_budget
+    _run_budget = None
+
+
 def check_spend_guard(extra_estimate: float = 0.0) -> float:
     """Block when recorded spend for today already hit the cap.
 
     Returns the current total when the call may proceed. Raises
     SpendLimitError otherwise. No model traffic happens past the cap.
+    A run budget, when set, blocks earlier at its own ceiling.
     """
     limit = daily_limit_usd()
     total = spent_today()
@@ -269,6 +293,13 @@ def check_spend_guard(extra_estimate: float = 0.0) -> float:
         raise SpendLimitError(
             f"daily model spend cap reached: ${total:.2f} of ${limit:.2f} used"
         )
+    if _run_budget is not None:
+        baseline, cap = _run_budget
+        used = total - baseline
+        if used + extra_estimate >= cap:
+            raise SpendLimitError(
+                f"live run cap reached: ${used:.2f} of ${cap:.2f} this run"
+            )
     return total
 
 

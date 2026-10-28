@@ -58,6 +58,23 @@ def test_spend_roundtrip(isolated_storage):
     assert llm.spent_today() == pytest.approx(entry["cost_usd"])
 
 
+def test_run_budget_caps_one_run(isolated_storage):
+    llm.record_spend(model="muse-spark-1.3", input_tokens=1000,
+                     output_tokens=1000)
+    baseline = llm.spent_today()
+    llm.set_run_budget(baseline, 2.0)
+    try:
+        assert llm.check_spend_guard() == pytest.approx(baseline)
+        llm.record_spend(model="muse-wonder-1.0", input_tokens=500000,
+                         output_tokens=100000)
+        with pytest.raises(llm.SpendLimitError, match="live run cap"):
+            llm.check_spend_guard()
+    finally:
+        llm.clear_run_budget()
+    assert llm.check_spend_guard() >= 0
+    assert llm._run_budget is None
+
+
 def test_guard_blocks_past_cap(isolated_storage, monkeypatch):
     monkeypatch.setenv("LLM_DAILY_LIMIT_USD", "0.0001")
     llm.record_spend(model="muse-spark-1.3", input_tokens=100000, output_tokens=0)
