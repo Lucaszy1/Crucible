@@ -12,6 +12,10 @@ The first results were wrong. A bug in my own test setup made the defender look 
 
 With sensor alerts turned on, the defender contained 10 of 10 intrusions in our controlled runs and never lost the secret. With them off, the secret was read in 19 of 20. Below is exactly how we measured that, and what it does not prove.
 
+![Crucible architecture](docs/architecture.svg)
+
+Red probes, blue defends, and the auditor judges every defensive decision, all inside an internal-only Docker network.
+
 ## Headline results
 
 - With sensor alerts on, Spark blue contained all 20 scripted intrusions and never lost the secret; with them off, the secret was read in 19 of 20 (chain p < 0.0001, noisy p = 0.0001, Fisher exact, computed). Limit: scripted red intrudes every episode by construction, one scenario, 10 episodes per cell.
