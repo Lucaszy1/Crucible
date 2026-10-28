@@ -9,6 +9,11 @@ runs/*
 # Cached model responses, safe to delete at any time.
 .llm_cache/
 
+# Live playbook and generated stack files, rewritten every run.
+playbooks/
+sandbox/compose.gen.yml
+sandbox/spec.gen.json
+
 # Python runtime files.
 __pycache__/
 *.pyc
