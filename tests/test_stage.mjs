@@ -4,9 +4,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  applyCamera, blueLine, calloutForEvent, clashOrbX, dollyTarget, frameBudget, frameP95, fxForEvent,
-  guardianPulse, intrusionLevel, laneFeed, paintGuardian, paintIntrusion, redLine, stageLayout,
-  stageWash, stepCamera,
+  applyCamera, blueLine, calloutForEvent, clashOrbX, dollyTarget, FLIGHT_MS, frameBudget, frameP95,
+  flightLane, fxForEvent, guardianPulse, intrusionLevel, laneFeed, lanePoint, paintGuardian,
+  paintIntrusion, redLine, stageLayout, stageWash, stepCamera,
 } from "../dashboard/js/stage.js";
 import { arenaGeometry, classicLayout, normalizeLayout } from "../dashboard/js/layout.js";
 
@@ -326,40 +326,91 @@ describe("entity levels", () => {
     assert.ok(calls.includes("fillText"), "glyphs paint");
   });
 
-  it("maps red tools to beams", () => {
+  it("maps red tools to host marks plus a shard at the Guardian", () => {
     const kinds = (ev, ctx) => fxForEvent(ev, ctx).map((f) => f.kind);
-    assert.deepEqual(kinds(ev("a", "red", "scan_host", { host: "web" }, { ok: true })), ["fan"]);
-    assert.deepEqual(kinds(ev("b", "red", "http_request", { host: "web" }, { ok: true })), ["needle"]);
-    assert.deepEqual(kinds(ev("c", "red", "list_files", { host: "app" }, { ok: true })), ["needle"]);
-    assert.deepEqual(kinds(ev("d", "red", "try_credential", { host: "app" }, { ok: true })), ["keys"]);
+    assert.deepEqual(kinds(ev("a", "red", "scan_host", { host: "web" }, { ok: true })), ["fan", "volley"]);
+    assert.deepEqual(kinds(ev("b", "red", "http_request", { host: "web" }, { ok: true })), ["needle", "lance"]);
+    assert.deepEqual(kinds(ev("c", "red", "list_files", { host: "app" }, { ok: true })), ["needle", "lance"]);
+    assert.deepEqual(kinds(ev("d", "red", "try_credential", { host: "app" }, { ok: true })), ["keys", "lance"]);
     assert.deepEqual(kinds(ev("e", "red", "try_credential", { host: "app" },
-      { ok: true, authenticated: true }), {}), ["pierce"]);
+      { ok: true, authenticated: true }), {}), ["pierce", "lance"]);
     assert.deepEqual(kinds(ev("f", "red", "try_credential", { host: "db" },
-      { ok: true, authenticated: true }), { lastRedHost: "app" }), ["pierce", "tendril"]);
+      { ok: true, authenticated: true }), { lastRedHost: "app" }), ["pierce", "lance", "tendril"]);
     const tendril = fxForEvent(ev("f", "red", "try_credential", { host: "db" },
-      { ok: true, authenticated: true }), { lastRedHost: "app" })[1];
+      { ok: true, authenticated: true }), { lastRedHost: "app" })[2];
     assert.equal(tendril.from, "app");
     assert.deepEqual(kinds(ev("g", "red", "try_credential", { host: "app" },
-      { ok: true, authenticated: true }), { lastRedHost: "app" }), ["pierce"]);
+      { ok: true, authenticated: true }), { lastRedHost: "app" }), ["pierce", "lance"]);
     assert.deepEqual(kinds(ev("h", "red", "read_file", { host: "db", path: "/etc/x" },
-      { ok: true })), ["siphon"]);
+      { ok: true })), ["siphon", "lance"]);
     assert.deepEqual(kinds(ev("i", "red", "read_file", { host: "db" },
-      { ok: true, path: "/secret/crown" })), ["grab"]);
+      { ok: true, path: "/secret/crown" })), ["grab", "lance"]);
     assert.deepEqual(kinds(ev("j", "red", "report_finding", {}, { ok: true })), []);
-    assert.deepEqual(kinds(ev("k", "red", "scan_host", { host: "web" }, { ok: false })), ["fizzle"]);
-    assert.deepEqual(kinds(ev("l", "red", "read_file", { host: "db" }, { ok: false })), ["fizzle"]);
+    assert.deepEqual(kinds(ev("k", "red", "scan_host", { host: "web" }, { ok: false })), ["fizzle", "lance"]);
+    assert.deepEqual(kinds(ev("l", "red", "read_file", { host: "db" }, { ok: false })), ["fizzle", "lance"]);
   });
 
-  it("maps blue tools to beams", () => {
+  it("sizes red projectiles by significance and marks failures", () => {
+    const proj = (entry) => fxForEvent(entry, {}).find((f) => f.kind === "lance" || f.kind === "volley");
+    const scan = proj(ev("a", "red", "scan_host", { host: "web" }, { ok: true }));
+    assert.equal(scan.kind, "volley");
+    assert.equal(scan.size, "small");
+    assert.equal(scan.fail, false);
+    assert.equal(scan.flight, FLIGHT_MS.small);
+    const signin = proj(ev("b", "red", "try_credential", { host: "db" },
+      { ok: true, authenticated: true }));
+    assert.equal(signin.size, "heavy");
+    assert.equal(signin.fail, false);
+    const grab = proj(ev("c", "red", "read_file", { host: "db" }, { ok: true, path: "/secret/crown" }));
+    assert.equal(grab.size, "heavy");
+    const probe = proj(ev("d", "red", "http_request", { host: "web" }, { ok: true }));
+    assert.equal(probe.size, "standard");
+    const guess = proj(ev("e", "red", "try_credential", { host: "app" }, { ok: true }));
+    assert.equal(guess.fail, true);
+    const fail = proj(ev("f", "red", "read_file", { host: "db" }, { ok: false }));
+    assert.equal(fail.fail, true);
+  });
+
+  it("maps blue tools to host marks plus an orb at the Intrusion", () => {
     const kinds = (ev, ctx) => fxForEvent(ev, ctx).map((f) => f.kind);
-    assert.deepEqual(kinds(ev("a", "blue", "read_logs", { host: "web" }, { ok: true })), ["scanring"]);
-    assert.deepEqual(kinds(ev("b", "blue", "report_finding", {}, { ok: true })), ["flare"]);
-    assert.deepEqual(kinds(ev("c", "blue", "isolate_host", { host: "app" }, { ok: true })), ["slam", "ring"]);
-    assert.deepEqual(kinds(ev("d", "blue", "patch_service", { host: "app" }, { ok: true })), ["sweep"]);
-    assert.deepEqual(kinds(ev("e", "blue", "restore_host", { host: "app" }, { ok: true })), ["reconnect"]);
-    assert.deepEqual(kinds(ev("f", "blue", "isolate_host", { host: "app" }, { ok: false })), ["fizzle"]);
+    assert.deepEqual(kinds(ev("a", "blue", "read_logs", { host: "web" }, { ok: true })), ["scanring", "orb"]);
+    assert.deepEqual(kinds(ev("b", "blue", "report_finding", {}, { ok: true })), ["flare", "orb"]);
+    assert.deepEqual(kinds(ev("c", "blue", "isolate_host", { host: "app" }, { ok: true })),
+      ["slam", "ring", "orb"]);
+    assert.deepEqual(kinds(ev("d", "blue", "patch_service", { host: "app" }, { ok: true })), ["sweep", "orb"]);
+    assert.deepEqual(kinds(ev("e", "blue", "restore_host", { host: "app" }, { ok: true })), ["reconnect", "orb"]);
+    assert.deepEqual(kinds(ev("f", "blue", "isolate_host", { host: "app" }, { ok: false })), ["fizzle", "orb"]);
     assert.deepEqual(kinds(ev("g", "auditor", "audit", {}, {})), []);
     assert.deepEqual(fxForEvent(null, {}), []);
+  });
+
+  it("sizes blue projectiles by significance and marks failures", () => {
+    const proj = (entry) => fxForEvent(entry, {}).find((f) => f.kind === "orb");
+    assert.equal(proj(ev("a", "blue", "read_logs", { host: "web" }, { ok: true })).size, "small");
+    assert.equal(proj(ev("b", "blue", "report_finding", {}, { ok: true })).size, "small");
+    assert.equal(proj(ev("c", "blue", "isolate_host", { host: "app" }, { ok: true })).size, "large");
+    assert.equal(proj(ev("d", "blue", "patch_service", { host: "app" }, { ok: true })).size, "large");
+    assert.equal(proj(ev("e", "blue", "restore_host", { host: "app" }, { ok: true })).size, "standard");
+    const fail = proj(ev("f", "blue", "isolate_host", { host: "app" }, { ok: false }));
+    assert.equal(fail.fail, true);
+    assert.equal(fail.flight, FLIGHT_MS.standard);
+  });
+
+  it("flies hostless moves as projectiles alone", () => {
+    const kinds = (entry) => fxForEvent(entry, {}).map((f) => f.kind);
+    assert.deepEqual(kinds(ev("a", "red", "scan_host", {}, { ok: true })), ["volley"]);
+    assert.deepEqual(kinds(ev("b", "blue", "patch_service", {}, { ok: true })), ["orb"]);
+  });
+
+  it("draws the flight lane over the network, deterministically", () => {
+    const lane = flightLane({ x: 100, y: 400 }, { x: 900, y: 400 });
+    assert.deepEqual(lanePoint(lane, 0), { x: 100, y: 400 });
+    assert.deepEqual(lanePoint(lane, 1), { x: 900, y: 400 });
+    const mid = lanePoint(lane, 0.5);
+    assert.equal(mid.x, 500);
+    assert.ok(mid.y < 400, `lane peaks above the chord, got ${mid.y}`);
+    assert.deepEqual(flightLane({ x: 100, y: 400 }, { x: 900, y: 400 }), lane);
+    assert.ok(lanePoint(lane, -1).y >= mid.y, "clamped ends stay below the peak");
   });
 
   it("names callouts from the technique data", () => {

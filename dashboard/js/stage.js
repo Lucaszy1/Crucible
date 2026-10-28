@@ -431,7 +431,7 @@ export function initStage(canvas, opts) {
     camTarget: { dx: 0, dy: 0, z: 1 },
     idleUntil: 0,
     trauma: 0,
-    hitstopUntil: 0,
+    hitstopFrames: 0,
     clock: 0,
     lastT: 0,
     frameAvg: 16,
@@ -466,6 +466,7 @@ export function initStage(canvas, opts) {
     knock: { red: 0, blue: 0 },
     tug: 0,
     fx: [],
+    impacts: [],
     sparks: [],
     lastRedHost: null,
     wash: "none",
@@ -903,6 +904,7 @@ export function renderStageStatic(refs, events, cursor, opts, instant) {
     refs.guardian = guardianPulse(slice);
     refs.tug = pressure;
     refs.fx = [];
+    refs.impacts = [];
     refs.sparks = [];
     let lastRed = null;
     for (const ev of slice) {
@@ -964,7 +966,9 @@ export function stageNotify(refs, ev, states, speed) {
       spawnSparks(refs, orb.x, orb.y, ev.actor === "red" ? "red" : "blue", 10);
     }
     for (const fx of fxForEvent(ev, { jewel: refs.jewel, lastRedHost: prevRed })) {
-      refs.fx.push({ ...fx, t0: refs.clock });
+      const entry = { ...fx, t0: refs.clock };
+      refs.fx.push(entry);
+      scheduleImpacts(refs, entry);
     }
     const callout = calloutForEvent(ev, refs.attackMap);
     if (callout) {
@@ -1111,6 +1115,7 @@ export function cancelStage(refs) {
   // animation and strand the canvas black after any resize cleared it.
   if (!refs) return;
   refs.fx = [];
+  refs.impacts = [];
   refs.sparks = [];
   refs.flash = null;
   refs.surge = { red: 0, blue: 0 };
@@ -1198,48 +1203,76 @@ export function fxForEvent(ev, ctx) {
   const r = ev.result || {};
   const failed = r.ok === false;
   if (ev.actor === "red") {
-    if (failed && ev.tool !== "try_credential") return host ? [{ kind: "fizzle", host, dur: 700 }] : [];
+    // Every red move also flies a crimson shard at the Guardian:
+    // scans volley three small ones, sign-ins and the secret read
+    // throw heavy lances, failed moves shatter on the shield.
+    const fail = projectileEntry("lance", "red", "standard", true);
+    if (failed && ev.tool !== "try_credential") {
+      return host ? [{ kind: "fizzle", host, dur: 700 }, fail] : [fail];
+    }
     switch (ev.tool) {
       case "scan_host":
-        return host ? [{ kind: "fan", host, dur: 900 }] : [];
+        return host
+          ? [{ kind: "fan", host, dur: 900 }, projectileEntry("volley", "red", "small", false)]
+          : [projectileEntry("volley", "red", "small", false)];
       case "http_request":
       case "list_files":
-        return host ? [{ kind: "needle", host, dur: 800 }] : [];
+        return host
+          ? [{ kind: "needle", host, dur: 800 }, projectileEntry("lance", "red", "standard", false)]
+          : [projectileEntry("lance", "red", "standard", false)];
       case "try_credential":
-        if (r.authenticated !== true) return host ? [{ kind: "keys", host, dur: 900 }] : [];
-        if (!host) return [];
-        const out = [{ kind: "pierce", host, dur: 1000 }];
+        if (r.authenticated !== true) {
+          return host ? [{ kind: "keys", host, dur: 900 }, fail] : [fail];
+        }
+        if (!host) return [projectileEntry("lance", "red", "heavy", false)];
+        const out = [
+          { kind: "pierce", host, dur: 1000 },
+          projectileEntry("lance", "red", "heavy", false),
+        ];
         if (c.lastRedHost && c.lastRedHost !== host) {
           out.push({ kind: "tendril", from: c.lastRedHost, host, dur: 1200 });
         }
         return out;
       case "read_file": {
-        if (!host) return [];
+        const heavy = projectileEntry("lance", "red", "heavy", false);
+        const standard = projectileEntry("lance", "red", "standard", false);
+        if (!host) return r.ok === true ? [standard] : [fail];
         const path = String(r.path || (ev.args || {}).path || "");
-        if (r.ok === true && path.startsWith("/secret/")) return [{ kind: "grab", host, dur: 1400 }];
-        if (r.ok === true) return [{ kind: "siphon", host, dur: 1100 }];
-        return [{ kind: "fizzle", host, dur: 700 }];
+        if (r.ok === true && path.startsWith("/secret/")) return [{ kind: "grab", host, dur: 1400 }, heavy];
+        if (r.ok === true) return [{ kind: "siphon", host, dur: 1100 }, standard];
+        return [{ kind: "fizzle", host, dur: 700 }, fail];
       }
       default:
         return [];
     }
   }
   if (ev.actor === "blue") {
-    if (failed) return host ? [{ kind: "fizzle", host, dur: 700, color: "blue" }] : [];
+    // Every blue move answers with a light orb at the Intrusion:
+    // reviews and reports send small ones, isolation and patching
+    // send large ones, failed moves fizzle mid-flight.
+    const fail = projectileEntry("orb", "blue", "standard", true);
+    if (failed) return host ? [{ kind: "fizzle", host, dur: 700, color: "blue" }, fail] : [fail];
     switch (ev.tool) {
       case "read_logs":
-        return host ? [{ kind: "scanring", host, dur: 900 }] : [];
+        return host
+          ? [{ kind: "scanring", host, dur: 900 }, projectileEntry("orb", "blue", "small", false)]
+          : [projectileEntry("orb", "blue", "small", false)];
       case "report_finding":
-        return [{ kind: "flare", dur: 800 }];
+        return [{ kind: "flare", dur: 800 }, projectileEntry("orb", "blue", "small", false)];
       case "isolate_host":
         return host ? [
           { kind: "slam", host, dur: 1000 },
           { kind: "ring", host, t0: 0, dur: 800, color: "127,212,255", r0: 10, r1: 90 },
-        ] : [];
+          projectileEntry("orb", "blue", "large", false),
+        ] : [projectileEntry("orb", "blue", "large", false)];
       case "patch_service":
-        return host ? [{ kind: "sweep", host, dur: 900 }] : [];
+        return host
+          ? [{ kind: "sweep", host, dur: 900 }, projectileEntry("orb", "blue", "large", false)]
+          : [projectileEntry("orb", "blue", "large", false)];
       case "restore_host":
-        return host ? [{ kind: "reconnect", host, dur: 1000 }] : [];
+        return host
+          ? [{ kind: "reconnect", host, dur: 1000 }, projectileEntry("orb", "blue", "standard", false)]
+          : [projectileEntry("orb", "blue", "standard", false)];
       default:
         return [];
     }
@@ -1268,6 +1301,45 @@ export function calloutForEvent(ev, attackMap) {
 export function clashOrbX(x0, x1, pressure) {
   const p = Math.max(-1, Math.min(1, Number(pressure) || 0));
   return x0 + (x1 - x0) * (0.5 + (p / 2) * 0.76);
+}
+
+// Projectile flight lane between the entities: a quadratic arc that
+// lifts over the network so the exchange reads above the hosts.
+// Pure: endpoints in, lane out; lanePoint samples it.
+export function flightLane(from, to) {
+  const a = from || { x: 0, y: 0 };
+  const b = to || { x: 0, y: 0 };
+  const dist = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const lift = Math.max(80, Math.min(200, dist * 0.3));
+  return {
+    x0: a.x, y0: a.y,
+    cx: (a.x + b.x) / 2, cy: Math.min(a.y, b.y) - lift,
+    x1: b.x, y1: b.y,
+  };
+}
+
+export function lanePoint(lane, t) {
+  const u = Math.max(0, Math.min(1, Number(t) || 0));
+  const a = (1 - u) * (1 - u);
+  const b = 2 * (1 - u) * u;
+  const c = u * u;
+  return {
+    x: a * lane.x0 + b * lane.cx + c * lane.x1,
+    y: a * lane.y0 + b * lane.cy + c * lane.y1,
+  };
+}
+
+// Flight times in ms by projectile size: travel runs about half a
+// second for light moves to four-fifths for heavy ones, then a short
+// impact window for the shockwave and flash.
+export const FLIGHT_MS = { small: 500, standard: 650, heavy: 800, large: 800 };
+export const IMPACT_MS = 350;
+export const VOLLEY_STAGGER_MS = 120;
+
+function projectileEntry(kind, side, size, fail) {
+  const flight = FLIGHT_MS[size] || FLIGHT_MS.standard;
+  const stagger = kind === "volley" ? VOLLEY_STAGGER_MS * 2 : 0;
+  return { kind, side, size, fail: Boolean(fail), flight, dur: flight + stagger + IMPACT_MS };
 }
 
 // Rolling frame-time budget with hysteresis: slow machines drop to a
@@ -1306,7 +1378,10 @@ function startStageLoop(refs) {
       refs.fpsCount = 0;
       refs.fpsT = t;
     }
-    if (t < refs.hitstopUntil) {
+    if (refs.hitstopFrames > 0) {
+      // Hit-stop: hold the frozen frame for a beat so heavy
+      // impacts land. Counted in frames, immune to clock drift.
+      refs.hitstopFrames -= 1;
       drawStage(refs);
       return;
     }
@@ -1401,9 +1476,89 @@ function spawnSparks(refs, x, y, color, count) {
   if (refs.sparks.length > 220) refs.sparks.splice(0, refs.sparks.length - 220);
 }
 
+// Projectile endpoints at the entities' rims, facing each other.
+function projEnds(refs, side) {
+  const from = entityCore(refs, side);
+  const to = entityCore(refs, side === "blue" ? "red" : "blue");
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy) || 1;
+  return {
+    from: { x: from.x + (dx / len) * from.r * 0.7, y: from.y + (dy / len) * from.r * 0.7 },
+    to: { x: to.x - (dx / len) * to.r * 0.55, y: to.y - (dy / len) * to.r * 0.55 },
+  };
+}
+
+// Impact ledger: one record per projectile strike, shatter, or
+// mid-flight fizzle. Fired from drawStage so stills and live play
+// agree, and cleared on scrub like every transient effect.
+function scheduleImpacts(refs, fx) {
+  if (!refs || !fx) return;
+  if (fx.kind !== "lance" && fx.kind !== "volley" && fx.kind !== "orb") return;
+  if (!refs.impacts) refs.impacts = [];
+  const struck = fx.side === "blue" ? "red" : "blue";
+  const flight = Number(fx.flight) || FLIGHT_MS.standard;
+  const t0 = Number(fx.t0) || refs.clock;
+  if (fx.kind === "volley") {
+    for (let i = 0; i < 3; i += 1) {
+      refs.impacts.push({ at: t0 + flight + i * VOLLEY_STAGGER_MS, kind: "strike", side: struck, size: "small" });
+    }
+    return;
+  }
+  if (fx.fail && fx.kind === "orb") {
+    // A failed orb dies halfway: fix its burst point now, from the
+    // same lane the painter flies, so paint and sparks agree.
+    const ends = projEnds(refs, fx.side);
+    const mid = lanePoint(flightLane(ends.from, ends.to), 0.5);
+    refs.impacts.push({ at: t0 + flight / 2, kind: "fizzlepuff", side: struck, x: mid.x, y: mid.y });
+    return;
+  }
+  refs.impacts.push({
+    at: t0 + flight,
+    kind: fx.fail ? "shatter" : "strike",
+    side: struck,
+    size: fx.size || "standard",
+  });
+}
+
+// Knock window per side, matching the recoil denominators in
+// paintEntities: red reads 450ms, blue 600ms.
+const KNOCK_MS = { red: 450, blue: 600 };
+
+function fireImpacts(refs) {
+  const due = refs.impacts;
+  if (!due || due.length === 0) return;
+  let dirty = false;
+  for (const hit of due) {
+    if (hit.fired || refs.clock < hit.at) continue;
+    hit.fired = true;
+    dirty = true;
+    if (hit.kind === "fizzlepuff") {
+      spawnSparks(refs, hit.x, hit.y, "gray", 8);
+      continue;
+    }
+    const ends = projEnds(refs, hit.side === "red" ? "blue" : "red");
+    if (hit.kind === "shatter") {
+      // A failed lance breaks on the shield: sparks only, no
+      // hit-stop, no recoil, and the bar does not move.
+      spawnSparks(refs, ends.to.x, ends.to.y, "red", 7);
+      spawnSparks(refs, ends.to.x, ends.to.y, "gray", 7);
+      continue;
+    }
+    const size = hit.size || "standard";
+    const heavy = size === "heavy" || size === "large";
+    spawnSparks(refs, ends.to.x, ends.to.y, hit.side === "red" ? "blue" : "red", heavy ? 26 : size === "small" ? 10 : 16);
+    refs.trauma = Math.min(1, refs.trauma + (heavy ? 0.5 : size === "small" ? 0.15 : 0.3));
+    refs.knock[hit.side] = refs.clock + (KNOCK_MS[hit.side] || 500);
+    if (size !== "small") refs.hitstopFrames = Math.max(refs.hitstopFrames || 0, heavy ? 9 : 6);
+  }
+  if (dirty) refs.impacts = due.filter((hit) => !hit.fired || refs.clock - hit.at < 500);
+}
+
 function drawStage(refs) {
   const ctx = refs.ctx;
   if (!ctx || !refs.stage) return;
+  fireImpacts(refs);
   ensureFrame(refs);
   buildStaticLayers(refs);
   buildSprites(refs);
@@ -2177,6 +2332,11 @@ function paintFx(refs, ctx) {
       case "callout":
         paintFxCallout(refs, ctx, fx, p);
         break;
+      case "lance":
+      case "volley":
+      case "orb":
+        paintProjectile(refs, ctx, fx, age);
+        break;
       default:
         break;
     }
@@ -2189,7 +2349,8 @@ function paintFx(refs, ctx) {
       const a = Math.max(0, Math.min(1, s.life / 500));
       ctx.strokeStyle = s.color === "red" ? `rgba(255,120,100,${a.toFixed(2)})`
         : s.color === "blue" ? `rgba(140,200,255,${a.toFixed(2)})`
-          : `rgba(240,240,245,${a.toFixed(2)})`;
+          : s.color === "gray" ? `rgba(150,155,168,${a.toFixed(2)})`
+            : `rgba(240,240,245,${a.toFixed(2)})`;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(s.x, s.y);
@@ -2533,6 +2694,187 @@ function paintFxCallout(refs, ctx, fx, p) {
   ctx.fillStyle = BONE;
   ctx.fillText(line, x + 4, y + 11, w - 20);
   ctx.restore();
+}
+
+// Body scale by move significance: volley shards fly small,
+// heavy lances and large orbs land the big impacts.
+const PROJ_SCALE = { small: 0.7, standard: 1, heavy: 1.5, large: 1.5 };
+
+function paintProjectile(refs, ctx, fx, age) {
+  const side = fx.side === "blue" ? "blue" : "red";
+  const ends = projEnds(refs, side);
+  const lane = flightLane(ends.from, ends.to);
+  const flight = Number(fx.flight) || FLIGHT_MS.standard;
+  const count = fx.kind === "volley" ? 3 : 1;
+  const stagger = fx.kind === "volley" ? VOLLEY_STAGGER_MS : 0;
+  for (let i = 0; i < count; i += 1) {
+    const local = age - i * stagger;
+    if (local < 0) continue;
+    paintProjOne(refs, ctx, fx, side, lane, ends, local, flight, i);
+  }
+}
+
+function laneTangent(lane, q) {
+  const p1 = lanePoint(lane, q);
+  const p0 = lanePoint(lane, Math.max(0, q - 0.03));
+  return Math.atan2(p1.y - p0.y, p1.x - p0.x);
+}
+
+function paintProjOne(refs, ctx, fx, side, lane, ends, local, flight, index) {
+  const s = PROJ_SCALE[fx.size] || 1;
+  const q = local / flight;
+  const red = side !== "blue";
+  if (fx.fail && !red) {
+    paintOrbFail(refs, ctx, lane, ends, q, s);
+    return;
+  }
+  if (q < 1) {
+    if (red) paintLance(refs, ctx, lane, q, s, index);
+    else paintOrb(refs, ctx, lane, q, s);
+    return;
+  }
+  const iq = Math.min(1, (local - flight) / IMPACT_MS);
+  if (fx.fail) paintShatter(refs, ctx, ends.to, iq, s);
+  else paintStrike(refs, ctx, ends.to, iq, s, red);
+}
+
+// Crimson code-lance: a shard body along the flight tangent with
+// a streak trail. Abstract splinter, no handle anywhere.
+function paintLance(refs, ctx, lane, q, s, index) {
+  const head = lanePoint(lane, q);
+  const ang = laneTangent(lane, q);
+  const px = head.x + Math.cos(ang + Math.PI / 2) * (index - 1) * 8;
+  const py = head.y + Math.sin(ang + Math.PI / 2) * (index - 1) * 8;
+  const sprites = refs.sprites || {};
+  const len = 52 * s;
+  const wid = 11 * s;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  // Trail: hot streak back along the lane plus cooling dots.
+  const tail = lanePoint(lane, Math.max(0, q - 0.16));
+  const streak = fxTex(refs, "streak");
+  if (streak) {
+    const tlen = Math.hypot(px - tail.x, py - tail.y);
+    const tang = Math.atan2(py - tail.y, px - tail.x);
+    ctx.save();
+    ctx.globalAlpha = 0.8;
+    ctx.translate((px + tail.x) / 2, (py + tail.y) / 2);
+    ctx.rotate(tang);
+    ctx.drawImage(streak, -tlen / 2, -wid, tlen, wid * 2);
+    ctx.restore();
+  }
+  for (let i = 1; i <= 3; i += 1) {
+    const dot = lanePoint(lane, Math.max(0, q - i * 0.05));
+    ctx.fillStyle = `rgba(255,110,90,${(0.62 - i * 0.13).toFixed(2)})`;
+    ctx.beginPath();
+    ctx.arc(dot.x, dot.y, (4 - i) * s, 0, 6.283);
+    ctx.fill();
+  }
+  drawGlow(ctx, sprites.red, px, py, len * 1.1, 0.85);
+  const shard = fxTex(refs, "shard");
+  ctx.translate(px, py);
+  ctx.rotate(ang);
+  // Crimson silhouette under the texture so the body reads red
+  // even where the generated shard runs pale.
+  ctx.fillStyle = "rgba(255,59,47,0.85)";
+  ctx.beginPath();
+  ctx.moveTo(len / 2, 0);
+  ctx.lineTo(-len * 0.3, -wid / 2);
+  ctx.lineTo(-len * 0.15, 0);
+  ctx.lineTo(-len * 0.3, wid / 2);
+  ctx.closePath();
+  ctx.fill();
+  if (shard) {
+    ctx.drawImage(shard, -len * 0.55, -wid * 1.6, len * 1.1, wid * 3.2);
+  }
+  ctx.fillStyle = "rgba(255,240,235,0.95)";
+  ctx.beginPath();
+  ctx.arc(len * 0.22, 0, 2.4 * s, 0, 6.283);
+  ctx.fill();
+  ctx.restore();
+}
+
+// Cyan light orb: a glowing sphere with a short comet tail.
+function paintOrb(refs, ctx, lane, q, s) {
+  const head = lanePoint(lane, q);
+  const sprites = refs.sprites || {};
+  const r = 10 * s;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = 1; i <= 4; i += 1) {
+    const dot = lanePoint(lane, Math.max(0, q - i * 0.045));
+    ctx.fillStyle = `rgba(140,210,255,${(0.68 - i * 0.12).toFixed(2)})`;
+    ctx.beginPath();
+    ctx.arc(dot.x, dot.y, Math.max(1, r * (1 - i * 0.15)), 0, 6.283);
+    ctx.fill();
+  }
+  drawGlow(ctx, sprites.cyan, head.x, head.y, r * 3.4, 0.8);
+  const flare = fxTex(refs, "flare");
+  if (flare) {
+    ctx.globalAlpha = 0.9;
+    ctx.drawImage(flare, head.x - r * 1.8, head.y - r * 1.8, r * 3.6, r * 3.6);
+    ctx.globalAlpha = 1;
+  }
+  ctx.fillStyle = "#eaf6ff";
+  ctx.beginPath();
+  ctx.arc(head.x, head.y, r * 0.55, 0, 6.283);
+  ctx.fill();
+  ctx.restore();
+}
+
+// A landed strike: shockwave ring plus a hot flash on the struck
+// entity's rim. Sparks, hit-stop, and recoil fire from the ledger.
+function paintStrike(refs, ctx, at, iq, s, red) {
+  const color = red ? "255,110,100" : "140,210,255";
+  paintFxRing(refs, ctx, { r0: 10 * s, r1: 74 * s, color, dur: IMPACT_MS }, iq * IMPACT_MS, at);
+  const sprites = refs.sprites || {};
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  drawGlow(ctx, red ? sprites.red : sprites.cyan, at.x, at.y, 60 * s * (1 - iq * 0.5), 0.85 * (1 - iq));
+  ctx.restore();
+}
+
+// A failed lance bursts against the shield: fragments rebound and
+// fall short. No ring marches on; the bar does not move.
+function paintShatter(refs, ctx, at, iq, s) {
+  const shard = fxTex(refs, "shard");
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = 0; i < 4; i += 1) {
+    const a = Math.PI + (i - 1.5) * 0.5;
+    const d = iq * 90 * s;
+    const x = at.x + Math.cos(a) * d;
+    const y = at.y + Math.sin(a) * d * 0.6 + iq * iq * 40;
+    const w = 7 * s * (1 - iq * 0.6);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(iq * 8 + i * 1.7);
+    ctx.globalAlpha = 0.9 * (1 - iq);
+    if (shard) ctx.drawImage(shard, -w * 1.5, -w * 1.5, w * 3, w * 3);
+    else {
+      ctx.fillStyle = "rgba(255,150,130,0.9)";
+      ctx.fillRect(-w / 2, -w / 4, w, w / 2);
+    }
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// A failed orb gutters out halfway across: it shrinks and grays,
+// leaving a small cold ring where it died.
+function paintOrbFail(refs, ctx, lane, ends, q, s) {
+  const mid = lanePoint(lane, 0.5);
+  if (q < 0.5) {
+    const fade = q > 0.32 ? 1 - (q - 0.32) / 0.18 * 0.4 : 1;
+    ctx.save();
+    ctx.globalAlpha = fade;
+    paintOrb(refs, ctx, lane, q, s);
+    ctx.restore();
+    return;
+  }
+  const iq = Math.min(1, (q - 0.5) * 4);
+  paintFxRing(refs, ctx, { r0: 6, r1: 34, color: "150,155,168", dur: IMPACT_MS }, iq * IMPACT_MS, mid);
+  void ends;
 }
 
 // Failed actions sputter and die on the target host itself.
