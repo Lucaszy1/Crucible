@@ -106,6 +106,16 @@ def test_resolve_run_still_rejects_traversal(client, tmp_runs):
     assert client.get("/api/runs/nope").status_code == 404
 
 
+def test_featured_json_resolves_fresh_and_uncached(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(api, "DASHBOARD_DIR", tmp_path)
+    (tmp_path / "featured.json").write_text('{"featured": ["a"]}')
+    assert client.get("/featured.json").json() == {"featured": ["a"]}
+    (tmp_path / "featured.json").write_text('{"featured": ["b"]}')
+    second = client.get("/featured.json")
+    assert second.json() == {"featured": ["b"]}
+    assert second.headers["cache-control"] == "no-store"
+
+
 def test_featured_curation_is_complete():
     featured = json.loads(
         (api.DASHBOARD_DIR / "featured.json").read_text(encoding="utf-8"))

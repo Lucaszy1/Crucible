@@ -918,6 +918,20 @@ def index() -> FileResponse:
     return FileResponse(DASHBOARD_DIR / "index.html")
 
 
+@app.get("/featured.json", include_in_schema=False)
+def featured() -> FileResponse:
+    """Serve the lobby curation fresh from disk on every request.
+
+    The static mount below holds no process cache, but browsers
+    heuristically cache bare files for days; no-store keeps
+    curation edits visible without a hard refresh.
+    """
+    return FileResponse(
+        DASHBOARD_DIR / "featured.json",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 # Static dashboard assets only. This mount cannot reach runs/, .env, or
 # any other server file: it serves the dashboard directory and nothing else.
 app.mount("/", StaticFiles(directory=DASHBOARD_DIR, html=True), name="dashboard")
