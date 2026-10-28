@@ -16,7 +16,7 @@ With sensor alerts turned on, the defender contained 10 of 10 intrusions in our 
 
 - With sensor alerts on, Spark blue contained all 20 scripted intrusions and never lost the secret; with them off, the secret was read in 19 of 20 (chain p < 0.0001, noisy p = 0.0001, Fisher exact, computed). Limit: scripted red intrudes every episode by construction, one scenario, 10 episodes per cell.
 - Against model red at 10 episodes per arm, the sensors gap was within noise (secret reads 0/10 versus 4/10, p = 0.087). Limit: small sample against a stochastic intruder, so this run concludes nothing about sensors there.
-- Playbook memory versus control held 16 of 20 versus 10 of 20, within noise (p = 0.096); we do not claim memory helps. Limit: one scenario, and every perfect score came with zero containment against a red that never authenticated.
+- Frozen-playbook memory cut secret reads on 20 held-out networks against solver red: 7 of 20 with memory versus 18 of 20 without (sensors off, paired exact p = 0.0010), and 11 of 20 versus 17 of 20 (sensors on, p = 0.031). Limit: solver red follows a known path, and Stage 3 sensors fired zero alerts, so this run says nothing about sensors.
 - Spark and Spark Open blue each held all 20 scripted episodes with sensors on, though Open reported later (median first report 15 to 17 events versus 1 to 3). Limit: descriptive only at n = 10, with unmatched noisy-red draws across the two runs.
 
 Details, intervals, and limits: `docs/SENSOR_RESULTS.md` and `docs/CAMPAIGN_RESULTS.md`.
@@ -125,11 +125,11 @@ playbooks/         live blue playbook (local only, gitignored)
 
 ## Results
 
-All numbers below come from `docs/CAMPAIGN_RESULTS.md` (20 episodes per arm, classic scenario) and the saved benchmark runs under `runs/bench-*/`. Counts are quoted exactly; p-values marked computed were derived from those counts with exact tests.
+All numbers below come from `docs/CAMPAIGN_RESULTS.md` (20 episodes per arm, classic scenario) and the saved benchmark runs under `runs/bench-*/`. Counts are quoted exactly; p-values marked computed were derived from those counts with exact tests (Fisher for unpaired cells, McNemar for paired Stage 3 seeds).
 
 Validation story first. Our first campaign looked like a win for memory, then analysis showed the result was contaminated: container logs were never cleared between episodes, so blue read stale success lines, quoted them in reports, and red (which could then see blue report text) reused the leaked account names. We threw that campaign out, fixed the design (per-episode log scoping with clean-start checks, and prompts where neither team sees the other team's report text), and reran from scratch. The rerun is the only campaign we report.
 
-Memory versus control (model red and model blue, one scenario, 20 episodes per arm): the memory arm held 16 of 20, control held 10 of 20 (Fisher exact two-sided p = 0.096, not significant at 0.05). Mean blue score was 79.9 versus 49.9 on a bimodal 0-or-100 scale, so the mean restates the win counts. Red probed the exposed admin page in 4 of 20 memory episodes versus 10 of 20 control, and that probe predicted the outcome perfectly; red is blind to blue by construction, so that gap is sampling variation, not something blue caused. We do NOT claim memory helps: the gap is within noise, every perfect score came with zero containment against a red that never authenticated, and blue contained 0 of its 4 real intrusions.
+Memory versus control (model red and model blue, one scenario, 20 episodes per arm): the memory arm held 16 of 20, control held 10 of 20 (Fisher exact two-sided p = 0.096, not significant at 0.05). Mean blue score was 79.9 versus 49.9 on a bimodal 0-or-100 scale, so the mean restates the win counts. Red probed the exposed admin page in 4 of 20 memory episodes versus 10 of 20 control, and that probe predicted the outcome perfectly; red is blind to blue by construction, so that gap is sampling variation, not something blue caused. That non-finding is specific to its setting (model red, online playbook, one scenario): the gap is within noise, every perfect score came with zero containment against a red that never authenticated, and blue contained 0 of its 4 real intrusions. The frozen-playbook held-out test below is the stronger memory evidence, and it goes the other way.
 
 Sensors with scripted red (`runs/bench-bench1`, classic scenario, Spark blue, memory off, 10 episodes per cell):
 
@@ -142,7 +142,18 @@ Sensors with scripted red (`runs/bench-bench1`, classic scenario, Spark blue, me
 
 Secret-read gap, sensors on versus off: chain p < 0.0001, noisy p = 0.0001 (Fisher exact two-sided, computed). Limits, stated plainly: scripted red intrudes in every episode by construction, so this measures containment of a fixed chain, not detection of a varied intruder; one scenario only; 10 episodes per cell.
 
-TBD: Stage 3 held-out results. The frozen-playbook generalization run on unseen networks (train seeds 1001 to 1040, held-out seeds 9001 to 9020) is in progress; its intrusion, containment, secret-read, delay, downtime, and auditor numbers will replace this paragraph when the benchmark finishes. No claim about generalization is made until then.
+Stage 3 held-out results (`runs/bench-stage3-heldout`, frozen 8-rule playbook from solver train seeds 1001 to 1009, held-out seeds 9001 to 9020, solver red, Open blue on Baseten, 1 episode per network per cell, 20 paired seeds, audit on the two sensors-on cells):
+
+| Blue | Memory | Intrusions | Secret reads | Contained |
+|---|---|---|---|---|
+| sensors off | off | 20/20 | 18/20 | 4/20 |
+| sensors off | on | 20/20 | 7/20 | 14/20 |
+| sensors on | off | 20/20 | 17/20 | 4/20 |
+| sensors on | on | 20/20 | 11/20 | 9/20 |
+
+Secret-read Wilson 95 percent: 18/20 (69.9, 97.2), 7/20 (18.1, 56.7), 17/20 (64.0, 94.8), 11/20 (34.2, 74.2). Paired exact (McNemar) two-sided per network: memory beats control on secret reads in all four pairings (sensors off 11-0 discordant, p = 0.0010; sensors on 6-0, p = 0.031; cross pairings 7-0 and 10-0, p = 0.016 and 0.0020), with zero reversals in any pairing. On containment the sensors-off memory gap differs (0-10, p = 0.0020) while the sensors-on memory gap is within noise (0-5, p = 0.0625); both sensors-on versus sensors-off gaps are within noise. Seven networks (9001, 9007, 9009, 9010, 9014, 9017, 9020) lost in all four arms: red signs in on move 2 (easy, hard-intermediate) or 3 (medium) while blue's first move sees only the opening probe, and in 27 of those 28 episodes blue never isolated any host in time.
+
+Limits, stated plainly: solver red replays a known path with seeded noise, so this proves blue contains a known-path intruder on unseen networks, not that it stops an adaptive attacker; 20 networks are one pilot, not coverage; the playbook was learned against the solver's path distribution, where list-before-read always holds; and the Stage 3 sensor comparison is void because sensors fired zero alerts in all 58 sensors-on episodes of the train and held-out benches (the sensor reader polls the classic host list while generated networks use spec hosts, so every lookup missed). Audit covered the two sensors-on cells only (justified 156 of 173 without memory, 207 of 248 with memory). Baseten tokens for the held-out run: 889 calls, 2.06M in / 162k out / 82k reasoning; check the invoice for dollars.
 
 ## Open-weights blue
 
