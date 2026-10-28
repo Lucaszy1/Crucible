@@ -3,7 +3,7 @@ import { fetchAttackMap, fetchCampaign, fetchCampaigns, fetchConfig, fetchFeatur
 import { fillCampaignSelects, renderLearn } from "./learn.js";
 import {
   acceptLiveTraffic, autoplayQueue, bootStale, displayOutcome, endCardStats, eventHost,
-  followOpensLive, motionReduced, outcomeLine,
+  finishSide, followOpensLive, motionReduced, outcomeLine,
   rankFeatured, reduceHostStates, runFlags, scoreEvents,
 } from "./state.js";
 import { describeEvent, statusSentence } from "./story.js";
@@ -29,7 +29,8 @@ import {
 } from "./arena.js";
 import {
   cancelStage, firstAccessStage, flashStageHost, glitchStage, initStage,
-  loadStageArt, renderStageStatic, setStageActive, setStageArt, setStageLayout, stageNotify,
+  loadStageArt, renderStageStatic, setStageActive, setStageArt, setStageLayout, stageFinish,
+  stageNotify,
 } from "./stage.js";
 import {
   classicLayout, layoutFromEvents, layoutHosts, layoutWeights, scenarioMeta, scenarioText,
@@ -810,6 +811,21 @@ function showEndCardFor() {
   const stats = endCardStats(store.events, store.finalScore, store.weights);
   const audits = reduceAudits(store.events, store.events.length);
   const nextId = nextFeaturedId();
+  // Decisive endings on the cinematic stage play the finish first:
+  // three rays, the loser's explosion, then the card. Quiet endings,
+  // the classic view, reduced motion, and a hidden arena skip it.
+  const side = finishSide(stats.key);
+  if (side && !store.classic && stageRefs && !els.arenaView.hidden && !reducedMotion()) {
+    const started = stageFinish(stageRefs, side, {
+      pace: store.pace,
+      onDone: () => showEndCardNow(stats, audits, nextId),
+    });
+    if (started) return;
+  }
+  showEndCardNow(stats, audits, nextId);
+}
+
+function showEndCardNow(stats, audits, nextId) {
   showEndCard(endEls(), stats, audits.summary.justifiedPct, nextId);
   if (stats.key === "secret-exposed") glitchScene();
   const auto = store.presentLoop || (store.lobby.autoplay && store.mode === "replay");

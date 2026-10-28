@@ -468,6 +468,10 @@ export function initStage(canvas, opts) {
     barArmed: false,
     barRunKey: "",
     barCursor: 0,
+    finish: null,
+    dead: null,
+    desat: 0,
+    desatTarget: 0,
     fx: [],
     impacts: [],
     sparks: [],
@@ -910,6 +914,10 @@ export function renderStageStatic(refs, events, cursor, opts, instant) {
     refs.fx = [];
     refs.impacts = [];
     refs.sparks = [];
+    refs.finish = null;
+    refs.dead = null;
+    refs.desat = 0;
+    refs.desatTarget = 0;
     let lastRed = null;
     for (const ev of slice) {
       if (ev && ev.actor === "red" && ev.tool === "try_credential" &&
@@ -1221,6 +1229,10 @@ export function cancelStage(refs) {
   refs.impacts = [];
   refs.sparks = [];
   refs.flash = null;
+  refs.finish = null;
+  refs.dead = null;
+  refs.desat = 0;
+  refs.desatTarget = 0;
   refs.surge = { red: 0, blue: 0 };
   refs.knock = { red: 0, blue: 0 };
   if (refs.audTimer) {
@@ -1538,6 +1550,18 @@ function startStageLoop(refs) {
     refs.clock += dt;
     refs.cam = stepCamera(refs.cam, refs.camTarget, dt);
     stepBarShown(refs, dt);
+    if (refs.finish && !refs.finish.fired && refs.clock >= refs.finish.doneAt) {
+      // The ending ran its course: hand the card to the caller once.
+      refs.finish.fired = true;
+      const done = refs.finish.onDone;
+      refs.finish = null;
+      if (typeof done === "function") done();
+    }
+    if (refs.desat !== refs.desatTarget) {
+      const dk = 1 - Math.exp(-Math.max(0, dt) / 1000 * 3);
+      refs.desat += (refs.desatTarget - refs.desat) * dk;
+      if (Math.abs(refs.desatTarget - refs.desat) < 0.01) refs.desat = refs.desatTarget;
+    }
     if (refs.idleUntil && refs.clock > refs.idleUntil) {
       refs.idleUntil = 0;
       refs.camTarget = { dx: 0, dy: 0, z: 1 };
@@ -1629,9 +1653,44 @@ function projEnds(refs, side) {
   };
 }
 
-// Impact ledger: one record per projectile strike, shatter, or
-// mid-flight fizzle. Fired from drawStage so stills and live play
-// agree, and cleared on scrub like every transient effect.
+// Finish sequence: when a decisive exercise ends, the winner fires
+// three rays of light at the loser, each striking harder, then the
+// loser explodes. Blue wins seal the Intrusion first and it
+// dissolves; red wins shatter the Guardian and desaturate the
+// stage. Rays reuse the fx and impact ledgers with future stamps;
+// completion fires from the tick so stills and live play agree.
+export function stageFinish(refs, side, opts) {
+  const o = opts || {};
+  const done = typeof o.onDone === "function" ? o.onDone : () => {};
+  if (!refs || refs.finish) return false;
+  if (refs.reduced) {
+    done();
+    return true;
+  }
+  const winner = side === "red" ? "red" : "blue";
+  const loser = winner === "red" ? "blue" : "red";
+  const plan = finishPlan(o.pace);
+  const t0 = refs.clock;
+  if (!refs.impacts) refs.impacts = [];
+  for (let i = 0; i < 3; i += 1) {
+    const at = t0 + i * plan.gap;
+    refs.fx.push({ kind: "ray", side: winner, power: i + 1, t0: at, dur: plan.rayDur, flight: plan.rayFlight });
+    refs.impacts.push({ at: at + plan.rayFlight, kind: "raystrike", side: loser, power: i + 1 });
+  }
+  const thirdAt = t0 + 2 * plan.gap + plan.rayFlight;
+  if (winner === "blue") {
+    refs.fx.push({ kind: "seal", t0: thirdAt, dur: plan.postRay });
+  }
+  const explodeAt = thirdAt + plan.postRay;
+  refs.impacts.push({ at: explodeAt, kind: "explode", side: loser });
+  refs.finish = { doneAt: explodeAt + plan.explodeDur + plan.cardDelay, onDone: done, fired: false };
+  return true;
+}
+
+// Impact ledger: one record per projectile strike, shatter,
+// mid-flight fizzle, ray strike, or final explosion. Fired from
+// drawStage so stills and live play agree, and cleared on scrub
+// like every transient effect.
 function scheduleImpacts(refs, fx) {
   if (!refs || !fx) return;
   if (fx.kind !== "lance" && fx.kind !== "volley" && fx.kind !== "orb") return;
@@ -1683,6 +1742,37 @@ function fireImpacts(refs) {
       // hit-stop, no recoil, and the bar does not move.
       spawnSparks(refs, ends.to.x, ends.to.y, "red", 7);
       spawnSparks(refs, ends.to.x, ends.to.y, "gray", 7);
+      continue;
+    }
+    if (hit.kind === "raystrike") {
+      // Finish rays strike with growing impact: more sparks,
+      // harder shake, longer freeze with each ray.
+      const power = Math.max(1, Math.min(3, Number(hit.power) || 1));
+      spawnSparks(refs, ends.to.x, ends.to.y, hit.side === "red" ? "blue" : "red", 6 + power * 10);
+      refs.trauma = Math.min(1, refs.trauma + 0.2 + power * 0.15);
+      refs.knock[hit.side] = refs.clock + (KNOCK_MS[hit.side] || 500);
+      if (power > 1) refs.hitstopFrames = Math.max(refs.hitstopFrames || 0, power === 2 ? 4 : 8);
+      continue;
+    }
+    if (hit.kind === "explode") {
+      // The loser explodes into particles. Red wins also drain
+      // the color from the stage; the vault already cracked when
+      // the secret was read.
+      spawnSparks(refs, ends.to.x, ends.to.y, hit.side === "red" ? "red" : "blue", 34);
+      spawnSparks(refs, ends.to.x, ends.to.y, "white", 26);
+      refs.trauma = 1;
+      refs.knock[hit.side] = refs.clock + (KNOCK_MS[hit.side] || 500);
+      refs.hitstopFrames = Math.max(refs.hitstopFrames || 0, 12);
+      refs.fx.push({
+        kind: "blast", x: ends.to.x, y: ends.to.y, t0: refs.clock, dur: 900,
+        color: hit.side === "red" ? "255,110,100" : "140,210,255",
+      });
+      refs.dead = {
+        side: hit.side,
+        at: refs.clock,
+        mode: hit.side === "red" ? "dissolve" : "shatter",
+      };
+      if (hit.side === "blue") refs.desatTarget = 0.85;
       continue;
     }
     const size = hit.size || "standard";
@@ -1807,6 +1897,15 @@ function paintFrame(refs, ctx) {
   paintParticles(refs, ctx);
   ctx.translate(-sx, -sy);
   paintOverlays(refs, ctx);
+  if (refs.desat > 0.01) {
+    // Red-win aftermath: drain the color. A gray wash through the
+    // saturation blend desaturates in one fill, no filter passes.
+    ctx.save();
+    ctx.globalCompositeOperation = "saturation";
+    ctx.fillStyle = `rgba(128,128,128,${(Math.min(1, refs.desat) * 0.9).toFixed(2)})`;
+    ctx.fillRect(0, 0, cw, ch);
+    ctx.restore();
+  }
   ctx.restore();
 }
 
@@ -2101,6 +2200,12 @@ function paintHostLabel(refs, ctx, id, x, y, r, jewel) {
   ctx.restore();
 }
 
+// Deterministic hash for debris scatter: no RNG in the paint path.
+function fhash(n) {
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
 function paintEntities(refs, ctx) {
   const slots = refs.stage.entities;
   const t = refs.clock / 1000;
@@ -2113,14 +2218,73 @@ function paintEntities(refs, ctx) {
   const level = Math.min(1, refs.intrusion + redHot * 0.25);
   const energy = Math.min(1.15, refs.guardian + blueHot * 0.35);
   const sway = refs.cam.dx * 0.12;
-  paintIntrusion(ctx, {
-    sprites: refs.sprites || {}, bodies: refs.bodies || {},
-    swayX: sway, flare: redHot, recoil: redKnock, burst: redHot,
-  }, red.x, red.y, red.r * (0.68 + 0.42 * refs.intrusion), level, t);
-  paintGuardian(ctx, {
-    sprites: refs.sprites || {}, bodies: refs.bodies || {},
-    swayX: sway, flare: blueHot, recoil: blueKnock, burst: 0,
-  }, blue.x, blue.y, blue.r, energy, t);
+  let redAlpha = 1;
+  let blueAlpha = 1;
+  let redY = red.y;
+  const dead = refs.dead;
+  if (dead) {
+    const span = dead.mode === "dissolve" ? 1500 : 1200;
+    const k = Math.max(0, Math.min(1, (refs.clock - dead.at) / span));
+    if (dead.side === "red") {
+      // Sealed, then dissolving: the body lifts and thins to nothing.
+      redAlpha = 1 - k;
+      redY = red.y - k * 36;
+    } else {
+      blueAlpha = 1 - k;
+    }
+  }
+  if (redAlpha > 0) {
+    ctx.save();
+    ctx.globalAlpha = redAlpha;
+    paintIntrusion(ctx, {
+      sprites: refs.sprites || {}, bodies: refs.bodies || {},
+      swayX: sway, flare: redHot, recoil: redKnock, burst: redHot,
+    }, red.x, redY, red.r * (0.68 + 0.42 * refs.intrusion), level, t);
+    ctx.restore();
+  }
+  if (blueAlpha > 0) {
+    ctx.save();
+    ctx.globalAlpha = blueAlpha;
+    paintGuardian(ctx, {
+      sprites: refs.sprites || {}, bodies: refs.bodies || {},
+      swayX: sway, flare: blueHot, recoil: blueKnock, burst: 0,
+    }, blue.x, blue.y, blue.r, energy, t);
+    ctx.restore();
+  }
+  if (dead && dead.side === "blue" && refs.clock > dead.at) {
+    // Shattered: opaque plate debris tumbles while the body fades
+    // and keeps going after it is gone.
+    paintShatterDebris(ctx, blue.x, blue.y, blue.r, refs.clock - dead.at);
+  }
+}
+
+// Guardian wreckage: pale plates tumbling outward, fading over
+// about two seconds. Deterministic scatter, opaque fills.
+function paintShatterDebris(ctx, x, y, r, age) {
+  const k = Math.max(0, Math.min(1, age / 2000));
+  if (k >= 1) return;
+  ctx.save();
+  for (let i = 0; i < 12; i += 1) {
+    const a = fhash(i + 1) * 6.283;
+    const dist = (30 + fhash(i + 21) * 170) * (1 - (1 - k) * (1 - k)) * Math.max(0.4, r / 82);
+    const px = x + Math.cos(a) * dist;
+    const py = y + Math.sin(a) * dist * 0.7 + k * k * 60;
+    const w = (8 + fhash(i + 41) * 14) * Math.max(0.4, r / 82);
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(k * (2 + fhash(i + 61) * 4) + fhash(i + 81) * 6.283);
+    ctx.globalAlpha = 0.95 * (1 - k);
+    ctx.fillStyle = i % 3 === 0 ? "#e8f4ff" : i % 3 === 1 ? "#9fd0f5" : "#5d7fa6";
+    ctx.beginPath();
+    ctx.moveTo(w / 2, 0);
+    ctx.lineTo(0, -w * 0.3);
+    ctx.lineTo(-w / 2, 0);
+    ctx.lineTo(0, w * 0.3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
 }
 
 // The Intrusion: the hero splash as its body, drawn large and
@@ -2423,6 +2587,15 @@ function paintFx(refs, ctx) {
       case "volley":
       case "orb":
         paintProjectile(refs, ctx, fx, age);
+        break;
+      case "ray":
+        paintRay(refs, ctx, fx, age);
+        break;
+      case "seal":
+        paintSeal(refs, ctx, fx, age);
+        break;
+      case "blast":
+        paintBlast(refs, ctx, fx, age);
         break;
       default:
         break;
@@ -2786,6 +2959,117 @@ function paintFxCallout(refs, ctx, fx, p) {
 // Body scale by move significance: volley shards fly small,
 // heavy lances and large orbs land the big impacts.
 const PROJ_SCALE = { small: 0.7, standard: 1, heavy: 1.5, large: 1.5 };
+
+// Finish ray: a shaft of light along the flight lane, white core
+// with the winner's tint, widening with each ray's power. After
+// arrival the impact blooms on the loser's rim.
+function paintRay(refs, ctx, fx, age) {
+  const side = fx.side === "blue" ? "blue" : "red";
+  const slots = refs.stage.entities;
+  const stage = projStageScale(slots.intrusion.r, slots.guardian.r);
+  const ends = projEnds(refs, side);
+  const lane = flightLane(ends.from, ends.to);
+  const flight = Number(fx.flight) || 350;
+  const power = Math.max(1, Math.min(3, Number(fx.power) || 1));
+  const width = (7 + power * 5) * stage;
+  const tint = side === "blue" ? "140,210,255" : "255,110,90";
+  const sprites = refs.sprites || {};
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.lineCap = "round";
+  if (age < flight) {
+    const q = Math.max(0, age / flight);
+    const head = lanePoint(lane, q);
+    ctx.strokeStyle = `rgba(${tint},0.45)`;
+    ctx.lineWidth = width * 2.4;
+    ctx.beginPath();
+    ctx.moveTo(ends.from.x, ends.from.y);
+    ctx.lineTo(head.x, head.y);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,0.9)";
+    ctx.lineWidth = Math.max(2, width * 0.7);
+    ctx.beginPath();
+    ctx.moveTo(ends.from.x, ends.from.y);
+    ctx.lineTo(head.x, head.y);
+    ctx.stroke();
+    drawGlow(ctx, sprites.white, head.x, head.y, width * 2.2, 0.85);
+    drawGlow(ctx, side === "blue" ? sprites.cyan : sprites.red,
+      ends.from.x, ends.from.y, width * (2 + q * 2), 0.5 + q * 0.4);
+  } else {
+    const iq = Math.min(1, (age - flight) / Math.max(1, fx.dur - flight));
+    const s = stage * (0.8 + power * 0.35);
+    paintFxRing(refs, ctx, { r0: 12 * s, r1: (50 + power * 26) * s, color: tint, dur: fx.dur - flight },
+      iq * (fx.dur - flight), ends.to);
+    drawGlow(ctx, sprites.white, ends.to.x, ends.to.y, 70 * s * (1 - iq * 0.6), 0.9 * (1 - iq));
+    drawGlow(ctx, side === "blue" ? sprites.cyan : sprites.red,
+      ends.to.x, ends.to.y, 46 * s * (1 - iq * 0.5), 0.7 * (1 - iq));
+  }
+  ctx.restore();
+}
+
+// Blue-win seal: pale rings cinch onto the Intrusion while three
+// shafts converge on it from the Guardian's side, then a white
+// flash as the dissolve begins.
+function paintSeal(refs, ctx, fx, age) {
+  const slots = refs.stage.entities;
+  const red = { x: slots.intrusion.x, y: slots.intrusion.y, r: slots.intrusion.r };
+  const blue = { x: slots.guardian.x, y: slots.guardian.y, r: slots.guardian.r };
+  const p = Math.max(0, Math.min(1, age / Math.max(1, fx.dur)));
+  const sprites = refs.sprites || {};
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.lineCap = "round";
+  for (let i = 0; i < 2; i += 1) {
+    const rr = red.r * (1.7 - p * 0.8) + i * 14;
+    ctx.strokeStyle = `rgba(230,245,255,${(0.75 * (1 - p * 0.4)).toFixed(2)})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(red.x, red.y, Math.max(4, rr), 0, 6.283);
+    ctx.stroke();
+  }
+  for (let i = 0; i < 3; i += 1) {
+    const a = Math.PI + (i - 1) * 0.38;
+    const sx = blue.x + Math.cos(a) * blue.r * 0.6;
+    const sy = blue.y + Math.sin(a) * blue.r * 0.6;
+    ctx.strokeStyle = `rgba(190,235,255,${(0.35 + p * 0.5).toFixed(2)})`;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(red.x, red.y);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = `rgba(255,255,255,${(0.5 + p * 0.4).toFixed(2)})`;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(blue.x - blue.r * 0.6, blue.y);
+  ctx.lineTo(red.x, red.y);
+  ctx.stroke();
+  if (p > 0.75) {
+    const q = (p - 0.75) / 0.25;
+    drawGlow(ctx, sprites.white, red.x, red.y, red.r * (1 + q), 0.85 * q);
+  }
+  ctx.restore();
+}
+
+// Explosion flash: a white-hot core with two shockwaves racing
+// out. The spark burst and the loser's breakup carry the rest.
+function paintBlast(refs, ctx, fx, age) {
+  const pt = fxPoint(refs, fx);
+  if (!pt) return;
+  const dur = Math.max(1, fx.dur);
+  const p = Math.max(0, Math.min(1, age / dur));
+  const color = fx.color || "255,255,255";
+  paintFxRing(refs, ctx, { r0: 12, r1: 190, color, dur }, age, pt);
+  if (p > 0.12) {
+    paintFxRing(refs, ctx, { r0: 8, r1: 130, color: "255,255,255", dur: dur * 0.8 },
+      (p - 0.12) * dur, pt);
+  }
+  const sprites = refs.sprites || {};
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  drawGlow(ctx, sprites.white, pt.x, pt.y, 150 * (1 - p * 0.7), 0.95 * (1 - p));
+  ctx.restore();
+}
 
 // Body scale follows the entities: full size on the big stage,
 // shrinking with docked glyphs so narrow stages keep projectiles
