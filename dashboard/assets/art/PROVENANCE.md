@@ -1,6 +1,7 @@
 # Art provenance
 
 Original art generated at build time for the cinematic arena.
+Generated: Oct 27 2026.
 Model: muse-image-1.0 on the Meta Model API (https://api.meta.ai/v1).
 All prompts describe original abstract designs: no existing characters,
 logos, brands, people, weapons, or gore. Files are committed so the

@@ -188,11 +188,13 @@ def generate(client, piece: dict) -> tuple[int, int]:
     return in_tokens, out_tokens
 
 
-def write_provenance() -> None:
+def write_provenance(generated_on: str | None = None) -> None:
+    stamp = generated_on or date.today().strftime("%b %d %Y")
     lines = [
         "# Art provenance",
         "",
         "Original art generated at build time for the cinematic arena.",
+        f"Generated: {stamp}.",
         f"Model: {MODEL} on the Meta Model API ({os.environ.get('MODEL_API_BASE', 'https://api.meta.ai/v1')}).",
         "All prompts describe original abstract designs: no existing characters,",
         "logos, brands, people, weapons, or gore. Files are committed so the",
