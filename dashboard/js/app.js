@@ -105,7 +105,6 @@ const els = {
   moveStrip: document.getElementById("moveStrip"),
   slate: document.getElementById("slate"),
   slateTitle: document.getElementById("slateTitle"),
-  slateHosts: document.getElementById("slateHosts"),
   slateCount: document.getElementById("slateCount"),
   thoughtRed: document.getElementById("thoughtRed"),
   thoughtRedHead: document.getElementById("thoughtRedHead"),
@@ -742,11 +741,9 @@ async function openExercise(runId, opts) {
     return;
   }
   store.opening = playOpening(
-    { root: els.slate, title: els.slateTitle, hosts: els.slateHosts, count: els.slateCount },
+    { root: els.slate, title: els.slateTitle, count: els.slateCount },
     {
       label: runId,
-      hosts: layoutHosts(store.layout || classicLayout()),
-      roles: Object.fromEntries(((store.layout || {}).hosts || []).map((host) => [host.id, host.role])),
       reduced: reducedMotion(),
       onDone: () => {
         store.opening = null;

@@ -1,8 +1,7 @@
 // Opening slate: a 3 to 4 second build-up before playback. Title,
-// sides, hosts, the protected file line, then a 3-2-1 countdown to
+// sides, the protected file line, then a 3-2-1 countdown to
 // BEGIN. Space or Enter skips. Never replays on scrub or jump: only
 // opening an exercise starts it. Skipped under reduced motion.
-import { HOSTS } from "./state.js";
 
 const COUNT = ["3", "2", "1", "BEGIN"];
 // Timings in ms: beat, beat, beat, BEGIN hold, then done.
@@ -36,19 +35,7 @@ export function playOpening(els, opts) {
     timers.push(setTimeout(finish, 0));
     return { skip: finish, destroy };
   }
-  if (els.title) els.title.textContent = `Exercise ${o.label || ""}`.trim();
-  if (els.hosts) {
-    els.hosts.innerHTML = "";
-    const names = Array.isArray(o.hosts) && o.hosts.length > 0 ? o.hosts : HOSTS;
-    const roles = (o && o.roles) || {};
-    for (const host of names) {
-      const chip = document.createElement("span");
-      chip.className = "slate-host";
-      chip.textContent = host;
-      if (roles[host]) chip.title = `${host} · ${roles[host]}`;
-      els.hosts.append(chip);
-    }
-  }
+  if (els.title) els.title.textContent = o.label || "Exercise";
   if (els.count) els.count.textContent = COUNT[0];
   if (els.root) els.root.hidden = false;
   document.addEventListener("keydown", onKey, true);
