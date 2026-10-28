@@ -43,4 +43,11 @@ export function initControls(els, deps) {
       deps.onSpeed(Number(btn.dataset.speed));
     });
   });
+  if (els.paceSeg) {
+    els.paceSeg.querySelectorAll("button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        deps.onPace(btn.dataset.pace);
+      });
+    });
+  }
 }

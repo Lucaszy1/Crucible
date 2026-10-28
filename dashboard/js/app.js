@@ -141,6 +141,7 @@ const controls = {
   agents: document.getElementById("agentsSelect"),
   run: document.getElementById("runBtn"),
   speedSeg: document.getElementById("speedSeg"),
+  paceSeg: document.getElementById("paceSeg"),
   light: document.getElementById("serverLight"),
   label: document.getElementById("serverLabel"),
 };
@@ -162,6 +163,7 @@ const store = {
   cursor: 0,
   playing: false,
   speed: 1,
+  pace: "standard",
   timer: null,
   weights: { web: 3, app: 3, db: 5, workstation: 1 },
   layout: null,
@@ -1162,6 +1164,25 @@ function applySpeed(speed) {
   if (store.playing) playReplay();
 }
 
+// Finish pace: Quick shortens the ending to a social-clip beat,
+// Slow stretches it for narration. Persisted like the toggles.
+function applyPace(pace) {
+  const valid = pace === "quick" || pace === "slow" ? pace : "standard";
+  store.pace = valid;
+  try {
+    window.localStorage.setItem("crucible-pace", valid);
+  } catch (err) {
+    // Private browsing: the pace simply does not persist.
+  }
+  if (controls.paceSeg) {
+    controls.paceSeg.querySelectorAll("button").forEach((btn) => {
+      const on = btn.dataset.pace === valid;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-pressed", String(on));
+    });
+  }
+}
+
 async function boot() {
   let theme = "light";
   try {
@@ -1199,7 +1220,15 @@ async function boot() {
   initControls(controls, {
     onRun: onRunRequest,
     onSpeed: (speed) => applySpeed(speed),
+    onPace: (pace) => applyPace(pace),
   });
+  let savedPace = "standard";
+  try {
+    savedPace = window.localStorage.getItem("crucible-pace") || "standard";
+  } catch (err) {
+    // Private browsing: fall back to the standard finish.
+  }
+  applyPace(savedPace);
   initThoughtHeads(thoughtPanels());
   setThoughtsCollapsed(thoughtPanels(), window.innerWidth < 800);
   initEndCard(endEls(), {

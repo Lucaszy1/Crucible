@@ -1467,6 +1467,25 @@ export const FLIGHT_MS = { small: 500, standard: 650, heavy: 800, large: 800 };
 export const IMPACT_MS = 350;
 export const VOLLEY_STAGGER_MS = 120;
 
+// Finish pace scales every beat of the ending: rays two seconds
+// apart at standard pace, the whole finish about nine seconds;
+// quick lands near six, slow near sixteen for narration.
+export const FINISH_PACES = { quick: 0.65, standard: 1, slow: 1.8 };
+
+export function finishPlan(pace) {
+  const m = FINISH_PACES[pace] || FINISH_PACES.standard;
+  const gap = Math.round(2000 * m);
+  const rayFlight = Math.round(350 * m);
+  const rayDur = Math.round(1100 * m);
+  const postRay = Math.round(1500 * m);
+  const explodeDur = Math.round(1800 * m);
+  const cardDelay = Math.round(800 * m);
+  return {
+    mult: m, gap, rayFlight, rayDur, postRay, explodeDur, cardDelay,
+    total: 2 * gap + rayFlight + postRay + explodeDur + cardDelay,
+  };
+}
+
 function projectileEntry(kind, side, size, fail) {
   const flight = FLIGHT_MS[size] || FLIGHT_MS.standard;
   const stagger = kind === "volley" ? VOLLEY_STAGGER_MS * 2 : 0;

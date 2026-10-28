@@ -4,9 +4,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  applyCamera, blueLine, calloutForEvent, dollyTarget, FLIGHT_MS, flightLaneRect, frameBudget,
-  frameP95, flightLane, fxForEvent, guardianPulse, intrusionLevel, laneFeed, lanePoint,
-  paintGuardian, paintIntrusion, redLine, stageLayout, stageWash, stepCamera,
+  applyCamera, blueLine, calloutForEvent, dollyTarget, FINISH_PACES, finishPlan, FLIGHT_MS,
+  flightLaneRect, frameBudget, frameP95, flightLane, fxForEvent, guardianPulse, intrusionLevel,
+  laneFeed, lanePoint, paintGuardian, paintIntrusion, redLine, stageLayout, stageWash, stepCamera,
 } from "../dashboard/js/stage.js";
 import { arenaGeometry, classicLayout, normalizeLayout } from "../dashboard/js/layout.js";
 
@@ -465,6 +465,21 @@ describe("entity levels", () => {
       assert.ok(pt.x >= box.x && pt.x <= box.x + box.w, `sample ${i} x inside`);
       assert.ok(pt.y >= box.y && pt.y <= box.y + box.h, `sample ${i} y inside`);
     }
+  });
+
+  it("spaces finish rays two seconds apart at standard pace", () => {
+    const plan = finishPlan("standard");
+    assert.equal(plan.mult, 1);
+    assert.equal(plan.gap, 2000);
+    assert.ok(plan.total >= 8000 && plan.total <= 10000, `standard total ${plan.total}`);
+    const quick = finishPlan("quick");
+    assert.ok(quick.total >= 5000 && quick.total <= 6500, `quick total ${quick.total}`);
+    assert.ok(quick.gap < plan.gap, "quick gaps shrink");
+    const slow = finishPlan("slow");
+    assert.ok(slow.total >= 14000 && slow.total <= 17000, `slow total ${slow.total}`);
+    assert.ok(slow.gap > plan.gap, "slow gaps stretch");
+    assert.deepEqual(finishPlan("bogus"), plan, "unknown pace falls back to standard");
+    assert.equal(FINISH_PACES.standard, 1);
   });
 
   it("keeps the flight lane peak above every endpoint", () => {

@@ -458,6 +458,16 @@ export function displayOutcome(eventList) {
   return { key, label: meta.label, tone: meta.tone, secret, gotIn, contained, acted };
 }
 
+// Finish side from the honest outcome only: a secret read means
+// the Intrusion wins the exchange, a stopped intrusion means the
+// Guardian does. Quiet and ambiguous endings (held, no intrusion,
+// uncontained, stalemate) play no finish sequence.
+export function finishSide(outcomeKey) {
+  if (outcomeKey === "secret-exposed") return "red";
+  if (outcomeKey === "contained") return "blue";
+  return null;
+}
+
 // One plain sentence per display outcome for end cards and captions.
 export function outcomeLine(key) {
   switch (key) {

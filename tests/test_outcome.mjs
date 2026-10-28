@@ -12,6 +12,7 @@ import {
   controlBarTip,
   displayOutcome,
   endCardStats,
+  finishSide,
   followOpensLive,
   motionReduced,
   outcomeLine,
@@ -305,6 +306,18 @@ describe("stripModel", () => {
     assert.equal(followOpensLive(true, "idle", null, { running: false }), false);
     assert.equal(followOpensLive(true, "idle", null, { running: true }), false);
     assert.equal(followOpensLive(true, "idle", null, null), false);
+  });
+});
+
+describe("finishSide", () => {
+  it("hands decisive endings to a winner and stays quiet otherwise", () => {
+    assert.equal(finishSide("secret-exposed"), "red");
+    assert.equal(finishSide("contained"), "blue");
+    assert.equal(finishSide("held"), null);
+    assert.equal(finishSide("no-intrusion"), null);
+    assert.equal(finishSide("uncontained"), null);
+    assert.equal(finishSide("stalemate"), null);
+    assert.equal(finishSide("unknown"), null);
   });
 });
 
