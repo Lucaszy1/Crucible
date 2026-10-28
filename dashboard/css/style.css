@@ -835,7 +835,9 @@ canvas.lobby-thumb:focus-visible { outline: 2px solid #8fb8ff; outline-offset: 2
   .arena-row3 > .arena-rail > .thought { max-height: 30vh; }
 }
 .thought.blue .thought-chips { justify-content: flex-end; }
-.thought.empty { display: none; }
+/* Waiting panels stay in the row: hiding them here used to widen
+   the canvas during the opening slate, then shrink it at the
+   first move, flashing the whole stage oversized for a moment. */
 .thought-head {
   background: none; border: none; padding: 0; margin: 0 0 4px;
   font-size: 10px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase;
