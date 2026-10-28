@@ -1,8 +1,9 @@
-"""Human blue: judge orders executed as blue turns.
+"""Human blue: judge orders executed as defender turns.
 
 A judge speaks or types orders ("isolate the database"); each order is
 parsed by crucible.commands and executed as one blue tool action with
-the same scoring, auditor, and logs as AI turns. Human turns wait on a
+the same scoring, auditor, and logs as AI turns, logged under actor
+"human" so assisted runs stay identifiable. Human turns wait on a
 command queue with a turn clock; no command means hold.
 
 Two agent types:
@@ -114,6 +115,7 @@ def _hold_action(reason: str = HOLD_REASON) -> dict:
 def _human_action(parsed: dict, receipt: dict) -> dict:
     action = {"tool": parsed["tool"], "args": dict(parsed["args"]),
               "reasoning": parsed["reasoning"], "evidence_refs": [],
+              "_actor": "human",
               "_human_source": receipt["source"],
               "_human_transcript": receipt["text"]}
     return action
@@ -122,7 +124,7 @@ def _human_action(parsed: dict, receipt: dict) -> dict:
 class HumanBlue:
     """Blue agent driven entirely by judge orders."""
 
-    actor = "blue"
+    actor = "human"
 
     def __init__(self, cmd_queue: CommandQueue, *,
                  inventory: dict | None = None,
@@ -180,6 +182,7 @@ class HumanBlue:
         else:
             question = parsed.get("reason", "Order refused.")
         action = _hold_action(question)
+        action["_actor"] = "human"
         action["_human_source"] = receipt["source"]
         action["_human_transcript"] = receipt["text"]
         self._queue.note_result(
@@ -257,7 +260,9 @@ class AIWithOverride:
         receipt = self._queue.pop(timeout=wait)
         if receipt is None:
             if self._latched:
-                return _hold_action()
+                held = _hold_action()
+                held["_actor"] = "human"
+                return held
             return self._delegate(turn, history, max_turns, alerts)
         if commands.is_hand_back(receipt["text"]):
             self._latched = False
@@ -265,5 +270,11 @@ class AIWithOverride:
                 {"id": receipt["id"], "text": receipt["text"],
                  "source": receipt["source"], "status": "handed-back"})
             return self._delegate(turn, history, max_turns, alerts)
+        if commands.is_take_over(receipt["text"]):
+            self._latched = True
+            self._queue.note_result(
+                {"id": receipt["id"], "text": receipt["text"],
+                 "source": receipt["source"], "status": "taken-over"})
+            return None
         self._latched = True
         return self._human._run_order(receipt)

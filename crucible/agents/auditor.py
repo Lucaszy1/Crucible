@@ -94,6 +94,11 @@ SYSTEM_PROMPT = (
 )
 
 
+def _is_blue_side(actor: str | None) -> bool:
+    """Whether an actor defends: the blue agent or a human defender."""
+    return actor in ("blue", "human")
+
+
 def visible_logs(prior_events: list) -> dict:
     """Map each log line id blue had read to its text.
 
@@ -103,7 +108,7 @@ def visible_logs(prior_events: list) -> dict:
     """
     visible: dict = {}
     for event in prior_events or []:
-        if event.get("actor") != "blue" or event.get("tool") != "read_logs":
+        if not _is_blue_side(event.get("actor")) or event.get("tool") != "read_logs":
             continue
         result = event.get("result", {}) or {}
         if result.get("ok") is not True:
@@ -119,7 +124,7 @@ def ref_first_seen(prior_events: list) -> dict:
     """Map each log line id to the event id where blue first saw it."""
     seen: dict = {}
     for event in prior_events or []:
-        if event.get("actor") != "blue" or event.get("tool") != "read_logs":
+        if not _is_blue_side(event.get("actor")) or event.get("tool") != "read_logs":
             continue
         result = event.get("result", {}) or {}
         if result.get("ok") is not True:
@@ -198,7 +203,7 @@ def redundant_read(blue_event: dict, prior_events: list) -> dict:
     seen: set = set()
     had_prior = False
     for event in prior_events or []:
-        if event.get("actor") != "blue" or event.get("tool") != "read_logs":
+        if not _is_blue_side(event.get("actor")) or event.get("tool") != "read_logs":
             continue
         prior_result = event.get("result", {}) or {}
         if prior_result.get("ok") is not True:
@@ -372,7 +377,7 @@ def _compact_result(tool: str, result: dict) -> str:
 
 def _blue_history_text(prior_events: list, limit: int = 6) -> str:
     """Render blue's own prior moves; red events never appear here."""
-    own = [event for event in prior_events or [] if event.get("actor") == "blue"]
+    own = [event for event in prior_events or [] if _is_blue_side(event.get("actor"))]
     if not own:
         return "No prior blue moves."
     lines = []
@@ -691,7 +696,7 @@ def audit_exercise(event_list: list, *, exercise_id: str | None = None,
                    role: str = ROLE) -> list:
     """Audit every blue action in an event list (end-of-exercise mode)."""
     targets = [index for index, event in enumerate(event_list or [])
-               if event.get("actor") == "blue"
+               if _is_blue_side(event.get("actor"))
                and event.get("tool") not in SKIP_TOOLS]
     audits = []
     for order, index in enumerate(targets, start=1):

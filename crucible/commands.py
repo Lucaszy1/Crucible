@@ -25,6 +25,7 @@ ALLOWED_TOOLS = (
     "read_logs",
     "report_finding",
     "list_processes",
+    "scan_host",
     "wait",
 )
 
@@ -35,6 +36,7 @@ EXAMPLES = (
     "read the last 100 lines on db",
     "report repeated sign-in failures on app",
     "status of the file share",
+    "scan the app host",
     "stand down",
 )
 
@@ -49,6 +51,9 @@ _VERBS = (
     ("patch_service", (
         r"\bpatch\w*\b", r"\bfix\b", r"\bfixes\b", r"\bfixed\b",
         r"\bremediat\w*\b", r"\brepair\w*\b", r"\bupdate\b",
+        # Sign-in rotation ships with the patch action, so a rotate
+        # order runs a patch and says so in its reasoning.
+        r"\brotat\w*\b",
     )),
     ("restore_host", (
         r"\brestor\w*\b", r"\breconnect\w*\b", r"\breattach\w*\b",
@@ -65,6 +70,9 @@ _VERBS = (
     ("list_processes", (
         r"\bstatus\b", r"\bprocess\w*\b", r"\bps\b", r"\bhealth\w*\b",
         r"\brunning on\b",
+    )),
+    ("scan_host", (
+        r"\bscan\w*\b", r"\brescan\b", r"\bsweep\b",
     )),
     ("wait", (
         r"\bstand down\b", r"\bstanddown\b", r"\bhold\b", r"\bholding\b",
@@ -104,12 +112,22 @@ _JEWEL_WORDS = ("crown jewel", "jewel")
 _HAND_BACK = ("hand back", "handback", "resume ai", "return control",
               "ai take over", "back to ai")
 
+_TAKE_OVER = ("take over", "takeover", "take control", "manual control",
+              "pause ai", "pause the ai", "my turn")
+
 
 def is_hand_back(text: str) -> bool:
     """Check whether a transcript returns control to the AI."""
     lowered = f" {str(text or '').lower()} "
     return any(f" {phrase} " in lowered or lowered.strip() == phrase
                for phrase in _HAND_BACK)
+
+
+def is_take_over(text: str) -> bool:
+    """Check whether a transcript takes control from the AI."""
+    lowered = f" {str(text or '').lower()} "
+    return any(f" {phrase} " in lowered or lowered.strip() == phrase
+               for phrase in _TAKE_OVER)
 
 
 def _detect_tool(text: str) -> str | None:
@@ -203,7 +221,7 @@ def validate_action(candidate: dict, inventory: dict,
                 "examples": list(EXAMPLES)}
     hosts = _inventory_hosts(inventory)
     if tool in ("isolate_host", "patch_service", "restore_host",
-                "read_logs", "list_processes"):
+                "read_logs", "list_processes", "scan_host"):
         host = str(args.get("host", "") or "")
         if host not in hosts:
             return {"status": "clarify",
@@ -304,9 +322,12 @@ def parse(text: str, inventory: dict,
                     "question": f"Which service on {host}?",
                     "options": []}
         args["service"] = expected
+    reasoning = f"Judge order: run {tool} on {host}."
+    if tool == "patch_service" and re.search(r"\brotat\w*\b", cleaned):
+        reasoning = (f"Judge order: rotate sign-in on {host}; "
+                     f"rotation ships with the patch action.")
     return validate_action(
-        {"tool": tool, "args": args,
-         "reasoning": f"Judge order: run {tool} on {host}."},
+        {"tool": tool, "args": args, "reasoning": reasoning},
         inventory, services)
 
 
@@ -315,7 +336,7 @@ _FALLBACK_SYSTEM = (
     "JSON object only, no other text. Either "
     '{"tool": "<name>", "args": {...}, "reasoning": "<short>"} '
     'with tool exactly one of isolate_host, patch_service, restore_host, '
-    "read_logs, report_finding, list_processes, wait; or "
+    "read_logs, report_finding, list_processes, scan_host, wait; or "
     '{"clarify": "<question>"} when the order is ambiguous; or '
     '{"refuse": "<reason>"} when it is outside that tool list. '
     "Hosts must come from the allowed list. Never invent a host, "
@@ -353,16 +374,32 @@ def parse_with_model(text: str, inventory: dict,
         return {"status": "refused",
                 "reason": "The phrasing model did not return usable JSON; "
                           "try one of the example orders.",
-                "examples": list(EXAMPLES)}
+                "examples": list(EXAMPLES),
+                "cost_usd": 0.0}
+    usage = (response or {}).get("usage", {}) or {}
+    try:
+        cost = llm.estimate_cost(
+            str((response or {}).get("model", "") or "dev"),
+            int(usage.get("input_tokens", 0) or 0),
+            int(usage.get("output_tokens", 0) or 0))
+    except (TypeError, ValueError):
+        cost = 0.0
+    if (response or {}).get("cached"):
+        cost = 0.0
     if not isinstance(payload, dict):
         return {"status": "refused",
                 "reason": "The phrasing model did not return usable JSON.",
-                "examples": list(EXAMPLES)}
+                "examples": list(EXAMPLES),
+                "cost_usd": cost}
     if isinstance(payload.get("clarify"), str):
         return {"status": "clarify",
-                "question": payload["clarify"][:300], "options": allowed}
+                "question": payload["clarify"][:300], "options": allowed,
+                "cost_usd": cost}
     if isinstance(payload.get("refuse"), str):
         return {"status": "refused",
                 "reason": payload["refuse"][:300],
-                "examples": list(EXAMPLES)}
-    return validate_action(payload, inventory, services)
+                "examples": list(EXAMPLES),
+                "cost_usd": cost}
+    result = validate_action(payload, inventory, services)
+    result["cost_usd"] = cost
+    return result

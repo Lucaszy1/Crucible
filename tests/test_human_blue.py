@@ -183,6 +183,37 @@ def test_override_ignores_hand_back_when_unlatched():
     assert blue.latched is False
 
 
+def test_human_actor_is_human():
+    blue = _human(CommandQueue())
+    assert blue.actor == "human"
+
+
+def test_take_over_latches_without_action():
+    cmd_queue = CommandQueue()
+    inner = _Inner()
+    blue = _override(cmd_queue, inner)
+    cmd_queue.push("take over")
+    assert blue.next_action(1, []) is None
+    assert blue.latched is True
+    assert inner.calls == []
+    assert cmd_queue.last_result()["status"] == "taken-over"
+
+
+def test_take_over_order_marks_human_actor():
+    cmd_queue = CommandQueue()
+    inner = _Inner()
+    blue = _override(cmd_queue, inner)
+    cmd_queue.push("take over")
+    blue.next_action(1, [])
+    cmd_queue.push("isolate the database", source="voice")
+    action = blue.next_action(3, [])
+    assert action["tool"] == "isolate_host"
+    assert action["_actor"] == "human"
+    held = blue.next_action(5, [])
+    assert held["tool"] == "wait"
+    assert held["_actor"] == "human"
+
+
 # -- loop hook --------------------------------------------------------------
 
 
@@ -199,11 +230,12 @@ def test_provenance_lands_in_event_log(tmp_path, monkeypatch):
         run_path=tmp_path / "human.jsonl", exercise_id="human-1",
         audit="off", sensors="off")
     logged = [event for event in result["events"]
-              if event.get("actor") == "blue"]
+              if event.get("actor") == "human"]
     assert len(logged) == 1
     assert logged[0]["tool"] == "isolate_host"
     assert logged[0]["source"] == "voice"
     assert logged[0]["transcript"] == "isolate the database"
+    assert result["score"]["assisted"] is True
     stored = events.read_events(tmp_path / "human.jsonl")
     assert stored[-1]["source"] == "voice"
     assert "_human_source" not in logged[0]["args"]

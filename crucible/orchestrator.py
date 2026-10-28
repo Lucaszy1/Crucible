@@ -144,6 +144,11 @@ def run_tool(tool_name: str, args: dict) -> dict:
         return {"ok": False, "error": str(exc)}
 
 
+def is_blue_side(actor: str | None) -> bool:
+    """Whether an actor defends: the blue agent or a human defender."""
+    return actor in ("blue", "human")
+
+
 def _compromised_hosts(event_list: list) -> set:
     found = set()
     for event in event_list:
@@ -172,7 +177,7 @@ def _secret_exfiltrated(event_list: list) -> bool:
 
 def _blue_acted(event_list: list) -> bool:
     for event in event_list:
-        if event.get("actor") != "blue":
+        if not is_blue_side(event.get("actor")):
             continue
         result = event.get("result", {}) or {}
         if result.get("ok") is not True:
@@ -378,7 +383,7 @@ def _relevant_detection_delay(scoring: list) -> int | None:
     alert_map = sensor_rules.alert_map_from_events(scoring)
     texts = _read_line_texts(scoring)
     for index, event in enumerate(scoring, start=1):
-        if event.get("actor") != "blue":
+        if not is_blue_side(event.get("actor")):
             continue
         if (event.get("result", {}) or {}).get("ok") is not True:
             continue
@@ -442,7 +447,7 @@ def score_events(event_list: list, business_weights: dict | None = None) -> dict
 
     time_to_detect = None
     for index, event in enumerate(scoring, start=1):
-        if event.get("actor") != "blue" or event.get("tool") != "report_finding":
+        if not is_blue_side(event.get("actor")) or event.get("tool") != "report_finding":
             continue
         if (event.get("result", {}) or {}).get("ok") is True:
             time_to_detect = index
@@ -457,7 +462,7 @@ def score_events(event_list: list, business_weights: dict | None = None) -> dict
         for index, event in enumerate(scoring, start=1):
             if index < first_compromise_at:
                 continue
-            if event.get("actor") != "blue":
+            if not is_blue_side(event.get("actor")):
                 continue
             if event.get("tool") not in CONTAINMENT_TOOLS:
                 continue
@@ -473,7 +478,7 @@ def score_events(event_list: list, business_weights: dict | None = None) -> dict
         for index, event in enumerate(scoring, start=1):
             if index < first_signin_at:
                 continue
-            if event.get("actor") != "blue":
+            if not is_blue_side(event.get("actor")):
                 continue
             if event.get("tool") not in CONTAINMENT_TOOLS:
                 continue
@@ -512,6 +517,8 @@ def score_events(event_list: list, business_weights: dict | None = None) -> dict
         "secret_exfiltrated": secret_read,
         "secret_read": secret_read,
         "outcome": outcome,
+        "assisted": any(event.get("actor") == "human"
+                        for event in scoring),
         "total_events": len(scoring),
         "downtime_cost": downtime_cost,
         "downtime_pct": downtime_pct,
@@ -534,10 +541,12 @@ def intrusion_conditional_summary(rows: list) -> dict:
     downtime among contained ones. Rates are None when no episode had
     an intrusion; medians skip episodes that never detected or
     contained; the downtime mean covers contained_after_intrusion
-    episodes only.
+    episodes only. Human-assisted rows never count: they are dropped
+    before every rate so assisted demos cannot move benchmark stats.
     """
-    total = len(rows or [])
-    intruded = [row for row in rows or [] if (row or {}).get("intrusion") is True]
+    clean = [row for row in rows or [] if not (row or {}).get("assisted")]
+    total = len(clean)
+    intruded = [row for row in clean if (row or {}).get("intrusion") is True]
     count = len(intruded)
     if not count:
         return {
@@ -792,7 +801,9 @@ def run_exercise(
                 "transcript": str(action.get("_human_transcript", "")),
             }
         logged = writer.log(
-            actor=getattr(agent, "actor", "unknown"),
+            actor=(action.get("_actor")
+                   if isinstance(action, dict) and action.get("_actor")
+                   else getattr(agent, "actor", "unknown")),
             tool=action.get("tool", ""),
             args=action.get("args", {}),
             result=result,
@@ -803,13 +814,13 @@ def run_exercise(
         )
         if (
             audit == "live"
-            and logged.get("actor") == "blue"
+            and is_blue_side(logged.get("actor"))
             and logged.get("tool") not in AUDIT_SKIP_TOOLS
         ):
             priors = [event for event in writer.events[:-1]
                       if event.get("actor") != "auditor"]
             blue_no = sum(1 for event in priors
-                          if event.get("actor") == "blue"
+                          if is_blue_side(event.get("actor"))
                           and event.get("tool") not in AUDIT_SKIP_TOOLS) + 1
             _log_audit(writer, audit_blue_event(
                 logged, priors, exercise_id=exercise_id,

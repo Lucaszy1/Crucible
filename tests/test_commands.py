@@ -59,6 +59,12 @@ PARSE_CASES = [
     ("stand down", "wait", {"reason": "judge ordered a hold"}),
     ("hold position", "wait", {"reason": "judge ordered a hold"}),
     ("do nothing for now", "wait", {"reason": "judge ordered a hold"}),
+    ("scan the app host", "scan_host", {"host": "app"}),
+    ("sweep db for open ports", "scan_host", {"host": "db"}),
+    ("rotate sign-in on app", "patch_service",
+     {"host": "app", "service": "reportapi"}),
+    ("rotate the secret on the database", "patch_service",
+     {"host": "db", "service": "fakestore"}),
 ]
 
 
@@ -173,6 +179,27 @@ def test_hand_back_detection():
     assert commands.is_hand_back("isolate the database") is False
 
 
+def test_take_over_detection():
+    assert commands.is_take_over("take over") is True
+    assert commands.is_take_over("pause the ai, my turn") is True
+    assert commands.is_take_over("take db offline") is False
+    assert commands.is_take_over("isolate the database") is False
+
+
+def test_rotate_runs_patch_and_says_so():
+    result = commands.parse("rotate sign-in on app",
+                            _inventory(), _services())
+    assert result["status"] == "ok"
+    assert result["tool"] == "patch_service"
+    assert "rotation ships with the patch" in result["reasoning"]
+
+
+def test_scan_needs_a_known_host():
+    result = commands.parse("scan the moon", _inventory(), _services())
+    assert result["status"] == "clarify"
+    assert "web" in result["question"]
+
+
 def _fake_client(content):
     message = SimpleNamespace(content=content, tool_calls=[])
     usage = SimpleNamespace(prompt_tokens=10, completion_tokens=5)
@@ -196,6 +223,7 @@ def test_model_fallback_validates(monkeypatch, tmp_path):
                                        client=_fake_client(body))
     assert result["status"] == "ok"
     assert result["args"] == {"host": "db"}
+    assert result["cost_usd"] >= 0.0
 
 
 def test_model_fallback_bad_json_refuses(monkeypatch, tmp_path):

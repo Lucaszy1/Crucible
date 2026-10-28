@@ -21,7 +21,7 @@ Examples:
   python -m crucible.bench --name try --red chain --sensors on --memory off \\
       --episodes-per-cell 2
   python -m crucible.bench --name open --blue-model meta-models/muse-spark-open-1026 \\
-      --blue-base-url https://api.baseten.co/v1 --blue-api-key-env BASETEN_API_KEY
+      --blue-base-url https://inference.baseten.co/v1 --blue-api-key-env BASETEN_API_KEY
 """
 
 from __future__ import annotations
@@ -72,6 +72,7 @@ CSV_FIELDS = (
     "scenario_seed",
     "scenario_difficulty",
     "blue_profile",
+    "assisted",
 )
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -609,6 +610,7 @@ def _run_episode(bench: dict, cell: dict, rep: int, args, client,
         "scenario_seed": (scenario or {}).get("seed"),
         "scenario_difficulty": (scenario or {}).get("difficulty"),
         "blue_profile": args.blue,
+        "assisted": bool(score.get("assisted", False)),
     })
     latest = bench["rows"][-1]
     print(f"{exercise_id}: outcome={latest['outcome']} "

@@ -81,6 +81,48 @@ def test_score_marks_detection_and_containment():
     assert score["secret_exfiltrated"] is True
 
 
+def test_score_counts_human_defense_as_blue():
+    history = [
+        _event("red", "scan_host", {"ok": True}, 1),
+        _event("human", "read_logs", {"ok": True}, 2),
+        _event("red", "try_credential",
+               {"ok": True, "host": "db", "authenticated": True}, 3),
+        _event("human", "report_finding", {"ok": True, "id": "finding-1"}, 4),
+        _event("human", "isolate_host", {"ok": True, "host": "db"}, 5),
+    ]
+    score = orchestrator.score_events(history)
+    assert score["outcome"] == "blue_held"
+    assert score["time_to_detect"] == 4
+    assert score["detection_delay"] == 3
+    assert score["time_to_contain"] == 5
+    assert score["contained_after_intrusion"] is True
+    assert score["assisted"] is True
+
+
+def test_score_unassisted_without_human_events():
+    history = [
+        _event("red", "scan_host", {"ok": True}, 1),
+        _event("blue", "read_logs", {"ok": True}, 2),
+    ]
+    score = orchestrator.score_events(history)
+    assert score["assisted"] is False
+
+
+def test_summary_drops_assisted_rows():
+    rows = [
+        {"intrusion": True, "contained_after_intrusion": True,
+         "secret_read": False, "relevant_detection_delay": 2,
+         "time_to_contain": 6, "downtime_pct": 5.0},
+        {"intrusion": True, "contained_after_intrusion": True,
+         "secret_read": False, "relevant_detection_delay": 2,
+         "time_to_contain": 6, "downtime_pct": 5.0, "assisted": True},
+    ]
+    summary = orchestrator.intrusion_conditional_summary(rows)
+    assert summary["episodes"] == 1
+    assert summary["intrusions"] == 1
+    assert summary["containment_rate"] == 1.0
+
+
 def test_score_stays_empty_without_progress():
     history = [
         _event("red", "scan_host", {"ok": True}, 1),

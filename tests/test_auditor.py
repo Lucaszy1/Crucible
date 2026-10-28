@@ -90,6 +90,30 @@ def _judgment(verdict, score=7, rationale="Plain reason here."):
 # Layer 1: deterministic evidence checks.
 
 
+def test_human_defense_audited_like_blue(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    history = [
+        _evt(1, "red", "scan_host"),
+        _evt(2, "human", "isolate_host", {"host": "db"},
+             {"ok": True, "host": "db"}, "Judge order."),
+    ]
+    client = _FakeClient(_response(_judgment("justified", 8)))
+    records = audit_exercise(history, exercise_id="audit-human",
+                             client=client, use_cache=False)
+    assert len(records) == 1
+    assert records[0]["target_event_id"] == "evt-0002"
+    assert records[0]["verdict"] == "justified"
+
+
+def test_human_reads_count_as_visible_logs():
+    history = [
+        _evt(1, "human", "read_logs", {"host": "db"},
+             {"ok": True, "host": "db",
+              "lines": [{"id": "db:7", "line": "signin ok"}]}),
+    ]
+    assert auditor.visible_logs(history) == {"db:7": "signin ok"}
+
+
 def test_refs_valid_when_logs_seen_and_host_matches():
     priors = [_read_logs(1, "db", [("db:0", "signin reset from=controller"),
                                    ("db:1", "signin ok user=admin from=controller")])]
