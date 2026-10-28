@@ -15,9 +15,12 @@ What the build does:
   id, and seed; every run is scored with
   orchestrator.score_events and outcome-checked.
 - Writes the API replacements as static JSON under site/data/:
-  runs index, one replay per run, featured list, attack map,
-  config, stage3 Learning numbers (derived from
-  dashboard/results.json), frozen playbook, and results.json.
+  runs index, one replay per run, one Layer 1 debrief per run,
+  featured list, attack map, config, stage3 Learning numbers
+  (derived from dashboard/results.json), frozen playbook, and
+  results.json. Debriefs are precomputed with
+  debrief.build_debrief, deterministic and model-free, so the
+  Story tab Debrief card works with no server.
 - Embeds the same data as window.__CRUCIBLE_STATIC__ in
   site/data.js. The page reads embedded data only, never fetch:
   fetch and ES modules are both blocked on file:// in Chrome,
@@ -60,6 +63,7 @@ DEFAULT_OUT = ROOT / "docs" / "site"
 
 sys.path.insert(0, str(ROOT))
 
+from crucible import debrief  # noqa: E402
 from crucible import orchestrator  # noqa: E402
 
 BASE_TIME = datetime(2026, 10, 28, 12, 0, 0, tzinfo=timezone.utc)
@@ -196,9 +200,19 @@ def build_replays(source_runs: Path) -> dict:
         info = scenario_info(events)
         if info["seed"] is None:
             raise SystemExit(f"error: {run_id} has no scenario seed")
+        try:
+            report = debrief.build_debrief(events, run_id=run_id)
+        except ValueError as exc:
+            raise SystemExit(f"error: {run_id} debrief failed: {exc}")
+        missing = debrief.validate_citations(report, events)
+        if missing:
+            raise SystemExit(
+                f"error: {run_id} debrief cites missing events: "
+                f"{', '.join(missing[:3])}")
         runs[run_id] = {
             "events": events,
             "score": score,
+            "debrief": report,
             "provenance": {
                 "bench": source["bench"],
                 "episode": source["episode"],
@@ -325,6 +339,8 @@ def write_data_files(out: Path, runs: dict) -> dict:
                    "provenance": runs[run_id]["provenance"]}
         write_json(data_dir / "runs" / f"{run_id}.json", payload)
         replays[run_id] = payload
+        debrief_payload = {"id": run_id, "debrief": runs[run_id]["debrief"]}
+        write_json(data_dir / "debriefs" / f"{run_id}.json", debrief_payload)
 
     featured = {"_note": "Featured replays in the static bundle, "
                          "in display order.",
@@ -359,9 +375,15 @@ def write_data_files(out: Path, runs: dict) -> dict:
         embedded_replays[run_id] = json.loads(
             (data_dir / "runs" / f"{run_id}.json")
             .read_text(encoding="utf-8"))
+    embedded_debriefs = {}
+    for run_id in RUN_IDS:
+        embedded_debriefs[run_id] = json.loads(
+            (data_dir / "debriefs" / f"{run_id}.json")
+            .read_text(encoding="utf-8"))
     return {
         "runsIndex": read("runs.json")["runs"],
         "replays": embedded_replays,
+        "debriefs": embedded_debriefs,
         "featured": read("featured.json")["featured"],
         "attackMap": read("attack_map.json"),
         "config": read("config.json"),
@@ -426,6 +448,12 @@ export function fetchFeatured() {
 export function fetchConfig() {
   return Promise.resolve(
     embedded().config || { hosts: [], business_weights: {}, daily_limit: 5 });
+}
+
+export function fetchDebrief(runId) {
+  const hit = (embedded().debriefs || {})[runId];
+  if (!hit) return Promise.reject(new Error(`unknown run ${JSON.stringify(runId)}`));
+  return Promise.resolve(hit);
 }
 
 export function fetchCampaigns() {

@@ -31,6 +31,7 @@
           <select id="agentsSelect">
             <option value="scripted" selected>Scripted (no cost)</option>
             <option value="model">Model (metered)</option>
+            <option value="model_open">Model-driven: briefed red, open blue (metered)</option>
           </select>
         </div>
         <div class="control-group">
@@ -89,12 +90,18 @@
 <div id="lobbyView">
 <main class="lobby-wrap">
   <section class="hero" aria-label="Start here">
-    <p class="hero-eyebrow">Crucible</p>
-    <h2 class="hero-title"><span class="r">Red</span> attacks. <span class="b">Blue</span> defends. The auditor keeps score.</h2>
-    <p class="hero-line">An AI red team attacks a simulated company network while an AI blue team defends and an independent auditor checks every decision.</p>
-    <div class="hero-actions">
-      <button id="liveBtn" class="btn primary hero-cta" disabled title="Live exercises need a local server — run locally to try this.">Run a live exercise</button>
-      <button id="replayBtn" class="btn hero-secondary" title="Open a random featured replay">Watch a replay</button>
+    <div class="hero-copy">
+      <p class="hero-eyebrow">Crucible</p>
+      <h2 class="hero-title"><span class="r">Red</span> attacks. <span class="b">Blue</span> defends. The auditor keeps score.</h2>
+      <p class="hero-line">An AI red team attacks a simulated company network while an AI blue team defends and an independent auditor checks every decision.</p>
+      <div class="hero-actions">
+        <button id="liveBtn" class="btn primary hero-cta" disabled title="Live exercises need a local server — run locally to try this.">Run a live exercise</button>
+        <button id="replayBtn" class="btn hero-secondary" title="Open a random featured replay">Watch a replay</button>
+      </div>
+    </div>
+    <div class="hero-art" aria-hidden="true">
+      <div class="hero-splash left"></div>
+      <div class="hero-splash right"></div>
     </div>
     <details class="advanced">
       <summary>Advanced</summary>
@@ -168,10 +175,10 @@
       <div id="slate" class="slate" hidden>
         <div class="slate-art left" aria-hidden="true"></div>
         <div class="slate-art right" aria-hidden="true"></div>
+        <div class="slate-rule" aria-hidden="true"></div>
         <div class="slate-eyebrow">Crucible Operations Center</div>
         <h2 id="slateTitle">Exercise</h2>
         <div class="slate-vs"><span class="r">RED</span><span class="vs">vs</span><span class="b">BLUE</span></div>
-        <div id="slateHosts" class="slate-hosts"></div>
         <p class="slate-file">One protected file</p>
         <div id="slateCount" class="slate-count">3</div>
         <p class="slate-skip">Space or Enter skips</p>
@@ -285,6 +292,12 @@
         <p class="empty">Open an exercise to see its outcome.</p>
       </div>
     </section>
+    <section class="panel" aria-label="Debrief">
+      <h2>Debrief</h2>
+      <div id="debriefBody" class="debrief">
+        <p class="empty">Open an exercise to see its debrief.</p>
+      </div>
+    </section>
     <section class="panel" aria-label="Key moments">
       <h2>Key moments</h2>
       <ol id="momentList" class="moments">
@@ -372,6 +385,7 @@
       <div><dt>Daily limit</dt><dd id="confirmLimit">--</dd></div>
     </dl>
     <p id="confirmWarn" class="warn" hidden></p>
+    <p id="confirmNote" class="muted" hidden></p>
     <div class="dialog-actions">
       <button id="confirmCancel" class="btn">Cancel</button>
       <button id="confirmOk" class="btn primary">Start exercise</button>

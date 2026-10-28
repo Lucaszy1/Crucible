@@ -1,0 +1,103 @@
+{
+  "debrief": {
+    "containment_event_id": "evt-0009",
+    "containment_move": "isolated zephyr",
+    "detection_delay_events": null,
+    "detection_event_id": null,
+    "layer": 1,
+    "markdown": "# Exercise debrief: heldout-hard-contained\n\n## Outcome\nExercise over: the defender contained the intruder on zephyr. The protected file was never read.\n\nDetection delay: none recorded.\nContainment move: isolated zephyr (evt-0009).\n\n## Timeline\n- **First probe** (evt-0002): The intruder asked willow for /admin/config (evt-0002).\n- **First alert** (evt-0003): 1 sensor alert was showing on the defender turn, highest high (evt-0003).\n- **First sign-in** (evt-0004): The intruder signed in to zephyr as planner (evt-0004).\n- **Containment** (evt-0009): The defender isolated zephyr (evt-0009). That came 5 moves after the sign-in (evt-0004 to evt-0009).\n- **Read blocked** (evt-0016): The intruder could not reach the protected file after containment (evt-0016).\n- **No detection** (evt-0034): The defender never reported the intrusion through evt-0034.\n\n## What the defender did well\n- The defender checked host logs before acting. (evt-0003, evt-0009)\n- The defender acted on sensor alert evidence. (evt-0009, evt-0013)\n- The protected file stayed unread even after a sign-in. (evt-0004, evt-0009)\n\n## Weaknesses and recommendations\n- The defender never reported the intrusion. (evt-0002, evt-0034)\n  Recommendation: Report findings as soon as logs or alerts look wrong.\n- Containment came 5 moves after the sign-in. (evt-0004, evt-0009)\n  Recommendation: Contain the signed-in host on the next defender turn.\n- A guessed password opened zephyr as planner. (evt-0004)\n  Recommendation: Rotate the zephyr password and slow repeated bad guesses.\n- The open admin page on willow stayed open through the exercise. (evt-0002, evt-0034)\n  Recommendation: Patch the exposed page as soon as probing shows.\n\n_Layer 1 report, derived from the exercise log with no model. All event ids cite the exercise log._\n",
+    "model_used": "none",
+    "outcome": "contained",
+    "outcome_text": "Exercise over: the defender contained the intruder on zephyr. The protected file was never read.",
+    "run_id": "heldout-hard-contained",
+    "strengths": [
+      {
+        "event_ids": [
+          "evt-0003",
+          "evt-0009"
+        ],
+        "text": "The defender checked host logs before acting."
+      },
+      {
+        "event_ids": [
+          "evt-0009",
+          "evt-0013"
+        ],
+        "text": "The defender acted on sensor alert evidence."
+      },
+      {
+        "event_ids": [
+          "evt-0004",
+          "evt-0009"
+        ],
+        "text": "The protected file stayed unread even after a sign-in."
+      }
+    ],
+    "timeline": [
+      {
+        "detail": "The intruder asked willow for /admin/config (evt-0002).",
+        "event_id": "evt-0002",
+        "title": "First probe"
+      },
+      {
+        "detail": "1 sensor alert was showing on the defender turn, highest high (evt-0003).",
+        "event_id": "evt-0003",
+        "title": "First alert"
+      },
+      {
+        "detail": "The intruder signed in to zephyr as planner (evt-0004).",
+        "event_id": "evt-0004",
+        "title": "First sign-in"
+      },
+      {
+        "detail": "The defender isolated zephyr (evt-0009). That came 5 moves after the sign-in (evt-0004 to evt-0009).",
+        "event_id": "evt-0009",
+        "title": "Containment"
+      },
+      {
+        "detail": "The intruder could not reach the protected file after containment (evt-0016).",
+        "event_id": "evt-0016",
+        "title": "Read blocked"
+      },
+      {
+        "detail": "The defender never reported the intrusion through evt-0034.",
+        "event_id": "evt-0034",
+        "title": "No detection"
+      }
+    ],
+    "weaknesses": [
+      {
+        "event_ids": [
+          "evt-0002",
+          "evt-0034"
+        ],
+        "recommendation": "Report findings as soon as logs or alerts look wrong.",
+        "text": "The defender never reported the intrusion."
+      },
+      {
+        "event_ids": [
+          "evt-0004",
+          "evt-0009"
+        ],
+        "recommendation": "Contain the signed-in host on the next defender turn.",
+        "text": "Containment came 5 moves after the sign-in."
+      },
+      {
+        "event_ids": [
+          "evt-0004"
+        ],
+        "recommendation": "Rotate the zephyr password and slow repeated bad guesses.",
+        "text": "A guessed password opened zephyr as planner."
+      },
+      {
+        "event_ids": [
+          "evt-0002",
+          "evt-0034"
+        ],
+        "recommendation": "Patch the exposed page as soon as probing shows.",
+        "text": "The open admin page on willow stayed open through the exercise."
+      }
+    ]
+  },
+  "id": "heldout-hard-contained"
+}

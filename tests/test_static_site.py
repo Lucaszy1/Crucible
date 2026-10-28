@@ -3,6 +3,7 @@
 Builds docs/site/ into a temp folder and checks the export contract:
 no references to localhost or /api anywhere, relative URLs only,
 3 to 5 featured replays with events, scores, and real provenance,
+a Layer 1 debrief per replay with citations into its own log,
 Learning data with the frozen playbook, and disabled live controls
 that point at a local run. No Docker, network, or model calls.
 """
@@ -12,6 +13,8 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+
+from crucible import debrief as debrief_mod
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -112,6 +115,44 @@ def test_static_site_has_no_unlabeled_synthetic(tmp_path):
     assert "updateProvBadge" in bundle
     html = (out / "index.html").read_text(encoding="utf-8")
     assert 'id="provBadge"' in html
+
+
+def test_static_site_debriefs(tmp_path):
+    out, _builder = build_to(tmp_path)
+    featured = json.loads((out / "data" / "featured.json")
+                          .read_text(encoding="utf-8"))["featured"]
+    assert len(featured) > 0
+    for run_id in featured:
+        payload = json.loads((out / "data" / "debriefs" / f"{run_id}.json")
+                             .read_text(encoding="utf-8"))
+        assert payload["id"] == run_id
+        report = payload["debrief"]
+        assert report["layer"] == 1
+        assert report["model_used"] == "none"
+        assert report["outcome_text"] != ""
+        assert report["markdown"] != ""
+        assert len(report["timeline"]) > 0
+        replay = json.loads((out / "data" / "runs" / f"{run_id}.json")
+                            .read_text(encoding="utf-8"))
+        missing = debrief_mod.validate_citations(report, replay["events"])
+        assert missing == []
+
+
+def test_static_site_embeds_debriefs(tmp_path):
+    out, _builder = build_to(tmp_path)
+    text = (out / "data.js").read_text(encoding="utf-8")
+    blob = text.split("=", 1)[1].strip().rstrip(";\n")
+    embedded = json.loads(blob)
+    featured = json.loads((out / "data" / "featured.json")
+                          .read_text(encoding="utf-8"))["featured"]
+    assert set(embedded["debriefs"]) == set(featured)
+    for run_id in featured:
+        on_disk = json.loads((out / "data" / "debriefs" / f"{run_id}.json")
+                             .read_text(encoding="utf-8"))
+        assert embedded["debriefs"][run_id] == on_disk
+    bundle = (out / "app.bundle.js").read_text(encoding="utf-8")
+    assert "function fetchDebrief(runId)" in bundle
+    assert "embedded().debriefs" in bundle
 
 
 def test_static_site_learning_data(tmp_path):

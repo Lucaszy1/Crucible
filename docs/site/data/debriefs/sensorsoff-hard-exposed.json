@@ -1,0 +1,95 @@
+{
+  "debrief": {
+    "containment_event_id": "evt-0023",
+    "containment_move": "isolated ember",
+    "detection_delay_events": null,
+    "detection_event_id": null,
+    "layer": 1,
+    "markdown": "# Exercise debrief: sensorsoff-hard-exposed\n\n## Outcome\nExercise over: the intruder read the protected file on ember.\n\nDetection delay: none recorded.\nContainment move: isolated ember (evt-0023).\n\n## Timeline\n- **First probe** (evt-0002): The intruder asked zephyr for /admin/health (evt-0002).\n- **First look** (evt-0003): The defender checked logs on juniper (evt-0003).\n- **First sign-in** (evt-0004): The intruder signed in to ember as steward (evt-0004).\n- **Protected file read** (evt-0012): The intruder read the protected file on ember (evt-0012).\n- **Containment** (evt-0023): The defender isolated ember (evt-0023). That came 19 moves after the sign-in (evt-0004 to evt-0023).\n- **No detection** (evt-0024): The defender never reported the intrusion through evt-0024.\n\n## What the defender did well\n- The defender checked host logs before acting. (evt-0003, evt-0023)\n- The defender attached log evidence to a report. (evt-0023)\n\n## Weaknesses and recommendations\n- The intruder read the protected file on ember. (evt-0004, evt-0012)\n  Recommendation: Contain the signed-in host before the intruder reaches the protected file.\n- The defender never reported the intrusion. (evt-0002, evt-0024)\n  Recommendation: Report findings as soon as logs or alerts look wrong.\n- Containment came 19 moves after the sign-in. (evt-0004, evt-0023)\n  Recommendation: Contain the signed-in host on the next defender turn.\n- A guessed password opened ember as steward. (evt-0004)\n  Recommendation: Rotate the ember password and slow repeated bad guesses.\n\n_Layer 1 report, derived from the exercise log with no model. All event ids cite the exercise log._\n",
+    "model_used": "none",
+    "outcome": "file_read",
+    "outcome_text": "Exercise over: the intruder read the protected file on ember.",
+    "run_id": "sensorsoff-hard-exposed",
+    "strengths": [
+      {
+        "event_ids": [
+          "evt-0003",
+          "evt-0023"
+        ],
+        "text": "The defender checked host logs before acting."
+      },
+      {
+        "event_ids": [
+          "evt-0023"
+        ],
+        "text": "The defender attached log evidence to a report."
+      }
+    ],
+    "timeline": [
+      {
+        "detail": "The intruder asked zephyr for /admin/health (evt-0002).",
+        "event_id": "evt-0002",
+        "title": "First probe"
+      },
+      {
+        "detail": "The defender checked logs on juniper (evt-0003).",
+        "event_id": "evt-0003",
+        "title": "First look"
+      },
+      {
+        "detail": "The intruder signed in to ember as steward (evt-0004).",
+        "event_id": "evt-0004",
+        "title": "First sign-in"
+      },
+      {
+        "detail": "The intruder read the protected file on ember (evt-0012).",
+        "event_id": "evt-0012",
+        "title": "Protected file read"
+      },
+      {
+        "detail": "The defender isolated ember (evt-0023). That came 19 moves after the sign-in (evt-0004 to evt-0023).",
+        "event_id": "evt-0023",
+        "title": "Containment"
+      },
+      {
+        "detail": "The defender never reported the intrusion through evt-0024.",
+        "event_id": "evt-0024",
+        "title": "No detection"
+      }
+    ],
+    "weaknesses": [
+      {
+        "event_ids": [
+          "evt-0004",
+          "evt-0012"
+        ],
+        "recommendation": "Contain the signed-in host before the intruder reaches the protected file.",
+        "text": "The intruder read the protected file on ember."
+      },
+      {
+        "event_ids": [
+          "evt-0002",
+          "evt-0024"
+        ],
+        "recommendation": "Report findings as soon as logs or alerts look wrong.",
+        "text": "The defender never reported the intrusion."
+      },
+      {
+        "event_ids": [
+          "evt-0004",
+          "evt-0023"
+        ],
+        "recommendation": "Contain the signed-in host on the next defender turn.",
+        "text": "Containment came 19 moves after the sign-in."
+      },
+      {
+        "event_ids": [
+          "evt-0004"
+        ],
+        "recommendation": "Rotate the ember password and slow repeated bad guesses.",
+        "text": "A guessed password opened ember as steward."
+      }
+    ]
+  },
+  "id": "sensorsoff-hard-exposed"
+}

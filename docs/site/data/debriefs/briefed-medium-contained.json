@@ -1,0 +1,129 @@
+{
+  "debrief": {
+    "containment_event_id": "evt-0025",
+    "containment_move": "isolated meadow",
+    "detection_delay_events": 21,
+    "detection_event_id": "evt-0023",
+    "layer": 1,
+    "markdown": "# Exercise debrief: briefed-medium-contained\n\n## Outcome\nExercise over: the defender contained the intruder on meadow. The protected file was never read.\n\nDetection delay: 21 moves.\nContainment move: isolated meadow (evt-0025).\n\n## Timeline\n- **First probe** (evt-0002): The intruder asked pillow for /admin (evt-0002).\n- **First look** (evt-0003): The defender checked logs on pine (evt-0003).\n- **First alert** (evt-0009): 2 sensor alerts were showing on the defender turn, highest high (evt-0009).\n- **Detection** (evt-0023): Detection came 21 moves after the first intruder move (evt-0002 to evt-0023).\n- **Containment** (evt-0025): The defender isolated meadow (evt-0025). That came -1 moves after the sign-in (evt-0026 to evt-0025).\n- **First sign-in** (evt-0026): The intruder signed in to pine as deployer (evt-0026).\n\n## What the defender did well\n- The defender contained the signed-in host within -1 moves of the sign-in. (evt-0026, evt-0025)\n- The defender reported the intrusion 21 moves after the first intruder move. (evt-0002, evt-0023)\n- The defender checked host logs before acting. (evt-0003, evt-0023)\n- The defender acted on sensor alert evidence. (evt-0023, evt-0025, evt-0027, evt-0035, evt-0037, evt-0043, evt-0053, evt-0059)\n- The defender restored meadow, bringing it back up. (evt-0035)\n- The protected file stayed unread even after a sign-in. (evt-0026, evt-0025)\n\n## Weaknesses and recommendations\n- Detection took 21 moves after the first intruder move. (evt-0002, evt-0023)\n  Recommendation: Check entry host logs on every defender turn so probing is seen sooner.\n- A guessed password opened pine as deployer. (evt-0026)\n  Recommendation: Rotate the pine password and slow repeated bad guesses.\n- The open admin page on pillow stayed open through the exercise. (evt-0008, evt-0061)\n  Recommendation: Patch the exposed page as soon as probing shows.\n- The defender took 14 moves to act after the first sensor alert. (evt-0009, evt-0023)\n  Recommendation: Treat the first sensor alert as the trigger to report.\n\n_Layer 1 report, derived from the exercise log with no model. All event ids cite the exercise log._\n",
+    "model_used": "none",
+    "outcome": "contained",
+    "outcome_text": "Exercise over: the defender contained the intruder on meadow. The protected file was never read.",
+    "run_id": "briefed-medium-contained",
+    "strengths": [
+      {
+        "event_ids": [
+          "evt-0026",
+          "evt-0025"
+        ],
+        "text": "The defender contained the signed-in host within -1 moves of the sign-in."
+      },
+      {
+        "event_ids": [
+          "evt-0002",
+          "evt-0023"
+        ],
+        "text": "The defender reported the intrusion 21 moves after the first intruder move."
+      },
+      {
+        "event_ids": [
+          "evt-0003",
+          "evt-0023"
+        ],
+        "text": "The defender checked host logs before acting."
+      },
+      {
+        "event_ids": [
+          "evt-0023",
+          "evt-0025",
+          "evt-0027",
+          "evt-0035",
+          "evt-0037",
+          "evt-0043",
+          "evt-0053",
+          "evt-0059"
+        ],
+        "text": "The defender acted on sensor alert evidence."
+      },
+      {
+        "event_ids": [
+          "evt-0035"
+        ],
+        "text": "The defender restored meadow, bringing it back up."
+      },
+      {
+        "event_ids": [
+          "evt-0026",
+          "evt-0025"
+        ],
+        "text": "The protected file stayed unread even after a sign-in."
+      }
+    ],
+    "timeline": [
+      {
+        "detail": "The intruder asked pillow for /admin (evt-0002).",
+        "event_id": "evt-0002",
+        "title": "First probe"
+      },
+      {
+        "detail": "The defender checked logs on pine (evt-0003).",
+        "event_id": "evt-0003",
+        "title": "First look"
+      },
+      {
+        "detail": "2 sensor alerts were showing on the defender turn, highest high (evt-0009).",
+        "event_id": "evt-0009",
+        "title": "First alert"
+      },
+      {
+        "detail": "Detection came 21 moves after the first intruder move (evt-0002 to evt-0023).",
+        "event_id": "evt-0023",
+        "title": "Detection"
+      },
+      {
+        "detail": "The defender isolated meadow (evt-0025). That came -1 moves after the sign-in (evt-0026 to evt-0025).",
+        "event_id": "evt-0025",
+        "title": "Containment"
+      },
+      {
+        "detail": "The intruder signed in to pine as deployer (evt-0026).",
+        "event_id": "evt-0026",
+        "title": "First sign-in"
+      }
+    ],
+    "weaknesses": [
+      {
+        "event_ids": [
+          "evt-0002",
+          "evt-0023"
+        ],
+        "recommendation": "Check entry host logs on every defender turn so probing is seen sooner.",
+        "text": "Detection took 21 moves after the first intruder move."
+      },
+      {
+        "event_ids": [
+          "evt-0026"
+        ],
+        "recommendation": "Rotate the pine password and slow repeated bad guesses.",
+        "text": "A guessed password opened pine as deployer."
+      },
+      {
+        "event_ids": [
+          "evt-0008",
+          "evt-0061"
+        ],
+        "recommendation": "Patch the exposed page as soon as probing shows.",
+        "text": "The open admin page on pillow stayed open through the exercise."
+      },
+      {
+        "event_ids": [
+          "evt-0009",
+          "evt-0023"
+        ],
+        "recommendation": "Treat the first sensor alert as the trigger to report.",
+        "text": "The defender took 14 moves to act after the first sensor alert."
+      }
+    ]
+  },
+  "id": "briefed-medium-contained"
+}

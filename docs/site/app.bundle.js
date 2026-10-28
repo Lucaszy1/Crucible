@@ -843,6 +843,12 @@ function fetchConfig() {
     embedded().config || { hosts: [], business_weights: {}, daily_limit: 5 });
 }
 
+function fetchDebrief(runId) {
+  const hit = (embedded().debriefs || {})[runId];
+  if (!hit) return Promise.reject(new Error(`unknown run ${JSON.stringify(runId)}`));
+  return Promise.resolve(hit);
+}
+
 function fetchCampaigns() {
   return Promise.resolve({ campaigns: [] });
 }
@@ -900,7 +906,7 @@ function openLive(onMessage, onError) {
   return { close() {} };
 }
 
-return { fetchRuns, fetchRun, fetchStage3, fetchAttackMap, fetchFeatured, fetchConfig, fetchCampaigns, fetchCampaign, fetchStatus, fetchPreview, parseOrder, sendOrder, sendDemo, sendTakeover, fetchCommandState, sendAudio, startExercise, openLive };
+return { fetchRuns, fetchRun, fetchStage3, fetchAttackMap, fetchFeatured, fetchConfig, fetchDebrief, fetchCampaigns, fetchCampaign, fetchStatus, fetchPreview, parseOrder, sendOrder, sendDemo, sendTakeover, fetchCommandState, sendAudio, startExercise, openLive };
 })();
 const __mod_learn__ = (() => {
 "use strict";
@@ -1272,7 +1278,11 @@ function keyMoments(events) {
   const out = [];
   const push = (key, index, title) => {
     if (index < 0) return;
-    out.push({ key, index, title, caption: describeEvent(list[index]) });
+    out.push({
+    key, index, title,
+    caption: describeEvent(list[index]),
+    reasoning: String(list[index].reasoning_summary || ""),
+  });
   };
   push("signin", signin, "First sign-in");
   if (detection >= 0 && detection !== containment) push("detection", detection, "Detection");
@@ -1303,6 +1313,143 @@ function groupRounds(items) {
 }
 
 return { actorName, describeEvent, statusSentence, keyMoments, groupRounds };
+})();
+const __mod_debrief__ = (() => {
+"use strict";
+// Exercise debrief card for the Story view. jumpTarget is pure
+// (node-tested); renderDebrief builds the card DOM. Copy: exercise,
+// containment, defender only; no em dashes.
+
+// Replay cursor that shows through the cited event (1-based), or
+// null when the id is not in this exercise.
+function jumpTarget(events, eventId) {
+  const index = (events || []).findIndex((ev) => ev && ev.id === eventId);
+  return index < 0 ? null : index + 1;
+}
+
+function evidenceIds(item) {
+  if (item && Array.isArray(item.event_ids)) return item.event_ids;
+  if (item && item.event_id) return [item.event_id];
+  return [];
+}
+
+function evidenceBlock(item, onEvidence) {
+  const ids = evidenceIds(item);
+  const wrap = document.createElement("details");
+  wrap.className = "evidence";
+  const summary = document.createElement("summary");
+  summary.textContent = `Evidence (${ids.length})`;
+  const chips = document.createElement("div");
+  chips.className = "chips";
+  for (const id of ids) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    chip.textContent = id;
+    chip.title = `Jump the replay to ${id}`;
+    chip.addEventListener("click", () => onEvidence(id));
+    chips.append(chip);
+  }
+  wrap.append(summary, chips);
+  return wrap;
+}
+
+function metaLine(report) {
+  const delay = report.detection_delay_events;
+  const delayText = delay === null || delay === undefined
+    ? "Detection delay: none recorded"
+    : `Detection delay: ${delay} ${delay === 1 ? "move" : "moves"}`;
+  const move = report.containment_event_id
+    ? `Containment: ${report.containment_move} (${report.containment_event_id})`
+    : "Containment: none";
+  return `${delayText} · ${move}`;
+}
+
+// Build the Debrief card: outcome, delay and containment, timeline,
+// strengths, weaknesses with recommendations. Each item carries an
+// expandable evidence list whose chips jump the replay.
+function renderDebrief(body, report, hooks) {
+  const onEvidence = hooks && hooks.onEvidence ? hooks.onEvidence : () => {};
+  const onCopy = hooks && hooks.onCopy ? hooks.onCopy : () => {};
+  body.innerHTML = "";
+  if (!report) {
+    const idle = document.createElement("p");
+    idle.className = "empty";
+    idle.textContent = "Open an exercise to see its debrief.";
+    body.append(idle);
+    return;
+  }
+  if (report.error) {
+    const idle = document.createElement("p");
+    idle.className = "empty";
+    idle.textContent = "The debrief is not available for this exercise.";
+    body.append(idle);
+    return;
+  }
+  const outcome = document.createElement("p");
+  outcome.className = "story-line";
+  outcome.textContent = report.outcome_text || "";
+  const meta = document.createElement("p");
+  meta.className = "lobby-meta";
+  meta.textContent = metaLine(report);
+  const layer = document.createElement("p");
+  layer.className = "lobby-meta";
+  layer.textContent = report.layer === 2
+    ? "Plain-language rewrite."
+    : "From the log, no model.";
+  body.append(outcome, meta, layer);
+
+  const sections = [
+    { title: "Timeline", items: report.timeline || [], kind: "moment" },
+    { title: "What the defender did well", items: report.strengths || [], kind: "text" },
+    { title: "Weaknesses and recommendations", items: report.weaknesses || [], kind: "weakness" },
+  ];
+  for (const section of sections) {
+    const head = document.createElement("h3");
+    head.className = "mini-head";
+    head.textContent = section.title;
+    body.append(head);
+    if (section.items.length === 0) {
+      const idle = document.createElement("p");
+      idle.className = "empty";
+      idle.textContent = "None recorded.";
+      body.append(idle);
+      continue;
+    }
+    const list = document.createElement("ul");
+    list.className = "debrief-list";
+    for (const item of section.items) {
+      const row = document.createElement("li");
+      const line = document.createElement("p");
+      if (section.kind === "moment") {
+        const strong = document.createElement("strong");
+        strong.textContent = item.title || "";
+        line.append(strong, document.createTextNode(`: ${item.detail || ""}`));
+      } else {
+        line.textContent = item.text || "";
+      }
+      row.append(line);
+      if (section.kind === "weakness" && item.recommendation) {
+        const rec = document.createElement("p");
+        rec.className = "debrief-rec";
+        rec.textContent = `Recommendation: ${item.recommendation}`;
+        row.append(rec);
+      }
+      row.append(evidenceBlock(item, onEvidence));
+      list.append(row);
+    }
+    body.append(list);
+  }
+
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.className = "btn small";
+  copy.textContent = "Copy as markdown";
+  copy.addEventListener("click", () => onCopy(report.markdown || "", copy));
+  body.append(copy);
+}
+
+return { jumpTarget, renderDebrief };
 })();
 const __mod_layout__ = (() => {
 "use strict";
@@ -1588,7 +1735,9 @@ function arenaGeometry(layout) {
 }
 
 // Small-map geometry for the Story view SVG: same segment columns,
-// tighter rows. Classic coordinates reproduce exactly.
+// tighter rows. Classic coordinates reproduce exactly. Rows carry
+// a name label above and a state label below, so a three-high
+// column spreads pitch 107 and taller columns split in two.
 const MAP_VIEW = { w: 640, h: 360 };
 
 function mapGeometry(layout) {
@@ -1599,7 +1748,7 @@ function mapGeometry(layout) {
   let crowded = false;
   SEGMENTS.forEach((segment, index) => {
     const ids = columns[index];
-    const groups = ids.length > 5
+    const groups = ids.length > 3
       ? [ids.slice(0, Math.ceil(ids.length / 2)), ids.slice(Math.ceil(ids.length / 2))]
       : [ids];
     if (groups.length > 1) crowded = true;
@@ -1608,7 +1757,8 @@ function mapGeometry(layout) {
       group.forEach((id, i) => {
         let y = 140;
         if (group.length === 2) y = i === 0 ? 140 : 285;
-        else if (group.length > 2) y = 85 + (i * 195) / (group.length - 1);
+        else if (group.length === 3) y = 86 + i * 107;
+        else if (group.length > 3) y = 86 + (i * 214) / (group.length - 1);
         positions[id] = { x, y };
       });
     });
@@ -2666,12 +2816,16 @@ function serverStatus(spend) {
   return { state: "ok", label: "Server ready", runDisabled: false };
 }
 
-function showConfirm(els, spend, capped, onConfirm) {
+function showConfirm(els, spend, capped, onConfirm, note) {
   els.cost.textContent = `$${Number(spend?.estimated_exercise_cost || 0).toFixed(2)} (estimate)`;
   els.spent.textContent = `$${Number(spend?.spent_today || 0).toFixed(2)}`;
   els.limit.textContent = `$${Number(spend?.daily_limit || 0).toFixed(2)}`;
   els.warn.hidden = !capped;
   if (capped) els.warn.textContent = capped;
+  if (els.note) {
+    els.note.hidden = !note;
+    if (note) els.note.textContent = note;
+  }
   els.overlay.hidden = false;
   const close = (ok) => {
     els.overlay.hidden = true;
@@ -3211,6 +3365,28 @@ function dollyTarget(layout, nodes, hostId) {
   dx = Math.min(hiX, Math.max(loX, dx));
   dy = Math.min(hiY, Math.max(loY, dy));
   return { dx, dy, z };
+}
+
+// Winner beat: after the blast the tail plays on the winner
+// instead of the empty spot where the loser stood. A short pan
+// toward the winner's side at rest zoom; capped so no host
+// leaves the frame. Pure.
+function winnerBeatTarget(stage, winner) {
+  const rest = { dx: 0, dy: 0, z: 1 };
+  const slots = stage && stage.entities;
+  const slot = slots
+    ? (winner === "blue" ? slots.guardian : slots.intrusion)
+    : null;
+  if (!stage || !slot || !stage.band || !stage.area) return rest;
+  const bandCx = (stage.band.x0 + stage.band.x1) / 2;
+  const bandCy = (stage.area.top + stage.area.bottom) / 2;
+  const cap = 70;
+  const clamp = (value) => Math.max(-cap, Math.min(cap, value));
+  return {
+    dx: clamp((bandCx - slot.x) * 0.25),
+    dy: clamp((bandCy - slot.y) * 0.25),
+    z: 1,
+  };
 }
 
 // One exponential smoothing step toward the target. Converges
@@ -4762,8 +4938,10 @@ function moveSpanMs(size) {
 
 // Finish pace scales every beat of the ending: a short charge,
 // one giant projectile, then three beams two seconds apart at
-// standard pace; the whole finish runs under ten seconds, quick
-// lands near six, slow near seventeen for narration.
+// standard pace; the card lands about a second after the blast
+// (the dissolve keeps its own timing and finishes behind it),
+// so the whole finish runs eight seconds, quick near five,
+// slow near fourteen for narration.
 const FINISH_PACES = { quick: 0.65, standard: 1, slow: 1.8 };
 
 function finishPlan(pace) {
@@ -4773,8 +4951,8 @@ function finishPlan(pace) {
   const gap = Math.round(2000 * m);
   const beamDur = Math.round(1400 * m);
   const postBeam = Math.round(1500 * m);
-  const explodeDur = Math.round(1800 * m);
-  const cardDelay = Math.round(800 * m);
+  const explodeDur = Math.round(600 * m);
+  const cardDelay = Math.round(400 * m);
   return {
     mult: m, charge, titanFlight, gap, beamDur, postBeam, explodeDur, cardDelay,
     total: charge + titanFlight + 2 * gap + postBeam + explodeDur + cardDelay,
@@ -5162,7 +5340,8 @@ function fireImpacts(refs) {
         mode: hit.side === "red" ? "dissolve" : "shatter",
       };
       if (hit.side === "blue") refs.desatTarget = 0.85;
-      refs.camTarget = { dx: 0, dy: 0, z: 1 };
+      refs.camTarget = winnerBeatTarget(
+        refs.stage, hit.side === "red" ? "blue" : "red");
       continue;
     }
     const size = hit.size || "standard";
@@ -7098,7 +7277,7 @@ function paintOverlays(refs, ctx) {
   }
 }
 
-return { stageLayout, applyCamera, dollyTarget, stepCamera, redLine, blueLine, laneFeed, intrusionLevel, guardianPulse, stageWash, loadStageArt, auditorChrome, measureChrome, initStage, fitStage, setStageLayout, setStageArt, sampleMeltMask, renderStageStatic, renderStageThumb, stageNotify, showStageAuditor, hideStageAuditor, flashStageHost, glitchStage, firstAccessStage, cancelStage, setStageActive, setStageReduced, frameP95, fxForEvent, calloutForEvent, flightLane, lanePoint, flightLaneRect, clashCrop, moveSpanMs, finishPlan, hitstopFor, frameBudget, meltSpriteAlpha, meltChar, meltStride, meltGlyphPx, meltGlyphAlpha, meltHaloAlpha, meltDrift, stageFinish, probeStageContent, paintIntrusion, paintGuardian, projBody, trailSpan, flashHold, STAGE_WORLD, FLIGHT_MS, IMPACT_MS, AFTERMATH_MS, VOLLEY_STAGGER_MS, FINISH_PACES, LOW_STREAK, MELT_DELAY_MS, MELT_SPAN_MS, MELT_FADE_MS, MELT_SLOTS, MELT_SLOTS_LOW, PROJ_SCALE, LANCE_LEN, LANCE_WID, ORB_R };
+return { stageLayout, applyCamera, dollyTarget, winnerBeatTarget, stepCamera, redLine, blueLine, laneFeed, intrusionLevel, guardianPulse, stageWash, loadStageArt, auditorChrome, measureChrome, initStage, fitStage, setStageLayout, setStageArt, sampleMeltMask, renderStageStatic, renderStageThumb, stageNotify, showStageAuditor, hideStageAuditor, flashStageHost, glitchStage, firstAccessStage, cancelStage, setStageActive, setStageReduced, frameP95, fxForEvent, calloutForEvent, flightLane, lanePoint, flightLaneRect, clashCrop, moveSpanMs, finishPlan, hitstopFor, frameBudget, meltSpriteAlpha, meltChar, meltStride, meltGlyphPx, meltGlyphAlpha, meltHaloAlpha, meltDrift, stageFinish, probeStageContent, paintIntrusion, paintGuardian, projBody, trailSpan, flashHold, STAGE_WORLD, FLIGHT_MS, IMPACT_MS, AFTERMATH_MS, VOLLEY_STAGGER_MS, FINISH_PACES, LOW_STREAK, MELT_DELAY_MS, MELT_SPAN_MS, MELT_FADE_MS, MELT_SLOTS, MELT_SLOTS_LOW, PROJ_SCALE, LANCE_LEN, LANCE_WID, ORB_R };
 })();
 const __mod_thumbnail__ = (() => {
 "use strict";
@@ -7802,10 +7981,10 @@ function finishThumbJob(job, bmp, url) {
   const entry = job.gen === bitmapGen ? cacheGet(job.key, job.moves) : null;
   for (const target of job.targets) {
     if (entry) blitThumb(target, entry);
-    else if (typeof window !== "undefined" && window.CRUCIBLE_STATIC &&
-        target && typeof target._thumbPaint === "function") {
+    else if (target && typeof target._thumbPaint === "function") {
       // Snapshots fail where the canvas is tainted (file art on
-      // file hosting): paint the frame straight onto the card.
+      // file hosting) or the bitmap lands stale: paint the frame
+      // straight onto the card instead of leaving it empty.
       try { target._thumbPaint(); } catch { /* stays empty */ }
     }
     if (target && target._thumbKey === job.key) target._thumbKey = "";
@@ -8436,10 +8615,9 @@ return { drawLiveScenario, hostNoun, storyLine, formatDuration, partitionLobby, 
 const __mod_opening__ = (() => {
 "use strict";
 // Opening slate: a 3 to 4 second build-up before playback. Title,
-// sides, hosts, the protected file line, then a 3-2-1 countdown to
+// sides, the protected file line, then a 3-2-1 countdown to
 // BEGIN. Space or Enter skips. Never replays on scrub or jump: only
 // opening an exercise starts it. Skipped under reduced motion.
-const { HOSTS } = __mod_state__;
 
 const COUNT = ["3", "2", "1", "BEGIN"];
 // Timings in ms: beat, beat, beat, BEGIN hold, then done.
@@ -8473,19 +8651,7 @@ function playOpening(els, opts) {
     timers.push(setTimeout(finish, 0));
     return { skip: finish, destroy };
   }
-  if (els.title) els.title.textContent = `Exercise ${o.label || ""}`.trim();
-  if (els.hosts) {
-    els.hosts.innerHTML = "";
-    const names = Array.isArray(o.hosts) && o.hosts.length > 0 ? o.hosts : HOSTS;
-    const roles = (o && o.roles) || {};
-    for (const host of names) {
-      const chip = document.createElement("span");
-      chip.className = "slate-host";
-      chip.textContent = host;
-      if (roles[host]) chip.title = `${host} · ${roles[host]}`;
-      els.hosts.append(chip);
-    }
-  }
+  if (els.title) els.title.textContent = o.label || "Exercise";
   if (els.count) els.count.textContent = COUNT[0];
   if (els.root) els.root.hidden = false;
   document.addEventListener("keydown", onKey, true);
@@ -8517,6 +8683,35 @@ const CLASSIC_REF_ID = /^(web|app|db|workstation):\d+$/;
 const TYPE_MS = 12;
 const TYPE_BUDGET_MS = 2600;
 
+// Margin budget: longer thoughts truncate (sentence, else word)
+// and open full in the expander.
+const THOUGHT_MAX_CHARS = 220;
+
+// Truncate without ever splitting a word: a sentence end wins when
+// one keeps at least half the cap, else the last fitting space.
+// Short text passes through; a lone over-long token stays whole.
+function truncateThought(text, max) {
+  const clean = String(text || "");
+  const cap = Math.max(20, Math.floor(max) || THOUGHT_MAX_CHARS);
+  if (clean.length <= cap) return { text: clean, cut: false };
+  const floor = cap / 2;
+  let cut = -1;
+  const re = /[.!?](\s|$)/g;
+  let hit = re.exec(clean);
+  while (hit !== null) {
+    const end = hit.index + 1;
+    if (end > cap) break;
+    if (end >= floor) cut = end;
+    hit = re.exec(clean);
+  }
+  if (cut < 0) {
+    const space = clean.lastIndexOf(" ", cap);
+    if (space > 0) cut = space;
+  }
+  if (cut < 0) return { text: clean, cut: false };
+  return { text: `${clean.slice(0, cut).trimEnd()}…`, cut: true };
+}
+
 // Evidence refs name a range host and line: upland:12. Hosts come
 // from the exercise layout; without one the classic four apply.
 function refPattern(hosts) {
@@ -8532,10 +8727,25 @@ function latestFor(slice, actor) {
   return null;
 }
 
-function thoughtText(ev) {
+// Baseten tool-call replies carry no text, so blue's summary is
+// the honest fallback below; real thinking replaces it, labeled.
+const MODEL_CHOSE_RE = /^Model chose [\w-]+\.$/;
+
+// Full bubble text for one event: the reasoning summary, or the
+// event sentence when empty. Blue thinking (Baseten
+// reasoning_content, stored on the event) shows labeled as
+// thinking: alone when the summary is the fallback, after a real
+// summary otherwise. Pure and node-tested; the caller truncates
+// and wires the expander exactly as before.
+function thoughtText(ev, actor) {
   if (!ev) return "";
   const raw = String(ev.reasoning_summary || "").trim();
-  return raw !== "" ? raw : describeEvent(ev);
+  const base = raw !== "" ? raw : describeEvent(ev);
+  if (actor !== "blue") return base;
+  const thinking = String(ev.thinking || "").trim().replace(/\s+/g, " ");
+  if (thinking === "") return base;
+  if (raw === "" || MODEL_CHOSE_RE.test(raw)) return `Thinking: ${thinking}`;
+  return `${base} Thinking: ${thinking}`;
 }
 
 function thoughtRefs(ev, hosts) {
@@ -8576,6 +8786,8 @@ function renderPanel(panel, slice, actor, opts, state) {
       panel.text.dataset.lastId = "";
       panel.text.textContent = actor === "red" ? "Red is waiting." : "Blue is waiting.";
     }
+    panel.root.classList.remove("cut");
+    closeExpander(state, opts);
     return;
   }
   for (const ref of thoughtRefs(ev, opts && opts.hosts)) {
@@ -8590,11 +8802,91 @@ function renderPanel(panel, slice, actor, opts, state) {
   }
   if (panel.text.dataset.lastId === id) return;
   panel.text.dataset.lastId = id;
-  typeInto(panel.text, thoughtText(ev), opts.reduced, state);
+  closeExpander(state, opts);
+  const full = thoughtText(ev, actor);
+  const shown = truncateThought(full, THOUGHT_MAX_CHARS);
+  panel.text.dataset.full = full;
+  panel.root.classList.toggle("cut", shown.cut);
+  wireExpander(panel, state, opts);
+  typeInto(panel.text, shown.text, opts.reduced, state);
+}
+
+// One open expander at a time across both panels.
+let openExpander = null;
+
+function expanderEl(panel) {
+  let box = panel.root.querySelector(".thought-full");
+  if (box) return box;
+  box = document.createElement("div");
+  box.className = "thought-full";
+  box.hidden = true;
+  const body = document.createElement("p");
+  body.className = "thought-full-text";
+  const shut = document.createElement("button");
+  shut.type = "button";
+  shut.className = "thought-full-close";
+  shut.textContent = "Close";
+  shut.setAttribute("aria-label", "Close full thought");
+  box.append(body, shut);
+  panel.root.append(box);
+  return box;
+}
+
+function openExpanderFor(panel, state, opts) {
+  if (panel.text.dataset.lastId === "") return;
+  if (!panel.root.classList.contains("cut")) return;
+  const box = expanderEl(panel);
+  if (openExpander && openExpander !== box) closeExpander(openExpander._state, openExpander._opts);
+  box.querySelector(".thought-full-text").textContent = panel.text.dataset.full || "";
+  box.hidden = false;
+  box._state = state;
+  box._opts = opts;
+  openExpander = box;
+  if (opts && typeof opts.onExpandChange === "function") opts.onExpandChange(true);
+}
+
+function closeExpander(state, opts) {
+  const box = openExpander;
+  if (!box) return;
+  box.hidden = true;
+  openExpander = null;
+  const hook = (opts && opts.onExpandChange)
+    || (box._opts && box._opts.onExpandChange);
+  if (typeof hook === "function") hook(false);
+}
+
+function wireExpander(panel, state, opts) {
+  if (panel.text.dataset.wired === "1") return;
+  panel.text.dataset.wired = "1";
+  panel.text.setAttribute("tabindex", "0");
+  panel.text.setAttribute("role", "button");
+  panel.text.setAttribute("aria-label", "Open the full thought");
+  panel.text.addEventListener("mouseenter", () => openExpanderFor(panel, state, opts));
+  panel.root.addEventListener("mouseleave", () => closeExpander(state, opts));
+  panel.text.addEventListener("click", () => {
+    const box = panel.root.querySelector(".thought-full");
+    if (box && !box.hidden) closeExpander(state, opts);
+    else openExpanderFor(panel, state, opts);
+  });
+  panel.text.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      openExpanderFor(panel, state, opts);
+    } else if (ev.key === "Escape") {
+      closeExpander(state, opts);
+    }
+  });
+  panel.root.addEventListener("click", (ev) => {
+    if (ev.target && ev.target.classList && ev.target.classList.contains("thought-full-close")) {
+      closeExpander(state, opts);
+    }
+  });
 }
 
 // panels: { red: {root, text, chips}, blue: {...} }. opts:
-// { reduced, onFlash }. Hidden when the slice holds no moves.
+// { reduced, onFlash, onExpandChange }. Hidden when the slice holds
+// no moves. onExpandChange(open) fires when the full-text expander
+// opens or closes so the caller can pause and resume playback.
 function renderThoughts(panels, slice, opts, state) {
   const st = state || { red: {}, blue: {} };
   const lane = (slice || []).filter((ev) => ev && (ev.actor === "red" || ev.actor === "blue"));
@@ -8628,7 +8920,7 @@ function initThoughtHeads(panels) {
   }
 }
 
-return { renderThoughts, setThoughtsCollapsed, initThoughtHeads };
+return { truncateThought, thoughtText, renderThoughts, setThoughtsCollapsed, initThoughtHeads, THOUGHT_MAX_CHARS };
 })();
 const __mod_endcard__ = (() => {
 "use strict";
@@ -11276,10 +11568,11 @@ function updateProvBadge(prov) {
   }
 }
 // Operations Center bootstrap: lobby, arena show flow, tabs, themes.
-const { fetchAttackMap, fetchCampaign, fetchCampaigns, fetchConfig, fetchFeatured, fetchPreview, fetchRun, fetchRuns, fetchStage3, fetchStatus, openLive, startExercise } = __mod_api__;
+const { fetchAttackMap, fetchCampaign, fetchCampaigns, fetchConfig, fetchDebrief, fetchFeatured, fetchPreview, fetchRun, fetchRuns, fetchStage3, fetchStatus, openLive, startExercise } = __mod_api__;
 const { renderLearning } = __mod_learn__;
 const { acceptLiveTraffic, autoplayQueue, bootStale, bootTimedOut, displayOutcome, endCardStats, eventHost, errorRetryTarget, finishSide, followOpensLive, motionReduced, motionSetting, normalizeActor, outcomeLine, phaseLabel, rankFeatured, reduceHostStates, runFlags, scoreEvents, streamDead } = __mod_state__;
 const { describeEvent, keyMoments, statusSentence } = __mod_story__;
+const { jumpTarget, renderDebrief } = __mod_debrief__;
 const { initMap, updateMap } = __mod_network__;
 const { renderFeed } = __mod_feed__;
 const { renderStrip, renderTransport, stripModel } = __mod_timeline__;
@@ -11314,6 +11607,7 @@ const els = {
   blueTech: document.getElementById("blueLabelList"),
   feed: document.getElementById("feedList"),
   storyOutcome: document.getElementById("storyOutcome"),
+  debriefBody: document.getElementById("debriefBody"),
   momentList: document.getElementById("momentList"),
   presentLatest: document.getElementById("presentLatest"),
   play: document.getElementById("playBtn"),
@@ -11364,7 +11658,6 @@ const els = {
   moveStrip: document.getElementById("moveStrip"),
   slate: document.getElementById("slate"),
   slateTitle: document.getElementById("slateTitle"),
-  slateHosts: document.getElementById("slateHosts"),
   slateCount: document.getElementById("slateCount"),
   thoughtRed: document.getElementById("thoughtRed"),
   thoughtRedHead: document.getElementById("thoughtRedHead"),
@@ -11430,6 +11723,7 @@ const confirm = {
   spent: document.getElementById("confirmSpent"),
   limit: document.getElementById("confirmLimit"),
   warn: document.getElementById("confirmWarn"),
+  note: document.getElementById("confirmNote"),
   ok: document.getElementById("confirmOk"),
   cancel: document.getElementById("confirmCancel"),
 };
@@ -11452,6 +11746,8 @@ const store = {
   spend: null,
   finalScore: null,
   storyKey: "",
+  debrief: null,
+  debriefRun: null,
   label: "No exercise loaded",
   liveSource: null,
   livePath: null,
@@ -11696,6 +11992,15 @@ function render(animate) {
       const flashView = sceneView();
       if (flashView.refs) flashView.flash(flashView.refs, host);
     },
+    onExpandChange: (open) => {
+      if (open) {
+        store.thoughtPaused = store.playing;
+        if (store.playing) pauseReplay();
+      } else if (store.thoughtPaused && !store.playing) {
+        store.thoughtPaused = false;
+        playReplay();
+      }
+    },
   }, store.thoughtState);
   renderTechniques(
     { stages: els.stages, redTech: els.redTech, blueTech: els.blueTech },
@@ -11713,7 +12018,8 @@ function render(animate) {
 // when the story changes (new run or longer lane); frames are
 // static stills, so the Motion setting needs no special case.
 function renderStoryPanels(display) {
-  const key = `${store.runId}|${store.events.length}|${store.finalScore ? "end" : "live"}`;
+  const debriefKey = !store.debrief ? "none" : store.debrief.error ? "error" : "ready";
+  const key = `${store.runId}|${store.events.length}|${store.finalScore ? "end" : "live"}|${debriefKey}`;
   if (store.storyKey === key) return;
   store.storyKey = key;
   const out = els.storyOutcome;
@@ -11739,6 +12045,13 @@ function renderStoryPanels(display) {
     meta.textContent = `${score} · ${store.events.length} moves`;
     out.append(badge, line, meta);
   }
+  renderDebrief(els.debriefBody, store.runId ? store.debrief : null, {
+    onEvidence: (id) => {
+      const target = jumpTarget(store.events, id);
+      if (target !== null) jump(target);
+    },
+    onCopy: copyDebrief,
+  });
   const list = els.momentList;
   list.innerHTML = "";
   const moments = keyMoments(store.events);
@@ -11774,9 +12087,48 @@ function renderStoryPanels(display) {
     cap.className = "moment-cap";
     cap.textContent = moment.caption;
     body.append(head, cap);
+    if (moment.reasoning) {
+      const thought = document.createElement("p");
+      thought.className = "moment-thought";
+      thought.textContent = moment.reasoning;
+      body.append(thought);
+    }
     item.append(frame, body);
     list.append(item);
   }
+}
+
+async function copyDebrief(text, btn) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (err) {
+    const area = document.createElement("textarea");
+    area.value = text;
+    document.body.append(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+  if (btn) {
+    btn.textContent = "Copied";
+    setTimeout(() => { btn.textContent = "Copy as markdown"; }, 1500);
+  }
+}
+
+// Fetch one replay's debrief after its events load. Stale
+// responses (user moved on) are dropped by run id.
+function loadDebrief(runId) {
+  store.debriefRun = runId;
+  store.debrief = null;
+  fetchDebrief(runId).then((data) => {
+    if (store.debriefRun !== runId) return;
+    store.debrief = (data && data.debrief) || { error: true };
+    render(false);
+  }).catch(() => {
+    if (store.debriefRun !== runId) return;
+    store.debrief = { error: true };
+    render(false);
+  });
 }
 
 function stopTimer() {
@@ -11927,6 +12279,7 @@ async function openExercise(runId, opts) {
   store.events = (data.events || []).filter((ev) => ev && ev.actor !== "system");
   store.replayScore = data.score || null;
   if (window.CRUCIBLE_STATIC) updateProvBadge(data.provenance);
+  loadDebrief(runId);
   store.cursor = 0;
   store.firstAuthIndex = store.events.findIndex(
     (ev) => ev.actor === "red" && ev.tool === "try_credential" && (ev.result || {}).authenticated === true,
@@ -11942,11 +12295,9 @@ async function openExercise(runId, opts) {
     return;
   }
   store.opening = playOpening(
-    { root: els.slate, title: els.slateTitle, hosts: els.slateHosts, count: els.slateCount },
+    { root: els.slate, title: els.slateTitle, count: els.slateCount },
     {
       label: runId,
-      hosts: layoutHosts(store.layout || classicLayout()),
-      roles: Object.fromEntries(((store.layout || {}).hosts || []).map((host) => [host.id, host.role])),
       reduced: reducedMotion(),
       onDone: () => {
         store.opening = null;
@@ -12182,13 +12533,16 @@ function onLiveError() {
 }
 
 function onRunRequest(agents) {
-  if (agents === "model") {
+  if (agents === "model" || agents === "model_open") {
     fetchStatus()
       .then((spend) => {
         const capped = spend.spent_today >= spend.daily_limit
           ? "Spend cap already reached: this exercise would run on the scripted baseline."
           : null;
-        showConfirm(confirm, spend, capped, () => dealLive(agents));
+        const note = agents === "model_open"
+          ? "Briefed red plus open-weights blue. Hard cap $2.00 this run on the Meta side; Baseten bills its own invoice."
+          : null;
+        showConfirm(confirm, spend, capped, () => dealLive(agents), note);
       })
       .catch((err) => notice(`Could not check spend: ${err.message}`, true, {
         label: "Try again",
@@ -12294,10 +12648,13 @@ function showEndCardFor() {
 }
 
 function showEndCardNow(stats, audits, nextId) {
-  showEndCard(endEls(), stats, audits.summary.justifiedPct, nextId);
+  // The finish sequence runs before the card opens; re-read Next at
+  // open time so a shelf that loaded mid-finish still counts.
+  const fresh = nextFeaturedId() || nextId;
+  showEndCard(endEls(), stats, audits.summary.justifiedPct, fresh);
   if (stats.key === "secret-exposed") glitchScene();
   const auto = store.presentLoop || (store.lobby.autoplay && store.mode === "replay");
-  if (auto && nextId) scheduleAdvance(nextId);
+  if (auto && fresh) scheduleAdvance(fresh);
 }
 
 function scheduleAdvance(nextId) {
@@ -12380,6 +12737,11 @@ function paintLobby() {
     loading: store.lobby.loading,
   }, { onPlay: (id) => openExercise(id) },
   { art: store.stageArt || {}, attackMap: store.attackMap });
+  // A live run ends while the shelf reloads, so the end card can
+  // open with no Next yet; re-arm it as the ranks fill in.
+  if (endCardVisible(endEls())) {
+    endEls().next.disabled = !nextFeaturedId();
+  }
 }
 
 async function refreshRuns() {
@@ -12436,11 +12798,6 @@ async function refreshRuns() {
   await Promise.all(workers);
   store.lobby.loading = false;
   paintLobby();
-  // A live run ends while the shelf reloads, so the end card opens
-  // with no Next yet; re-arm it once the ranks are known.
-  if (endCardVisible(endEls())) {
-    endEls().next.disabled = !nextFeaturedId();
-  }
 }
 
 function watchReplay() {
@@ -12718,13 +13075,21 @@ async function boot() {
   if (els.classicBox) els.classicBox.checked = store.classic;
   loadStageArt("assets/art/").then((art) => {
     store.stageArt = art || {};
-    if (stageRefs) {
-      setStageArt(stageRefs, store.stageArt);
-      render(false);
-    }
-    // Thumbnails painted before the art arrived repaint textured.
+    // render() clears stage transients, so note a running finish
+    // before the repaint below wipes it.
+    const wipedFinish = Boolean(stageRefs && stageRefs.finish);
+    if (stageRefs) setStageArt(stageRefs, store.stageArt);
+    // Thumbnails and story frames painted before the art arrived
+    // repaint textured: the lobby remounts, and the story key
+    // reset rebuilds the moment frames on the next render.
     clearArenaThumbCache();
+    store.storyKey = "";
     paintLobby();
+    render(false);
+    // Art arriving mid-finish wipes the finish before its card
+    // opens (a fresh deep link at the end lands here): re-arm the
+    // end card when that happens.
+    if (wipedFinish && !endCardVisible(endEls())) showEndCardFor("replay");
   });
   try {
     store.attackMap = await fetchAttackMap();
