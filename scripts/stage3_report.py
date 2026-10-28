@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Merge finished Stage 3 cells into the results report (no model calls).
 
-Reads the four bench dirs plus the frozen playbook, recomputes every
+Reads the bench dirs plus the frozen playbook, recomputes every
 metric from the saved CSVs and jsonls, and writes:
 
 - docs/STAGE3_RESULTS.md: per-cell tables, Wilson intervals, exact
@@ -10,7 +10,14 @@ metric from the saved CSVs and jsonls, and writes:
 
   {"stage": 3, "generated": iso, "frozen_sha256": hex-or-null,
    "benches": {name: dir}, "cells": {key: {...}}, "comparisons": [...],
-   "claims": [...], "non_claims": [...]}
+   "void": {"cells": {...}, "comparisons": [...]},
+   "reference": {...}, "claims": [...], "non_claims": [...]}
+
+The headline sensors-on arms come from the corrected rerun
+(--sensors); the sensors-off arms come from the valid half of the
+first run (--heldout). The first run's sensors-on half is void
+(documented sensor bug, fixed in c9dd960) and is shown only in the
+void section, with its original p-values, for the record.
 
 Cells carry n, intrusion/secret/containment rates with Wilson bounds,
 median delays, mean downtime, audit justified rate (audited cells),
@@ -18,7 +25,10 @@ and total Meta cost. Comparisons carry discordant counts, exact
 two-sided p-values, and a verdict ("differs" or "within noise").
 
 Pairing key is (scenario_id, rep): same scenario, same rep index,
-across arms. Statistics are stdlib-only.
+across arms. B-vs-C pairs within the rerun with matched red; A-vs-B
+pairs across benches by scenario, which is approximate because red
+re-rolled between benches (the episode seed includes the bench name).
+Statistics are stdlib-only.
 """
 
 from __future__ import annotations
@@ -39,6 +49,12 @@ CELL_A = "solver-sensors-off-memory-off"
 CELL_B = "solver-sensors-on-memory-off"
 CELL_C = "solver-sensors-on-memory-on"
 CELL_BONUS = "solver-sensors-off-memory-on"
+BRIEFED_CELL = "model-briefed-sensors-on-memory-off"
+BRIEFED_LABEL = "briefed-red-vs-Spark-Open"
+
+# Benches whose sensors-on episodes are void: the collector bug kept
+# every lookup missing on generated nets (fixed in c9dd960).
+VOID_BENCH_NAMES = ("bench-stage3-train-solver", "bench-stage3-heldout")
 
 
 def _read_json(path: Path):
@@ -187,6 +203,24 @@ def _paired_rows(bench_dir: Path, key_a: str, key_b: str) -> list:
             if key_a in pair and key_b in pair]
 
 
+def _paired_rows_cross(bench_a: Path, key_a: str, bench_b: Path,
+                      key_b: str) -> list:
+    """Pair rows from two benches by (scenario_id, rep).
+
+    Used for the corrected sensors comparison, whose arms live in
+    different benches. Keys match because both benches ran the same
+    scenarios at the same rep index; red still re-rolled between
+    benches, so the pairing is approximate.
+    """
+    rows_a = {row_key: row for row in _csv_rows(bench_a)
+              if row.get("cell") == key_a
+              for row_key in [_pair_key(row)]}
+    rows_b = {row_key: row for row in _csv_rows(bench_b)
+              if row.get("cell") == key_b
+              for row_key in [_pair_key(row)]}
+    return [(rows_a[key], rows_b[key]) for key in rows_a if key in rows_b]
+
+
 def _binary_comparison(pairs: list, key: str) -> dict:
     wins_a = sum(1 for row_a, row_b in pairs
                  if row_a.get(key) == "True" and row_b.get(key) != "True")
@@ -223,10 +257,7 @@ def _continuous_comparison(pairs: list, key: str) -> dict:
             "medians": medians, "paired_n": len(diffs)}
 
 
-def compare(bench_dir: Path, key_a: str, key_b: str,
-            label_a: str, label_b: str) -> dict:
-    """Paired A-vs-B comparison with exact p-values and verdicts."""
-    pairs = _paired_rows(bench_dir, key_a, key_b)
+def _metrics_for(pairs: list) -> dict:
     metrics = {}
     for key in ("intrusion", "secret_read"):
         result = _binary_comparison(pairs, key)
@@ -238,8 +269,25 @@ def compare(bench_dir: Path, key_a: str, key_b: str,
         result["verdict"] = ("differs" if result["p"] < 0.05
                              else "within noise")
         metrics[key] = result
+    return metrics
+
+
+def compare(bench_dir: Path, key_a: str, key_b: str,
+            label_a: str, label_b: str) -> dict:
+    """Paired A-vs-B comparison with exact p-values and verdicts."""
+    pairs = _paired_rows(bench_dir, key_a, key_b)
     return {"arms": [label_a, label_b], "cells": [key_a, key_b],
-            "pairs": len(pairs), "metrics": metrics}
+            "pairs": len(pairs), "metrics": _metrics_for(pairs)}
+
+
+def compare_cross(bench_a: Path, key_a: str, bench_b: Path, key_b: str,
+                  label_a: str, label_b: str) -> dict:
+    """Cross-bench paired comparison (approximate: red re-rolled)."""
+    pairs = _paired_rows_cross(bench_a, key_a, bench_b, key_b)
+    return {"arms": [label_a, label_b], "cells": [key_a, key_b],
+            "pairs": len(pairs), "metrics": _metrics_for(pairs),
+            "note": "cross-bench pairing by scenario; red re-rolled "
+                    "between benches, so this pairing is approximate"}
 
 
 def _pct(value) -> str:
@@ -258,13 +306,55 @@ def _interval(pair) -> str:
     return f"({_pct(pair[0])}, {_pct(pair[1])})"
 
 
+def _p(value: float) -> str:
+    if 0.0 < value < 0.00005:
+        return "<0.0001"
+    return f"{value:.4f}"
+
+
+def _cell_row(arm: str, cell: dict) -> str:
+    intr = cell["intrusion"]
+    sec = cell["secret_read"]
+    cont = cell["contained_after_intrusion"]
+    return (
+        f"| {arm} | {cell['n']} "
+        f"| {intr['hits']}/{intr['n']} {_pct(intr['rate'])} "
+        f"{_interval(intr['wilson'])} "
+        f"| {sec['hits']}/{sec['n']} {_pct(sec['rate'])} "
+        f"{_interval(sec['wilson'])} "
+        f"| {cont['hits']}/{cont['n']} {_pct(cont['rate'])} "
+        f"| {_num(cell['median_detection_delay'])} "
+        f"| {_num(cell['median_time_to_contain'])} "
+        f"| {_num(cell['mean_downtime_pct'])}% "
+        f"| {_pct(cell['audit_justified_rate'])} |")
+
+
+def _comparison_rows(comps: list) -> list:
+    rows = []
+    for comp in comps:
+        label = f"{comp['arms'][0]} vs {comp['arms'][1]}"
+        for metric, result in comp["metrics"].items():
+            dis = result["discordant"]
+            rows.append(f"| {label} | {comp['pairs']} | {metric} | "
+                        f"{dis[0]}-{dis[1]} | {_p(result['p'])} | "
+                        f"{result['verdict']} |")
+    return rows
+
+
 def render_markdown(payload: dict) -> str:
     """Render the full results page from the merged payload."""
+    benches = payload["benches"]
     lines = ["# Stage 3 results: frozen playbook on held-out networks",
              "",
              f"Generated {payload['generated']} from "
-             + ", ".join(f"`{name}`" for name in payload["benches"]) + ".",
+             + ", ".join(f"`{name}`" for name in benches) + ".",
              f"Frozen playbook sha256: `{payload['frozen_sha256'] or 'n/a'}`.",
+             "Corrected headline: sensors-on arms come from the rerun "
+             f"`{benches.get('sensors', 'runs/bench-stage3-heldout-sensors')}` "
+             "(working sensors); sensors-off arms come from the valid half "
+             f"of `{benches.get('heldout', 'runs/bench-stage3-heldout')}`. "
+             "The first run's sensors-on half is void (documented sensor "
+             "bug, fixed in c9dd960) and appears only in the void section.",
              "Rates carry Wilson 95% intervals; paired p-values are exact "
              "two-sided (McNemar for binary outcomes, sign test for delays "
              "and downtime). p >= 0.05 is reported as within noise.",
@@ -275,58 +365,72 @@ def render_markdown(payload: dict) -> str:
              "med delay | med contain | downtime | audit just |",
              "|-----|---|------------|--------------|-----------|"
              "-----------|-------------|----------|------------|"]
-    for arm, key in (("A sensors-off", CELL_A), ("B sensors-on", CELL_B),
-                     ("C + playbook", CELL_C), ("bonus off+book", CELL_BONUS)):
+    for arm, key in (("A sensors-off", CELL_A),
+                     ("B sensors-on (rerun)", CELL_B),
+                     ("C + playbook (rerun)", CELL_C),
+                     ("bonus off+book", CELL_BONUS)):
         cell = payload["cells"].get(key)
         if cell is None:
             continue
-        intr = cell["intrusion"]
-        sec = cell["secret_read"]
-        cont = cell["contained_after_intrusion"]
-        lines.append(
-            f"| {arm} | {cell['n']} "
-            f"| {intr['hits']}/{intr['n']} {_pct(intr['rate'])} "
-            f"{_interval(intr['wilson'])} "
-            f"| {sec['hits']}/{sec['n']} {_pct(sec['rate'])} "
-            f"{_interval(sec['wilson'])} "
-            f"| {cont['hits']}/{cont['n']} {_pct(cont['rate'])} "
-            f"| {_num(cell['median_detection_delay'])} "
-            f"| {_num(cell['median_time_to_contain'])} "
-            f"| {_num(cell['mean_downtime_pct'])}% "
-            f"| {_pct(cell['audit_justified_rate'])} |")
+        lines.append(_cell_row(arm, cell))
     lines += ["",
               "Downtime is the mean over all episodes; med delay is the "
               "median first-report delay; med contain is the median time "
-              "to contain over contained episodes. Audit covers the B and "
-              "C cells only.",
+              "to contain over contained episodes. Audit covers the rerun "
+              "B and C cells only.",
               "",
               "## Paired comparisons",
               "",
               "| comparison | pairs | metric | discordant | p | verdict |",
               "|------------|-------|--------|------------|---|---------|"]
-    for comp in payload["comparisons"]:
-        label = f"{comp['arms'][0]} vs {comp['arms'][1]}"
-        for metric, result in comp["metrics"].items():
-            dis = result["discordant"]
-            lines.append(f"| {label} | {comp['pairs']} | {metric} | "
-                         f"{dis[0]}-{dis[1]} | {result['p']:.4f} | "
-                         f"{result['verdict']} |")
+    lines += _comparison_rows(payload["comparisons"])
     lines += ["",
               "Discordant counts read (first-arm-worse, second-arm-worse) "
               "for binary outcomes: for intrusion and secret reads, the "
               "worse side is the arm where the bad outcome happened. For "
               "delays and downtime they read (first-arm-slower, "
-              "second-arm-slower).",
-              "",
-              "## Reference runs",
-              ""]
+              "second-arm-slower)."]
+    for comp in payload["comparisons"]:
+        if comp.get("note"):
+            lines.append(f"{comp['arms'][0]} vs {comp['arms'][1]}: "
+                         f"{comp['note']}.")
+    void = payload.get("void", {})
+    if void.get("cells"):
+        names = ", ".join(f"`{name}`" for name in void.get("benches", []))
+        lines += ["",
+                  "## Void original (for the record, not evidence)",
+                  "",
+                  "The first run's sensors-on arms ran with silently "
+                  "broken sensors (zero alerts in every episode) and are "
+                  f"void by name ({names}; documented sensor bug, fixed "
+                  "in c9dd960). Original cells and p-values:",
+                  "",
+                  "| arm | n | intrusions | secret reads | contained | "
+                  "med delay | med contain | downtime | audit just |",
+                  "|-----|---|------------|--------------|-----------|"
+                  "-----------|-------------|----------|------------|"]
+        for arm, key in (("B sensors-on (void)", CELL_B),
+                         ("C + playbook (void)", CELL_C)):
+            cell = void["cells"].get(key)
+            if cell is None:
+                continue
+            lines.append(_cell_row(arm, cell))
+        lines += ["",
+                  "| comparison | pairs | metric | discordant | p | verdict |",
+                  "|------------|-------|--------|------------|---|---------|"]
+        lines += _comparison_rows(void.get("comparisons", []))
+    lines += ["", "## Reference runs", ""]
     for name, cell in payload["reference"].items():
         intr = cell["intrusion"]
         sec = cell["secret_read"]
+        cont = cell["contained_after_intrusion"]
         lines.append(f"- {name} (n={cell['n']}): intrusions "
                      f"{intr['hits']}/{intr['n']}, secret reads "
-                     f"{sec['hits']}/{sec['n']}, med delay "
-                     f"{_num(cell['median_detection_delay'])}.")
+                     f"{sec['hits']}/{sec['n']}, contained "
+                     f"{cont['hits']}/{cont['n']}, med delay "
+                     f"{_num(cell['median_detection_delay'])}, med relevant "
+                     f"{_num(cell['median_relevant_delay'])}, med contain "
+                     f"{_num(cell['median_time_to_contain'])}.")
     lines += ["", "## Claims", ""]
     lines += [f"- {claim}" for claim in payload["claims"]]
     lines += ["", "## Non-claims", ""]
@@ -338,19 +442,56 @@ def _claim_sentence(comp: dict, metric: str, bad: str) -> str:
     arms = comp["arms"]
     result = comp["metrics"][metric]
     dis = result["discordant"]
-    verdict = ("differs (p=%.4f)" % result["p"] if result["p"] < 0.05
-               else "is within noise (p=%.4f)" % result["p"])
+    verdict = ("differs (p=%s)" % _p(result["p"]) if result["p"] < 0.05
+               else "is within noise (p=%s)" % _p(result["p"]))
     return (f"{arms[0]} vs {arms[1]} on {bad}: discordant pairs "
             f"{dis[0]}-{dis[1]} over {comp['pairs']} pairs, {verdict}.")
 
 
-def build_claims(comparisons: list) -> list:
+def build_claims(comparisons: list, cells: dict, reference: dict,
+                 void: dict) -> list:
     """Factual claim sentences; significance comes from the p-values."""
     claims = []
     for comp in comparisons:
         claims.append(_claim_sentence(comp, "intrusion", "intrusion rate"))
         claims.append(_claim_sentence(comp, "secret_read",
                                       "secret-read rate"))
+    base = cells.get(CELL_B, {})
+    plus = cells.get(CELL_C, {})
+    if base.get("n") and plus.get("n"):
+        cont_b = base["contained_after_intrusion"]
+        cont_c = plus["contained_after_intrusion"]
+        sec_b = base["secret_read"]
+        sec_c = plus["secret_read"]
+        claims.append(
+            f"With working sensors every intrusion was contained in both "
+            f"memory arms ({cont_b['hits']}/{cont_b['n']} without memory, "
+            f"{cont_c['hits']}/{cont_c['n']} with memory; secret reads "
+            f"{sec_b['hits']}/{sec_b['n']} and {sec_c['hits']}/{sec_c['n']}): "
+            f"a ceiling effect, so memory is not distinguishable on "
+            f"outcomes with working sensors.")
+    briefed = reference.get(BRIEFED_LABEL)
+    if briefed is not None and briefed.get("n"):
+        cont = briefed["contained_after_intrusion"]
+        sec = briefed["secret_read"]
+        claims.append(
+            f"Briefed model red against Open blue (n={briefed['n']}, "
+            f"descriptive only): intrusions "
+            f"{briefed['intrusion']['hits']}/{briefed['n']}, contained "
+            f"{cont['hits']}/{cont['n']}, secret reads "
+            f"{sec['hits']}/{sec['n']}, median relevant detection delay "
+            f"{_num(briefed['median_relevant_delay'])} events, median time "
+            f"to contain {_num(briefed['median_time_to_contain'])} events.")
+    for comp in void.get("comparisons", []):
+        if comp.get("arms") == ["B", "C"]:
+            result = comp["metrics"]["secret_read"]
+            dis = result["discordant"]
+            claims.append(
+                f"Void record only: the void run's B vs C secret-read gap "
+                f"was discordant pairs {dis[0]}-{dis[1]} over "
+                f"{comp['pairs']} pairs (p={_p(result['p'])}); it is not "
+                f"evidence.")
+            break
     return claims
 
 
@@ -361,24 +502,38 @@ NON_CLAIMS = [
     "with 20 pairs only large asymmetries can reach p < 0.05.",
     "Held episodes can still reflect red failing on its own rather than "
     "blue defending; read wins beside intrusion and containment rates.",
-    "Solver-red pairs are exactly matched: the same scenario and rep "
-    "index replays identical red moves across arms by design, so arm "
-    "differences isolate blue, not red sampling.",
-    "Model red achieved no intrusion in 18 train episodes, so the "
-    "defense comparison uses a solver red with seeded imperfection: "
+    "B-vs-C pairs are exactly matched: the same scenario and rep index "
+    "in one bench replays identical red moves across arms by design, so "
+    "arm differences isolate blue, not red sampling. A-vs-B pairs "
+    "across benches by scenario instead, which is approximate because "
+    "red re-rolled between benches.",
+    "The main table uses a solver red with seeded imperfection, because "
+    "unbriefed model red achieved no intrusion in 18 train episodes: "
     "results show blue contains a known-path intruder, not that blue "
-    "stops an adaptive attacker.",
-    "Audit justified rates cover the B and C cells only; no other cell "
-    "was audited.",
+    "stops an adaptive attacker. Briefed model red intruded in 6 of 6 "
+    "probe episodes but that probe is descriptive only at n=6.",
+    "Audit justified rates cover the rerun B and C cells only; no other "
+    "cell was audited.",
+    "The frozen playbook was learned on train episodes whose sensors "
+    "were void too, so its rules were learned without sensor input; the "
+    "rerun tests a deaf-learned playbook under working sensors.",
 ]
 
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Merge Stage 3 cells into the results report.")
-    parser.add_argument("--heldout", default="runs/bench-stage3-heldout")
+    parser.add_argument("--heldout", default="runs/bench-stage3-heldout",
+                        help="First run: valid sensors-off half plus the "
+                        "void original")
+    parser.add_argument("--sensors",
+                        default="runs/bench-stage3-heldout-sensors",
+                        help="Corrected rerun for the headline sensors-on "
+                        "arms")
     parser.add_argument("--noisyref", default="runs/bench-stage3-noisyref")
     parser.add_argument("--xcheck", default="runs/bench-stage3-xcheck")
+    parser.add_argument("--briefed",
+                        default="runs/bench-stage3-briefed-vs-open")
     parser.add_argument("--frozen",
                         default="runs/stage3/frozen-playbook.json")
     parser.add_argument("--out-md", default="docs/STAGE3_RESULTS.md")
@@ -389,23 +544,39 @@ def parse_args(argv=None):
 def main(argv=None) -> int:
     args = parse_args(argv)
     heldout = Path(args.heldout)
+    sensors = Path(args.sensors)
     frozen = Path(args.frozen)
     if not (heldout / "summary.csv").exists():
         print(f"report: no finished held-out bench at {heldout}",
+              file=sys.stderr)
+        return 1
+    if not (sensors / "summary.csv").exists():
+        print(f"report: no finished sensors rerun bench at {sensors}",
               file=sys.stderr)
         return 1
     if not frozen.exists():
         print(f"report: no frozen playbook at {frozen}", file=sys.stderr)
         return 1
     cells = {}
-    for key in (CELL_A, CELL_B, CELL_C, CELL_BONUS):
+    for bench_dir, key in ((heldout, CELL_A), (sensors, CELL_B),
+                           (sensors, CELL_C), (heldout, CELL_BONUS)):
         try:
-            cells[key] = summarize_cell(heldout, key)
+            cell = summarize_cell(bench_dir, key)
         except FileNotFoundError:
             continue
-    cells = {key: cell for key, cell in cells.items() if cell["n"]}
-    comparisons = [compare(heldout, CELL_A, CELL_B, "A", "B"),
-                   compare(heldout, CELL_B, CELL_C, "B", "C")]
+        if cell["n"]:
+            cells[key] = cell
+    comparisons = [compare_cross(heldout, CELL_A, sensors, CELL_B,
+                                 "A", "B"),
+                   compare(sensors, CELL_B, CELL_C, "B", "C")]
+    void_cells = {}
+    for key in (CELL_B, CELL_C):
+        cell = summarize_cell(heldout, key)
+        if cell["n"]:
+            void_cells[key] = cell
+    void = {"benches": list(VOID_BENCH_NAMES), "cells": void_cells,
+            "comparisons": [compare(heldout, CELL_A, CELL_B, "A", "B"),
+                            compare(heldout, CELL_B, CELL_C, "B", "C")]}
     reference = {}
     noisyref = Path(args.noisyref)
     if (noisyref / "summary.csv").exists():
@@ -420,17 +591,24 @@ def main(argv=None) -> int:
         cell = summarize_cell(xcheck, key)
         if cell["n"]:
             reference[f"spark-blue:{key}"] = cell
+    briefed = Path(args.briefed)
+    if (briefed / "summary.csv").exists():
+        cell = summarize_cell(briefed, BRIEFED_CELL)
+        if cell["n"]:
+            reference[BRIEFED_LABEL] = cell
     payload = {
         "stage": 3,
         "generated": datetime.now(timezone.utc).isoformat(),
         "frozen_sha256": hashlib.sha256(
             frozen.read_bytes()).hexdigest(),
-        "benches": {"heldout": str(heldout),
-                    "noisyref": str(noisyref), "xcheck": str(xcheck)},
+        "benches": {"heldout": str(heldout), "sensors": str(sensors),
+                    "noisyref": str(noisyref), "xcheck": str(xcheck),
+                    "briefed": str(briefed)},
         "cells": cells,
         "comparisons": comparisons,
+        "void": void,
         "reference": reference,
-        "claims": build_claims(comparisons),
+        "claims": build_claims(comparisons, cells, reference, void),
         "non_claims": list(NON_CLAIMS),
     }
     md_path = Path(args.out_md)
