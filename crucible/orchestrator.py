@@ -214,6 +214,30 @@ def _business_weights(override: dict | None = None) -> dict:
         return dict(DEFAULT_BUSINESS_WEIGHTS)
 
 
+def _run_weights(event_list: list) -> dict | None:
+    """Return host weights from the run's own embedded layout, or None.
+
+    The first event carries scenario_layout with host ids and
+    weights. Logs that predate the field yield None so scoring
+    falls back to the ambient scenario weights as before.
+    """
+    for event in event_list or []:
+        layout = (event.get("args", {}) or {}).get("scenario_layout")
+        if not isinstance(layout, dict):
+            continue
+        weights = {}
+        for host in layout.get("hosts", []) or []:
+            if not isinstance(host, dict) or not host.get("id"):
+                continue
+            try:
+                weights[host["id"]] = int(host.get("weight", 1))
+            except (TypeError, ValueError):
+                continue
+        if weights:
+            return weights
+    return None
+
+
 def _downtime_cost(event_list: list, weights: dict) -> int:
     """Sum business weights for every turn each host stays down.
 
@@ -420,6 +444,8 @@ def score_events(event_list: list, business_weights: dict | None = None) -> dict
     and system events never shift positions or downtime: detection,
     containment, and downtime count over red and blue events only,
     while the audit metrics summarize the auditor events separately.
+    Host weights come from an explicit override, else the run's own
+    embedded layout, else the ambient scenario.
     """
     scoring = [event for event in (event_list or [])
                if event.get("actor") not in ("auditor", "system")]
@@ -494,6 +520,8 @@ def score_events(event_list: list, business_weights: dict | None = None) -> dict
     else:
         outcome = "stalemate"
 
+    if business_weights is None:
+        business_weights = _run_weights(event_list)
     weights = _business_weights(business_weights)
     counted = _events_for_downtime(scoring)
     downtime_cost = _downtime_cost(counted, weights)

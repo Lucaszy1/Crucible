@@ -575,6 +575,53 @@ def test_score_stays_in_range_on_long_outage():
     assert score["blue_score"] == round(100 - score["downtime_pct"], 2)
 
 
+def _layout_event():
+    return {
+        "id": "evt-0001",
+        "timestamp": "2026-01-01T00:00:00+00:00",
+        "actor": "system",
+        "tool": "clean_start_check",
+        "args": {"scenario_layout": {
+            "scenario_id": "scn-x",
+            "hosts": [{"id": "granite", "weight": 2},
+                      {"id": "nimbus", "weight": 3}],
+            "jewel_host": "granite"}},
+        "result": {"ok": True},
+        "reasoning_summary": "",
+        "evidence_refs": [],
+    }
+
+
+def _isolate_lane():
+    scan = _event("red", "scan_host", {"ok": True})
+    held = _event("blue", "isolate_host", {"ok": True, "host": "granite"})
+    held["args"] = {"host": "granite"}
+    return [scan, held]
+
+
+def test_score_uses_run_layout_weights_over_ambient(monkeypatch):
+    monkeypatch.setattr(sandbox, "load_scenario",
+                        lambda: {"business_weights": {"web": 3}})
+    lane = [_layout_event()] + _isolate_lane()
+    score = orchestrator.score_events(lane)
+    assert score["downtime_cost"] == 2
+    assert score["downtime_pct"] == round(2 / (17 * 2) * 100, 2)
+    assert score["outcome"] == "blue_held"
+
+
+def test_score_explicit_weights_beat_run_layout():
+    lane = [_layout_event()] + _isolate_lane()
+    score = orchestrator.score_events(lane, business_weights={"granite": 9})
+    assert score["downtime_cost"] == 9
+
+
+def test_score_falls_back_to_ambient_without_layout(monkeypatch):
+    monkeypatch.setattr(sandbox, "load_scenario",
+                        lambda: {"business_weights": {"granite": 7}})
+    score = orchestrator.score_events(_isolate_lane())
+    assert score["downtime_cost"] == 7
+
+
 def test_score_quiet_exercise_scores_hundred():
     history = [
         _event("red", "scan_host", {"ok": True}, 1),
