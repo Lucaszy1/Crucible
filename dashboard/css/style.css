@@ -785,6 +785,16 @@ body.present #presentLatest li:first-child { color: var(--muted); font-size: 19p
 }
 .lobby-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: auto; }
 .lobby-states { display: block; }
+.lobby-glyph {
+  width: 120px; height: 68px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px; background: #10131a; border: 1px solid var(--border);
+}
+.lobby-glyph svg path { fill: currentColor; }
+.lobby-glyph[data-tone="red"] { color: var(--red); }
+.lobby-glyph[data-tone="blue"] { color: var(--accent); }
+.lobby-glyph[data-tone="amber"] { color: var(--amber); }
+.lobby-glyph[data-tone="gray"] { color: var(--muted); }
 canvas.lobby-thumb {
   display: block; border-radius: 6px; background: #10131a;
   border: 1px solid var(--border); max-width: 100%;

@@ -5,7 +5,7 @@
 // state.js. Runs whose ids start with fake- never appear anywhere.
 import { classicLayout } from "./layout.js";
 import { eventHost, motionReduced, rankFeatured } from "./state.js";
-import { mountArenaThumb, mountThumbnail, thumbnailState } from "./thumbnail.js";
+import { mountArenaThumb, mountThumbnail, outcomeGlyph, thumbnailState } from "./thumbnail.js";
 
 const FLAG_LABEL = { test: "test", fallback: "fallback", scripted: "scripted" };
 
@@ -133,7 +133,9 @@ export function thumbnail(layout, tstate, opts) {
 }
 
 // Arena-frame thumbnail for a classified replay: the episode's
-// real stage at its poster event. env: { art, attackMap }.
+// real stage at its poster event. env: { art, attackMap }. The
+// canvas mounts empty and fills in from the idle queue; featured
+// cards also persist through sessionStorage.
 export function arenaThumb(model, env, opts) {
   const options = opts || {};
   const thumb = document.createElement("canvas");
@@ -145,6 +147,7 @@ export function arenaThumb(model, env, opts) {
   mountArenaThumb(thumb, model, env || {}, {
     w: options.w || 120,
     h: options.h || 68,
+    featured: options.featured,
   });
   return thumb;
 }
@@ -185,6 +188,7 @@ function featureCard(model, callbacks, env) {
   const thumb = arenaThumb(model, env, {
     w: 176, h: 100,
     label: `Arena frame for ${model.id}: ${model.outcome.label}`,
+    featured: true,
   });
   thumb.classList.add("feature-thumb");
   const body = document.createElement("div");
@@ -219,6 +223,8 @@ function featureCard(model, callbacks, env) {
 }
 
 // Compact archive card: outcome and shape, never a bare score.
+// Archive rows carry no canvas: a static outcome glyph holds the
+// slot, and a real thumbnail mounts only on hover or focus.
 function archiveCard(model, callbacks, env) {
   const el = document.createElement("article");
   el.className = "lobby-card";
@@ -241,12 +247,21 @@ function archiveCard(model, callbacks, env) {
   }
   const foot = document.createElement("div");
   foot.className = "lobby-foot";
-  const states = arenaThumb(model, env, {
-    w: 120, h: 68,
-    label: `Arena frame for ${model.id}: ${model.outcome.label}`,
-  });
-  states.classList.add("lobby-states");
-  foot.append(states, playButton(model.id, "Play", callbacks));
+  const glyph = outcomeGlyph(model.outcome);
+  glyph.classList.add("lobby-states");
+  foot.append(glyph, playButton(model.id, "Play", callbacks));
+  const upgrade = () => {
+    if (el._thumbUpgraded) return;
+    el._thumbUpgraded = true;
+    const states = arenaThumb(model, env, {
+      w: 120, h: 68,
+      label: `Arena frame for ${model.id}: ${model.outcome.label}`,
+    });
+    states.classList.add("lobby-states");
+    foot.replaceChild(states, glyph);
+  };
+  el.addEventListener("mouseenter", upgrade);
+  el.addEventListener("focusin", upgrade);
   el.append(head, meta);
   if (model.flags && model.flags.length > 0) el.append(badgesRow(model.flags));
   el.append(foot);
