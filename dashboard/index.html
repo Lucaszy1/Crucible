@@ -114,6 +114,12 @@
 <div id="arenaView" hidden>
 <main class="arena-wrap">
   <section class="arena-stage" id="arenaStage" aria-label="Exercise arena">
+   <div class="arena-row3">
+    <aside id="thoughtRed" class="thought red" aria-label="Red thought stream">
+      <button id="thoughtRedHead" class="thought-head" aria-expanded="true">Red thought</button>
+      <p id="thoughtRedText" class="thought-text"></p>
+      <div id="thoughtRedChips" class="thought-chips"></div>
+    </aside>
     <div class="arena-canvas-wrap" id="arenaWrap">
       <canvas id="arenaCanvas" role="img" aria-label="Arena contest scene"></canvas>
       <div id="arenaFrame" aria-hidden="true"></div>
@@ -148,16 +154,6 @@
         <div id="arenaCapTag" class="system">EXERCISE</div>
         <div id="arenaCapBody"><div id="arenaCapText">Hosts guard one secret.</div><div id="arenaCapSub"></div></div>
       </div>
-      <aside id="thoughtRed" class="thought red" aria-label="Red thought stream">
-        <button id="thoughtRedHead" class="thought-head" aria-expanded="true">Red thought</button>
-        <p id="thoughtRedText" class="thought-text"></p>
-        <div id="thoughtRedChips" class="thought-chips"></div>
-      </aside>
-      <aside id="thoughtBlue" class="thought blue" aria-label="Blue thought stream">
-        <button id="thoughtBlueHead" class="thought-head" aria-expanded="true">Blue thought</button>
-        <p id="thoughtBlueText" class="thought-text"></p>
-        <div id="thoughtBlueChips" class="thought-chips"></div>
-      </aside>
       <div id="slate" class="slate" hidden>
         <div class="slate-art left" aria-hidden="true"></div>
         <div class="slate-art right" aria-hidden="true"></div>
@@ -184,6 +180,12 @@
         <p class="end-skip">Esc closes</p>
       </div>
     </div>
+    <aside id="thoughtBlue" class="thought blue" aria-label="Blue thought stream">
+      <button id="thoughtBlueHead" class="thought-head" aria-expanded="true">Blue thought</button>
+      <p id="thoughtBlueText" class="thought-text"></p>
+      <div id="thoughtBlueChips" class="thought-chips"></div>
+    </aside>
+   </div>
     <div class="arena-bottom">
       <div class="score-strip arena-scores" aria-label="Score summary">
         <dl class="score-big"><dt>Outcome</dt><dd id="arenaOutcome">--</dd></dl>

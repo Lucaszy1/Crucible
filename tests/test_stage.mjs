@@ -4,9 +4,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  applyCamera, blueLine, calloutForEvent, dollyTarget, FLIGHT_MS, frameBudget, frameP95,
-  flightLane, fxForEvent, guardianPulse, intrusionLevel, laneFeed, lanePoint, paintGuardian,
-  paintIntrusion, redLine, stageLayout, stageWash, stepCamera,
+  applyCamera, blueLine, calloutForEvent, dollyTarget, FLIGHT_MS, flightLaneRect, frameBudget,
+  frameP95, flightLane, fxForEvent, guardianPulse, intrusionLevel, laneFeed, lanePoint,
+  paintGuardian, paintIntrusion, redLine, stageLayout, stageWash, stepCamera,
 } from "../dashboard/js/stage.js";
 import { arenaGeometry, classicLayout, normalizeLayout } from "../dashboard/js/layout.js";
 
@@ -77,6 +77,9 @@ describe("stageLayout", () => {
           const frame = { x: 0, y: 0, w, h };
           const hud = { x: 0, y: 0, w, h: chrome.hudBottom };
           const cap = { x: 0, y: chrome.capTop, w, h: h - chrome.capTop };
+          // The control bar rides the HUD center; canvas work must
+          // never enter its safe zone from below.
+          const bar = { x: w * 0.3, y: 0, w: w * 0.4, h: chrome.hudBottom };
           const tag = `${w}x${h} n=${count} aud=${audOn}`;
           for (const side of ["red", "blue"]) {
             const lane = stage.lanes[side];
@@ -135,6 +138,23 @@ describe("stageLayout", () => {
           }
           const pair = Math.hypot(ents[0].x - ents[1].x, ents[0].y - ents[1].y);
           assert.ok(pair >= ents[0].r + ents[1].r, `${tag} entities disjoint`);
+          // The projectile lane flies over the network but must stay
+          // inside the frame and clear of every chrome box: the HUD
+          // and the bar inside it, the caption, and the auditor card.
+          // Hosts may pass under the lane; paint order keeps the
+          // projectiles on top.
+          const laneBox = flightLaneRect(stage.entities.intrusion, stage.entities.guardian);
+          const curveBox = flightLaneRect(stage.entities.intrusion, stage.entities.guardian, 0);
+          assert.ok(inside(curveBox, frame), `${tag} lane inside`);
+          assert.ok(!hits(laneBox, hud), `${tag} lane clears HUD`);
+          assert.ok(!hits(laneBox, bar), `${tag} lane clears bar zone`);
+          assert.ok(!hits(laneBox, cap), `${tag} lane clears caption`);
+          if (audOn && chrome.audBottom + 10 + 40 <= chrome.capTop - 10) {
+            const laneAud = { x: w - 260, y: chrome.hudBottom, w: 250, h: chrome.audBottom - chrome.hudBottom };
+            // The curve itself clears the transient card; impact
+            // flashes at the entity rims may pass under it.
+            assert.ok(!hits(curveBox, laneAud), `${tag} lane clears auditor`);
+          }
           if (stage.mode === "side") {
             // Each entity spans roughly 30 to 35 percent of play height.
             const playH = stage.area.bottom - stage.area.top;
@@ -435,6 +455,16 @@ describe("entity levels", () => {
     assert.equal(nomap.tech, "scan_host");
     assert.equal(calloutForEvent(ev("f", "auditor", "audit", {}, {}), map), null);
     assert.equal(calloutForEvent(null, map), null);
+  });
+
+  it("bounds the whole flight lane in its rect", () => {
+    const box = flightLaneRect({ x: 100, y: 400, r: 60 }, { x: 900, y: 400, r: 60 });
+    const lane = flightLane({ x: 100 + 42, y: 400 }, { x: 900 - 33, y: 400 });
+    for (let i = 0; i <= 20; i += 1) {
+      const pt = lanePoint(lane, i / 20);
+      assert.ok(pt.x >= box.x && pt.x <= box.x + box.w, `sample ${i} x inside`);
+      assert.ok(pt.y >= box.y && pt.y <= box.y + box.h, `sample ${i} y inside`);
+    }
   });
 
   it("keeps the flight lane peak above every endpoint", () => {

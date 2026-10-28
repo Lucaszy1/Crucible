@@ -13,7 +13,6 @@ import {
 } from "./state.js";
 import { describeEvent } from "./story.js";
 import { verdictCard } from "./choreography.js";
-import { applyRail } from "./rail.js";
 
 export const STAGE_WORLD = { w: 1600, h: 900 };
 // Hosts fit inside this share of their band, leaving slack on every
@@ -1174,7 +1173,6 @@ export function showStageAuditor(refs, ev) {
   if (hud.audCite) hud.audCite.textContent = card.ids.length > 0 ? `cites ${card.ids.join(", ")}` : "no cited lines";
   if (hud.audNote) hud.audNote.textContent = String(card.rationale || "").slice(0, 140);
   hud.aud.className = card.word === "justified" ? "show" : "show bad";
-  layOutStageRail(refs);
   relayoutStage(refs);
   if (refs.audTimer) clearTimeout(refs.audTimer);
   refs.audTimer = setTimeout(() => hideStageAuditor(refs), 4200);
@@ -1189,23 +1187,9 @@ export function hideStageAuditor(refs, silent) {
   if (refs.hud.aud && refs.hud.aud.className !== "") {
     refs.hud.aud.className = "";
     if (!silent) {
-      layOutStageRail(refs);
       relayoutStage(refs);
     }
   }
-}
-
-function layOutStageRail(refs) {
-  if (!refs || !refs.hud) return null;
-  const hud = refs.hud;
-  return applyRail({
-    wrap: el("arenaWrap"),
-    mid: el("arenaMid"),
-    aud: hud.aud,
-    cap: hud.cap,
-    red: el("thoughtRed"),
-    blue: el("thoughtBlue"),
-  });
 }
 
 export function flashStageHost(refs, host) {
@@ -1439,6 +1423,41 @@ export function lanePoint(lane, t) {
     x: a * lane.x0 + b * lane.cx + c * lane.x1,
     y: a * lane.y0 + b * lane.cy + c * lane.y1,
   };
+}
+
+// Bounding box of the projectile lane between two entity slots,
+// padded for bodies and trails. Pure, for the overlap harness:
+// the lane must clear the HUD (and the bar inside it), the
+// caption, and the auditor card at every size. The pad defaults
+// to body size; pass a small pad for the curve-only box.
+export function flightLaneRect(intrusion, guardian, pad) {
+  const a = intrusion || { x: 0, y: 0, r: 0 };
+  const b = guardian || { x: 0, y: 0, r: 0 };
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const from = { x: a.x + (dx / len) * a.r * 0.7, y: a.y + (dy / len) * a.r * 0.7 };
+  const to = { x: b.x - (dx / len) * b.r * 0.55, y: b.y - (dy / len) * b.r * 0.55 };
+  const lane = flightLane(from, to);
+  // Quadratic extrema where the derivative crosses zero.
+  const extrema = (p0, pc, p1) => {
+    const denom = p0 - 2 * pc + p1;
+    if (denom === 0) return [];
+    const t = (p0 - pc) / denom;
+    return t > 0 && t < 1 ? [t] : [];
+  };
+  const xs = [lane.x0, lane.x1];
+  const ys = [lane.y0, lane.y1];
+  for (const t of [...extrema(lane.x0, lane.cx, lane.x1), ...extrema(lane.y0, lane.cy, lane.y1)]) {
+    const pt = lanePoint(lane, t);
+    xs.push(pt.x);
+    ys.push(pt.y);
+  }
+  const base = pad === undefined ? 44 : Math.max(0, Number(pad) || 0);
+  const margin = pad === undefined ? base * projStageScale(a.r, b.r) : base;
+  const x0 = Math.min(...xs) - margin;
+  const y0 = Math.min(...ys) - margin;
+  return { x: x0, y: y0, w: Math.max(...xs) - x0 + margin, h: Math.max(...ys) - y0 + margin };
 }
 
 // Flight times in ms by projectile size: travel runs about half a
@@ -2749,8 +2768,18 @@ function paintFxCallout(refs, ctx, fx, p) {
 // heavy lances and large orbs land the big impacts.
 const PROJ_SCALE = { small: 0.7, standard: 1, heavy: 1.5, large: 1.5 };
 
+// Body scale follows the entities: full size on the big stage,
+// shrinking with docked glyphs so narrow stages keep projectiles
+// proportionate to the lane they fly.
+function projStageScale(aR, bR) {
+  const r = Math.min(Number(aR) || 0, Number(bR) || 0);
+  return Math.max(0.45, Math.min(1, r / 56));
+}
+
 function paintProjectile(refs, ctx, fx, age) {
   const side = fx.side === "blue" ? "blue" : "red";
+  const slots = refs.stage.entities;
+  const stage = projStageScale(slots.intrusion.r, slots.guardian.r);
   const ends = projEnds(refs, side);
   const lane = flightLane(ends.from, ends.to);
   const flight = Number(fx.flight) || FLIGHT_MS.standard;
@@ -2759,7 +2788,7 @@ function paintProjectile(refs, ctx, fx, age) {
   for (let i = 0; i < count; i += 1) {
     const local = age - i * stagger;
     if (local < 0) continue;
-    paintProjOne(refs, ctx, fx, side, lane, ends, local, flight, i);
+    paintProjOne(refs, ctx, fx, side, lane, ends, local, flight, i, stage);
   }
 }
 
@@ -2769,8 +2798,8 @@ function laneTangent(lane, q) {
   return Math.atan2(p1.y - p0.y, p1.x - p0.x);
 }
 
-function paintProjOne(refs, ctx, fx, side, lane, ends, local, flight, index) {
-  const s = PROJ_SCALE[fx.size] || 1;
+function paintProjOne(refs, ctx, fx, side, lane, ends, local, flight, index, stage) {
+  const s = (PROJ_SCALE[fx.size] || 1) * (Number(stage) || 1);
   const q = local / flight;
   const red = side !== "blue";
   if (fx.fail && !red) {
