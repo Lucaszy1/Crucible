@@ -784,6 +784,15 @@ def run_exercise(
         idle_rounds = 0
         turns_used += 1
         result = run_tool(action.get("tool", ""), action.get("args", {}))
+        # Human provenance rides private action keys into extra event
+        # fields; actions without them log byte-identically to before.
+        provenance = None
+        if isinstance(action, dict) \
+                and action.get("_human_source") in ("voice", "text"):
+            provenance = {
+                "source": action["_human_source"],
+                "transcript": str(action.get("_human_transcript", "")),
+            }
         logged = writer.log(
             actor=getattr(agent, "actor", "unknown"),
             tool=action.get("tool", ""),
@@ -792,6 +801,7 @@ def run_exercise(
             reasoning_summary=action.get("reasoning", ""),
             evidence_refs=action.get("evidence_refs", []),
             sensor_alerts=fresh_alerts or None,
+            extra=provenance,
         )
         if (
             audit == "live"

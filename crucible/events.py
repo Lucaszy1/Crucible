@@ -139,11 +139,14 @@ class EventWriter:
         reasoning_summary: str = "",
         evidence_refs: list | None = None,
         sensor_alerts: list | None = None,
+        extra: dict | None = None,
     ) -> dict:
         """Build, store, and persist the next numbered event.
 
         sensor_alerts attaches the alerts shown to blue on that turn;
         omit it and the event keeps the original spec fields only.
+        extra merges small provenance fields (human source/transcript)
+        into the event; omit it and the bytes stay exactly as before.
         """
         self.count += 1
         event = new_event(
@@ -157,6 +160,9 @@ class EventWriter:
         )
         if sensor_alerts:
             event["sensor_alerts"] = [dict(alert) for alert in sensor_alerts]
+        if extra:
+            for key, value in extra.items():
+                event[key] = value
         self.events.append(event)
         append_event(self.path, event)
         return event
