@@ -52,10 +52,25 @@ function latestFor(slice, actor) {
   return null;
 }
 
-function thoughtText(ev) {
+// Baseten tool-call replies carry no text, so blue's summary is
+// the honest fallback below; real thinking replaces it, labeled.
+const MODEL_CHOSE_RE = /^Model chose [\w-]+\.$/;
+
+// Full bubble text for one event: the reasoning summary, or the
+// event sentence when empty. Blue thinking (Baseten
+// reasoning_content, stored on the event) shows labeled as
+// thinking: alone when the summary is the fallback, after a real
+// summary otherwise. Pure and node-tested; the caller truncates
+// and wires the expander exactly as before.
+export function thoughtText(ev, actor) {
   if (!ev) return "";
   const raw = String(ev.reasoning_summary || "").trim();
-  return raw !== "" ? raw : describeEvent(ev);
+  const base = raw !== "" ? raw : describeEvent(ev);
+  if (actor !== "blue") return base;
+  const thinking = String(ev.thinking || "").trim().replace(/\s+/g, " ");
+  if (thinking === "") return base;
+  if (raw === "" || MODEL_CHOSE_RE.test(raw)) return `Thinking: ${thinking}`;
+  return `${base} Thinking: ${thinking}`;
 }
 
 function thoughtRefs(ev, hosts) {
@@ -113,7 +128,7 @@ function renderPanel(panel, slice, actor, opts, state) {
   if (panel.text.dataset.lastId === id) return;
   panel.text.dataset.lastId = id;
   closeExpander(state, opts);
-  const full = thoughtText(ev);
+  const full = thoughtText(ev, actor);
   const shown = truncateThought(full, THOUGHT_MAX_CHARS);
   panel.text.dataset.full = full;
   panel.root.classList.toggle("cut", shown.cut);

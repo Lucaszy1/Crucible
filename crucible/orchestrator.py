@@ -791,15 +791,23 @@ def run_exercise(
         idle_rounds = 0
         turns_used += 1
         result = run_tool(action.get("tool", ""), action.get("args", {}))
-        # Human provenance rides private action keys into extra event
-        # fields; actions without them log byte-identically to before.
-        provenance = None
+        # Human provenance and blue thinking ride private action keys
+        # into extra event fields; actions without them log
+        # byte-identically to before.
+        extra = None
         if isinstance(action, dict) \
                 and action.get("_human_source") in ("voice", "text"):
-            provenance = {
+            extra = {
                 "source": action["_human_source"],
                 "transcript": str(action.get("_human_transcript", "")),
             }
+        thinking = ""
+        if isinstance(action, dict):
+            thinking = str(action.get("thinking", "") or "").strip()
+        if thinking:
+            if extra is None:
+                extra = {}
+            extra["thinking"] = events.sanitize_reasoning_summary(thinking)
         logged = writer.log(
             actor=(action.get("_actor")
                    if isinstance(action, dict) and action.get("_actor")
@@ -810,7 +818,7 @@ def run_exercise(
             reasoning_summary=action.get("reasoning", ""),
             evidence_refs=action.get("evidence_refs", []),
             sensor_alerts=fresh_alerts or None,
-            extra=provenance,
+            extra=extra,
         )
         if (
             audit == "live"

@@ -51,6 +51,8 @@ treat the 0 as free; check the Baseten invoice for real dollars.
    the scripted baseline with a note.
 3. Tool-call replies also carry `content: null`. Blue's reasoning text
    falls back to `Model chose <tool>.` (existing behavior, no crash).
+   The thinking itself is kept on the event as `thinking` and shown
+   in blue thought bubbles labeled as thinking.
 4. `reasoning_content` is ABSENT (not empty) when reasoning is 0, seen
    with forced `tool_choice`. The client defaults it to `""`.
 5. Tool replies are never cached (`_cacheable` needs text), so every
@@ -93,5 +95,6 @@ were thinking (~140 per turn). All 20 turns returned tool calls
 with `content: null`, so every blue thought bubble showed the
 `Model chose <tool>.` fallback (quirk 3 above, now confirmed at
 exercise scale). Blue still isolated twice on real probing and the
-run ended Contained. The thinking itself is billed but never
-displayed; only red's text replies appeared as real model prose.
+run ended Contained. At the time the thinking itself was billed
+but never displayed; only red's text replies appeared as real
+model prose. Newer runs keep it on the event (see quirk 3).

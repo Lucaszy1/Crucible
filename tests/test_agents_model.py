@@ -19,7 +19,7 @@ from crucible.agents.red import TOOL_SCHEMAS as RED_SCHEMAS
 from crucible.agents.red import _build_messages as red_build_messages
 
 
-def _response(content, tool_calls, finish_reason="stop"):
+def _response(content, tool_calls, finish_reason="stop", reasoning=""):
     calls = []
     for index, (name, args) in enumerate(tool_calls):
         if isinstance(args, dict):
@@ -28,7 +28,8 @@ def _response(content, tool_calls, finish_reason="stop"):
             args_text = args
         func = SimpleNamespace(name=name, arguments=args_text)
         calls.append(SimpleNamespace(id=f"call_{index}", function=func))
-    message = SimpleNamespace(content=content, tool_calls=calls)
+    message = SimpleNamespace(content=content, tool_calls=calls,
+                              reasoning_content=reasoning)
     usage = SimpleNamespace(prompt_tokens=10, completion_tokens=5)
     choice = SimpleNamespace(message=message, finish_reason=finish_reason)
     return SimpleNamespace(choices=[choice], usage=usage)
@@ -131,6 +132,58 @@ def test_blue_valid_call_carries_reasoning(tmp_path, monkeypatch):
     assert action["tool"] == "read_logs"
     assert action["args"]["host"] == "web"
     assert "odd requests" in action["reasoning"]
+
+
+def test_blue_tool_reply_carries_thinking(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    # Baseten tool-call shape: null content, thinking alongside.
+    resp = _response(None, [("read_logs", {"host": "web"})],
+                     reasoning="The sign-in alert looks real, checking logs.")
+    client = _FakeClient(resp)
+    agent = ModelBlue(client=client, exercise_id="ex-think")
+    action = agent.next_action(2, [])
+    assert action["tool"] == "read_logs"
+    assert action["reasoning"] == "Model chose read_logs."
+    assert action["thinking"] == "The sign-in alert looks real, checking logs."
+
+
+def test_blue_without_thinking_has_no_thinking_key(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    resp = _response("Checking web logs for odd requests.",
+                     [("read_logs", {"host": "web"})])
+    agent = ModelBlue(client=_FakeClient(resp), exercise_id="ex-nothink")
+    action = agent.next_action(2, [])
+    assert action.get("thinking", "") == ""
+
+
+def test_blue_thinking_lands_in_event_log(tmp_path, monkeypatch):
+    _isolated_llm(tmp_path, monkeypatch)
+    thought = "The sign-in alert looks real, checking logs first."
+    blue_resp = _response(None, [("read_logs", {"host": "web"})],
+                          reasoning=thought)
+    red_resp = _response("First probe.",
+                         [("scan_host", {"host": "web"})])
+    red = ModelRed(client=_FakeClient(red_resp))
+    blue = ModelBlue(client=_FakeClient(blue_resp),
+                     exercise_id="ex-think-log")
+    monkeypatch.setattr(orchestrator, "run_tool", lambda name, args: {"ok": True})
+    monkeypatch.setattr(tools, "begin_episode",
+                        lambda: {"ok": True, "attempts": 1, "checks": {}})
+    run_path = tmp_path / "thinking.jsonl"
+    result = orchestrator.run_exercise(red, blue, max_turns=4,
+                                       run_path=run_path)
+    blue_events = [event for event in result["events"]
+                   if event["actor"] == "blue"]
+    assert len(blue_events) == 2
+    for event in blue_events:
+        assert event["thinking"] == thought
+        assert event["reasoning_summary"] == "Model chose read_logs."
+    # Thinking never leaks into later prompts: the second blue turn
+    # sees the first turn's event, but its prompt carries no thinking.
+    assert len(blue._client.calls) == 2
+    for call in blue._client.calls:
+        for message in call["messages"]:
+            assert thought not in str(message.get("content", ""))
 
 
 def test_red_passes_default_reasoning_effort(tmp_path, monkeypatch):

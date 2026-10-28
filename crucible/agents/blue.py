@@ -398,4 +398,13 @@ class ModelBlue:
         evidence = _evidence_for(name, args, content, history)
         args.pop("evidence_refs", None)
         reasoning = _common.clean_reasoning(content, f"Model chose {name}.")
-        return {"tool": name, "args": args, "reasoning": reasoning, "evidence_refs": evidence}
+        action = {"tool": name, "args": args, "reasoning": reasoning,
+                  "evidence_refs": evidence}
+        # Baseten tool-call replies carry null content with the
+        # thinking alongside in reasoning_content (llm surfaces it as
+        # "reasoning"). Keep it for the thought bubbles; prompts and
+        # the tool choice never see it.
+        thinking = str((response or {}).get("reasoning", "") or "")
+        if thinking.strip():
+            action["thinking"] = thinking
+        return action

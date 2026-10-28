@@ -1,7 +1,7 @@
 // Thought truncation: sentence, word, short, and single-token cases.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { THOUGHT_MAX_CHARS, truncateThought } from "../dashboard/js/thoughts.js";
+import { THOUGHT_MAX_CHARS, thoughtText, truncateThought } from "../dashboard/js/thoughts.js";
 
 describe("truncateThought", () => {
   it("leaves short text unchanged", () => {
@@ -46,5 +46,53 @@ describe("truncateThought", () => {
 
   it("exposes the margin budget", () => {
     assert.ok(THOUGHT_MAX_CHARS >= 100);
+  });
+});
+
+describe("thoughtText", () => {
+  it("shows blue thinking labeled, dropping the fallback", () => {
+    const ev = {
+      actor: "blue", tool: "read_logs", args: { host: "web" },
+      result: { ok: true },
+      reasoning_summary: "Model chose read_logs.",
+      thinking: "The sign-in alert looks real, checking logs.",
+    };
+    assert.equal(thoughtText(ev, "blue"),
+      "Thinking: The sign-in alert looks real, checking logs.");
+  });
+
+  it("keeps a real blue summary ahead of the thinking", () => {
+    const ev = {
+      actor: "blue", tool: "read_logs", args: { host: "web" },
+      result: { ok: true },
+      reasoning_summary: "Checking web logs for odd requests.",
+      thinking: "The sign-in alert looks real.",
+    };
+    assert.equal(thoughtText(ev, "blue"),
+      "Checking web logs for odd requests. Thinking: The sign-in alert looks real.");
+  });
+
+  it("leaves blue bubbles unchanged without thinking", () => {
+    const ev = {
+      actor: "blue", tool: "read_logs", args: { host: "web" },
+      result: { ok: true },
+      reasoning_summary: "Model chose read_logs.",
+    };
+    assert.equal(thoughtText(ev, "blue"), "Model chose read_logs.");
+  });
+
+  it("ignores thinking on the red side", () => {
+    const ev = {
+      actor: "red", tool: "scan_host", args: { host: "web" },
+      result: { ok: true },
+      reasoning_summary: "First probe.",
+      thinking: "Should never show.",
+    };
+    assert.equal(thoughtText(ev, "red"), "First probe.");
+  });
+
+  it("falls back to the event sentence when empty", () => {
+    const ev = { actor: "blue", tool: "wait", args: {}, result: { ok: true } };
+    assert.equal(thoughtText(ev, "blue"), "Blue waited this round.");
   });
 });
