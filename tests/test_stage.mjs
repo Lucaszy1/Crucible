@@ -4,11 +4,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  applyCamera, auditorChrome, blueLine, calloutForEvent, dollyTarget, FINISH_PACES, finishPlan,
+  applyCamera, auditorChrome, blueLine, calloutForEvent, clashCrop, dollyTarget, FINISH_PACES, finishPlan,
   flashHold, FLIGHT_MS, flightLaneRect, frameBudget, frameP95, flightLane, fxForEvent,
   guardianPulse, hitstopFor, initStage, intrusionLevel, laneFeed, lanePoint, LOW_STREAK,
   moveSpanMs, paintGuardian,
-  paintIntrusion, projBody, redLine, renderStageStatic, setStageActive, setStageReduced,
+  paintIntrusion, projBody, redLine, renderStageStatic, renderStageThumb, setStageActive, setStageReduced,
   stageLayout, stageNotify, stageWash, stepCamera, trailSpan,
 } from "../dashboard/js/stage.js";
 import { arenaGeometry, classicLayout, normalizeLayout } from "../dashboard/js/layout.js";
@@ -711,5 +711,62 @@ describe("smoothness", () => {
     assert.equal(low, false);
     const last = frameBudget(avg, low, 50, slow);
     assert.equal(last.low, true);
+  });
+});
+
+describe("clashCrop", () => {
+  const red = { x: 110, y: 150, r: 45 };
+  const blue = { x: 370, y: 150, r: 45 };
+
+  it("holds both entities and the lane in 16:9 inside the frame", () => {
+    const crop = clashCrop(red, blue, 480, 270);
+    assert.ok(crop.sx >= 0 && crop.sy >= 0, JSON.stringify(crop));
+    assert.ok(crop.sx + crop.sw <= 480 && crop.sy + crop.sh <= 270, JSON.stringify(crop));
+    assert.ok(Math.abs(crop.sw / crop.sh - 16 / 9) < 0.05, JSON.stringify(crop));
+    for (const p of [red, blue]) {
+      assert.ok(p.x >= crop.sx && p.x <= crop.sx + crop.sw, "entity x inside");
+      assert.ok(p.y >= crop.sy && p.y <= crop.sy + crop.sh, "entity y inside");
+    }
+    assert.ok(crop.sy < Math.min(red.y, blue.y) - 20, "lane apex has headroom");
+    assert.ok(crop.sw < 480 && crop.sh < 270, "tighter than the full frame");
+  });
+
+  it("clamps to the frame when slots are missing", () => {
+    const crop = clashCrop(null, null, 480, 270);
+    assert.ok(crop.sx >= 0 && crop.sy >= 0, JSON.stringify(crop));
+    assert.ok(crop.sx + crop.sw <= 480 && crop.sy + crop.sh <= 270, JSON.stringify(crop));
+    assert.ok(Math.abs(crop.sw / crop.sh - 16 / 9) < 0.05, JSON.stringify(crop));
+  });
+});
+
+describe("renderStageThumb", () => {
+  function fakeCanvas() {
+    return { clientWidth: 480, clientHeight: 270, width: 0, height: 0, getContext: () => null };
+  }
+
+  it("stages the poster event mid-flight and crops the clash", () => {
+    const lane = [
+      ev("r1", "red", "try_credential", { host: "web" }, { ok: true, host: "web", authenticated: true }),
+      ev("b1", "blue", "isolate_host", { host: "web" }, { ok: true, host: "web" }),
+    ];
+    const refs = renderStageThumb(fakeCanvas(), lane, 2, { layout: classicLayout() });
+    const kinds = refs.fx.map((f) => f.kind);
+    assert.ok(kinds.includes("orb"), `poster orb staged: ${kinds}`);
+    const orb = refs.fx.find((f) => f.kind === "orb");
+    const age = refs.clock - orb.t0;
+    assert.ok(age > 0 && age < orb.flight, `frozen mid-flight: age ${age}`);
+    const crop = refs.thumbCrop;
+    assert.ok(crop.sx >= 0 && crop.sy >= 0, JSON.stringify(crop));
+    assert.ok(crop.sx + crop.sw <= 800 && crop.sy + crop.sh <= 450, JSON.stringify(crop));
+    assert.ok(Math.abs(crop.sw / crop.sh - 16 / 9) < 0.05, JSON.stringify(crop));
+    const ents = refs.stage.entities;
+    assert.ok(ents.intrusion.r >= 30 && ents.guardian.r >= 30, "wide composition, not stacked specks");
+  });
+
+  it("renders a quiet still when the poster is not a move", () => {
+    const lane = [ev("s1", "system", "clean_start_check", {}, { ok: true })];
+    const refs = renderStageThumb(fakeCanvas(), lane, 1, { layout: classicLayout() });
+    assert.equal(refs.fx.length, 0);
+    assert.ok(refs.thumbCrop.sw > 0 && refs.thumbCrop.sh > 0);
   });
 });

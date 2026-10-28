@@ -49,6 +49,12 @@ function makeEl(tag) {
       next.parentNode = this;
       return prev;
     },
+    removeChild(kid) {
+      const at = this.children.indexOf(kid);
+      if (at >= 0) this.children.splice(at, 1);
+      kid.parentNode = null;
+      return kid;
+    },
     setAttribute(key, value) {
       this[key] = value;
     },
@@ -94,6 +100,41 @@ function installDom() {
   delete globalThis.IntersectionObserver;
   delete globalThis.sessionStorage;
   delete globalThis.Image;
+}
+
+// Controllable visibility: observers register here, tests fire
+// enter/exit per target to simulate scrolling.
+const ioWatchers = new Map();
+
+function installIO() {
+  ioWatchers.clear();
+  globalThis.IntersectionObserver = class {
+    constructor(cb) {
+      this.cb = cb;
+    }
+    observe(target) {
+      let list = ioWatchers.get(target);
+      if (!list) {
+        list = [];
+        ioWatchers.set(target, list);
+      }
+      list.push(this);
+    }
+    unobserve(target) {
+      const list = ioWatchers.get(target) || [];
+      ioWatchers.set(target, list.filter((o) => o !== this));
+    }
+    disconnect() {
+      for (const [target, list] of ioWatchers) {
+        ioWatchers.set(target, list.filter((o) => o !== this));
+      }
+    }
+  };
+}
+
+function fireIO(target, visible) {
+  const list = ioWatchers.get(target) || [];
+  for (const o of [...list]) o.cb([{ isIntersecting: visible, target }]);
 }
 
 function restoreDom() {
@@ -207,9 +248,8 @@ describe("lazy lobby thumbnails", () => {
     }, { onPlay: () => {} }, { art: {}, attackMap: null });
     const syncMs = performance.now() - t0;
     assert.ok(syncMs < 50, `sync mount took ${syncMs.toFixed(1)}ms`);
-    assert.equal(stats.canvas, 6, "only featured cards own canvases");
     assert.equal(stats.getContext, 0, "no paint context touched during mount");
-    assert.equal(thumbPendingCount(), 6, "featured frames queue for idle");
+    assert.equal(thumbPendingCount(), 100, "every card queues for idle");
     assert.equal(archiveRoot.children.length, 94, "archive still lists every run");
   });
 
@@ -224,23 +264,76 @@ describe("lazy lobby thumbnails", () => {
       loading: false,
     }, { onPlay: () => {} }, { art: {}, attackMap: null });
     assert.equal(scheduled.length, 1, "one idle callback queued");
-    const seen = new Set([thumbPendingCount()]);
+    let pending = thumbPendingCount();
+    assert.equal(pending, 100);
     const slices = [];
     while (scheduled.length > 0) {
       const run = scheduled.shift();
       const t0 = performance.now();
       run();
       slices.push(performance.now() - t0);
-      seen.add(thumbPendingCount());
+      const next = thumbPendingCount();
+      assert.equal(next, pending - 1, "one card per slice");
+      pending = next;
     }
-    assert.deepEqual([...seen].sort((a, b) => a - b), [0, 1, 2, 3, 4, 5, 6]);
+    assert.equal(pending, 0);
     for (const ms of slices) assert.ok(ms < 50, `slice took ${ms.toFixed(1)}ms`);
-    assert.equal(thumbCacheSize(), 6);
-    assert.equal(attachedCanvases(featuredRoot, archiveRoot), 6);
-    assert.ok(6 + thumbCanvasCount() < 10, "attached plus scheduler canvases stay capped");
+    assert.equal(thumbCacheSize(), BITMAP_CACHE_MAX, "memory holds the last 60");
+    assert.equal(attachedCanvases(featuredRoot, archiveRoot), 100, "no observer, every row stays mounted");
+    assert.equal(thumbCanvasCount(), 2, "one shared render canvas plus one snap canvas");
   });
 
-  it("upgrades one archive row on hover without touching the rest", () => {
+  it("renders archive rows only while on screen", () => {
+    installIO();
+    const cards = [];
+    for (let i = 0; i < 20; i += 1) cards.push(card(i));
+    const featuredRoot = makeEl("div");
+    const archiveRoot = makeEl("div");
+    renderLobby(featuredRoot, archiveRoot, makeEl("span"), {
+      cards,
+      featuredIds: cards.slice(0, 2).map((c) => c.id),
+      loading: false,
+    }, { onPlay: () => {} }, { art: {}, attackMap: null });
+    assert.equal(attachedCanvases(featuredRoot, archiveRoot), 2, "off-screen rows hold the glyph only");
+    assert.equal(thumbPendingCount(), 2, "featured jobs queue unseen");
+    // Hover mounts the canvas early, but nothing renders until
+    // the row itself is on screen.
+    const row = archiveRoot.children[0];
+    row._listeners.mouseenter[0]();
+    const findCanvas = (root) => {
+      const walk = (el) => {
+        if (el.tagName === "CANVAS") return el;
+        for (const kid of el.children || []) {
+          const hit = walk(kid);
+          if (hit) return hit;
+        }
+        return null;
+      };
+      return walk(root);
+    };
+    const early = findCanvas(row);
+    assert.ok(early, "hover mounts the canvas");
+    assert.equal(scheduled.length, 0, "no render queued off screen");
+    fireIO(row, true);
+    assert.equal(findCanvas(row), early, "entry does not remount");
+    fireIO(early, true);
+    assert.equal(scheduled.length, 1, "entry queues one render");
+    drainAll(scheduled);
+    assert.equal(thumbPendingCount(), 2, "featured jobs stay queued unseen");
+    assert.equal(thumbCacheSize(), 1);
+    // Scrolling away releases the canvas; coming back blits the
+    // cached bitmap without queueing a render.
+    fireIO(row, false);
+    assert.equal(findCanvas(row), null, "exit releases the canvas");
+    assert.equal(attachedCanvases(featuredRoot, archiveRoot), 2);
+    fireIO(row, true);
+    assert.ok(findCanvas(row), "re-entry remounts");
+    assert.equal(scheduled.length, 0, "memory hit renders nothing");
+    assert.equal(thumbPendingCount(), 2);
+  });
+
+  it("releases canvases for rows scrolled off screen", () => {
+    installIO();
     const cards = [];
     for (let i = 0; i < 100; i += 1) cards.push(card(i));
     const featuredRoot = makeEl("div");
@@ -250,16 +343,29 @@ describe("lazy lobby thumbnails", () => {
       featuredIds: cards.slice(0, 6).map((c) => c.id),
       loading: false,
     }, { onPlay: () => {} }, { art: {}, attackMap: null });
-    assert.equal(stats.canvas, 6);
-    const row = archiveRoot.children[0];
-    assert.ok(row._listeners.mouseenter, "row arms hover");
-    row._listeners.mouseenter[0]();
-    assert.equal(stats.canvas, 7, "hover mounts exactly one canvas");
-    assert.equal(thumbPendingCount(), 7);
-    row._listeners.mouseenter[0]();
-    assert.equal(stats.canvas, 7, "second hover does not remount");
-    drainAll(scheduled);
-    assert.equal(thumbPendingCount(), 0);
+    const rows = archiveRoot.children.slice(0, 8);
+    const canvases = [];
+    for (const row of rows) {
+      fireIO(row, true);
+      const walk = (el) => {
+        if (el.tagName === "CANVAS") return el;
+        for (const kid of el.children || []) {
+          const hit = walk(kid);
+          if (hit) return hit;
+        }
+        return null;
+      };
+      const canvas = walk(row);
+      canvases.push(canvas);
+      fireIO(canvas, true);
+    }
+    const slices = drainAll(scheduled);
+    for (const ms of slices) assert.ok(ms < 50, `slice took ${ms.toFixed(1)}ms`);
+    assert.equal(thumbCacheSize(), 8);
+    assert.equal(attachedCanvases(featuredRoot, archiveRoot), 14);
+    for (const row of rows.slice(0, 7)) fireIO(row, false);
+    assert.equal(attachedCanvases(featuredRoot, archiveRoot), 7, "exits release all but one");
+    assert.equal(thumbCacheSize(), 8, "bitmaps stay cached while canvases go");
     const alive = attachedCanvases(featuredRoot, archiveRoot) + thumbCanvasCount();
     assert.ok(alive < 10, `${alive} canvases alive`);
   });
@@ -312,10 +418,11 @@ describe("lazy lobby thumbnails", () => {
   });
 
   it("caps the bitmap cache with LRU eviction", () => {
-    for (let i = 0; i < 30; i += 1) {
+    assert.equal(BITMAP_CACHE_MAX, 60);
+    for (let i = 0; i < 70; i += 1) {
       mountArenaThumb(makeEl("canvas"), card(i), {}, {});
     }
-    assert.equal(thumbPendingCount(), 30);
+    assert.equal(thumbPendingCount(), 70);
     drainAll(scheduled);
     assert.equal(thumbPendingCount(), 0);
     assert.equal(thumbCacheSize(), BITMAP_CACHE_MAX);
@@ -339,9 +446,10 @@ describe("lazy lobby thumbnails", () => {
     };
     const model = card(0);
     mountArenaThumb(makeEl("canvas"), model, {}, { featured: true });
+    mountArenaThumb(makeEl("canvas"), card(1), {}, {});
     drainAll(scheduled);
     await new Promise((resolve) => setTimeout(resolve, 10));
-    assert.equal(store.size, 1, "featured render writes one session entry");
+    assert.equal(store.size, 2, "featured and archive renders persist");
     const [[key, raw]] = [...store.entries()];
     assert.ok(key.includes(model.id), key);
     assert.equal(JSON.parse(raw).moves, model.moves);
@@ -355,5 +463,18 @@ describe("lazy lobby thumbnails", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(decoded, 1);
     assert.equal(thumbCacheSize(), 1);
+  });
+
+  it("survives sessionStorage quota failures", () => {
+    globalThis.sessionStorage = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("quota exceeded");
+      },
+    };
+    mountArenaThumb(makeEl("canvas"), card(0), {}, {});
+    drainAll(scheduled);
+    assert.equal(thumbPendingCount(), 0);
+    assert.equal(thumbCacheSize(), 1, "memory holds what the session refused");
   });
 });
