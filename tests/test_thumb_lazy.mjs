@@ -477,6 +477,52 @@ describe("lazy lobby thumbnails", () => {
     assert.equal(thumbCacheSize(), 1);
   });
 
+  it("repaints frames mounted before art arrives", () => {
+    installIO();
+    const model = card(0);
+    const canvas = makeEl("canvas");
+    mountArenaThumb(canvas, model, {}, { cursor: 2 });
+    assert.equal(thumbPendingCount(), 1);
+    // Art arrives: the cache turns over and drops the queued job.
+    clearArenaThumbCache();
+    assert.equal(thumbPendingCount(), 0);
+    fireIO(canvas, true);
+    assert.equal(thumbPendingCount(), 1, "visibility re-queues the dropped job");
+    drainAll(scheduled);
+    assert.equal(thumbCacheSize(), 1);
+    assert.equal(canvas._thumbKey, "", "card blitted and released");
+  });
+
+  it("paints the frame straight onto the card when the snapshot is lost", async () => {
+    let release = null;
+    globalThis.createImageBitmap = () => new Promise((resolve) => {
+      release = resolve;
+    });
+    try {
+      const model = card(0);
+      const canvas = makeEl("canvas");
+      let paints = 0;
+      mountArenaThumb(canvas, model, {}, {});
+      const direct = canvas._thumbPaint;
+      canvas._thumbPaint = () => {
+        paints += 1;
+        return direct();
+      };
+      assert.equal(thumbPendingCount(), 1);
+      drainAll(scheduled);
+      assert.ok(release, "render waits on the bitmap");
+      // Art arrives while the render flies: the bitmap lands stale.
+      clearArenaThumbCache();
+      release({ stub: true });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.equal(thumbCacheSize(), 0, "stale bitmap dropped");
+      assert.equal(paints, 1, "frame painted straight onto the card");
+      assert.equal(canvas._thumbKey, "", "card released");
+    } finally {
+      delete globalThis.createImageBitmap;
+    }
+  });
+
   it("survives sessionStorage quota failures", () => {
     globalThis.sessionStorage = {
       getItem: () => null,

@@ -606,7 +606,17 @@ function queueArenaThumb(canvas, card, env, featured, cursor, key) {
         if (entry.isIntersecting) {
           seen.unobserve(canvas);
           const live = thumbJobs.get(key);
-          if (live) live.visible = true;
+          if (live) {
+            live.visible = true;
+          } else if (!(thumbInFlight && thumbInFlight.key === key) &&
+              !cacheGet(key, job.moves)) {
+            // The cache generation turned over after this card
+            // queued (art arrived): re-queue it instead of waiting
+            // on a job that no longer exists.
+            job.gen = bitmapGen;
+            job.visible = true;
+            thumbJobs.set(key, job);
+          }
           requestThumbIdle();
         }
       }
@@ -688,6 +698,12 @@ function finishThumbJob(job, bmp, url) {
   const entry = job.gen === bitmapGen ? cacheGet(job.key, job.moves) : null;
   for (const target of job.targets) {
     if (entry) blitThumb(target, entry);
+    else if (target && typeof target._thumbPaint === "function") {
+      // Snapshots fail where the canvas is tainted (file art on
+      // file hosting) or the bitmap lands stale: paint the frame
+      // straight onto the card instead of leaving it empty.
+      try { target._thumbPaint(); } catch { /* stays empty */ }
+    }
     if (target && target._thumbKey === job.key) target._thumbKey = "";
   }
   job.targets.clear();

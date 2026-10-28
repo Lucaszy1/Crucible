@@ -1523,13 +1523,21 @@ async function boot() {
   if (els.classicBox) els.classicBox.checked = store.classic;
   loadStageArt("/assets/art/").then((art) => {
     store.stageArt = art || {};
-    if (stageRefs) {
-      setStageArt(stageRefs, store.stageArt);
-      render(false);
-    }
-    // Thumbnails painted before the art arrived repaint textured.
+    // render() clears stage transients, so note a running finish
+    // before the repaint below wipes it.
+    const wipedFinish = Boolean(stageRefs && stageRefs.finish);
+    if (stageRefs) setStageArt(stageRefs, store.stageArt);
+    // Thumbnails and story frames painted before the art arrived
+    // repaint textured: the lobby remounts, and the story key
+    // reset rebuilds the moment frames on the next render.
     clearArenaThumbCache();
+    store.storyKey = "";
     paintLobby();
+    render(false);
+    // Art arriving mid-finish wipes the finish before its card
+    // opens (a fresh deep link at the end lands here): re-arm the
+    // end card when that happens.
+    if (wipedFinish && !endCardVisible(endEls())) showEndCardFor("replay");
   });
   try {
     store.attackMap = await fetchAttackMap();

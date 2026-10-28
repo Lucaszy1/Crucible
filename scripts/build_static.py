@@ -614,43 +614,14 @@ LEARN_PATCHES = [
      "  }"),
 ]
 
-THUMB_PATCHES = [
-    ("          const live = thumbJobs.get(key);\n"
-     "          if (live) live.visible = true;\n"
-     "          requestThumbIdle();",
-     "          const live = thumbJobs.get(key);\n"
-     "          if (live) {\n"
-     "            live.visible = true;\n"
-     "          } else if (!(thumbInFlight && thumbInFlight.key === key) &&\n"
-     "              !cacheGet(key, job.moves)) {\n"
-     "            // The cache generation turned over after this card\n"
-     "            // queued (art arrived): re-queue it instead of waiting\n"
-     "            // on a job that no longer exists.\n"
-     "            job.gen = bitmapGen;\n"
-     "            job.visible = true;\n"
-     "            thumbJobs.set(key, job);\n"
-     "          }\n"
-     "          requestThumbIdle();"),
-    ("  const entry = job.gen === bitmapGen ? cacheGet(job.key, job.moves) : null;\n"
-     "  for (const target of job.targets) {\n"
-     "    if (entry) blitThumb(target, entry);\n",
-     "  const entry = job.gen === bitmapGen ? cacheGet(job.key, job.moves) : null;\n"
-     "  for (const target of job.targets) {\n"
-     "    if (entry) blitThumb(target, entry);\n"
-     "    else if (typeof window !== \"undefined\" && window.CRUCIBLE_STATIC &&\n"
-     "        target && typeof target._thumbPaint === \"function\") {\n"
-     "      // Snapshots fail where the canvas is tainted (file art on\n"
-     "      // file hosting): paint the frame straight onto the card.\n"
-     "      try { target._thumbPaint(); } catch { /* stays empty */ }\n"
-     "    }\n"),
-]
-
+# thumbnail.js needs no static patches: the live code re-queues
+# jobs dropped by the art turnover and paints frames straight
+# onto cards when snapshots fail, which covers file hosting too.
 MODULE_PATCHES = {
     "app": APP_PATCHES,
     "commandbar": COMMANDBAR_PATCHES,
     "learn": LEARN_PATCHES,
     "lobby": LOBBY_PATCHES,
-    "thumbnail": THUMB_PATCHES,
 }
 
 
