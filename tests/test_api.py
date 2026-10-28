@@ -8,6 +8,7 @@ calls are needed.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import threading
 import time
@@ -199,6 +200,25 @@ def test_start_with_fake_runner_streams_live_events(client, monkeypatch):
 def test_start_rejects_bad_agents_value(client):
     res = client.post("/api/exercise/start", json={"agents": "rogue"})
     assert res.status_code == 422
+
+
+def test_start_mints_unique_minute_stamped_ids(client, monkeypatch, tmp_runs):
+    def fake(agents, exercise_id, run_path, publish, scenario_key="classic"):
+        run_path.write_text("{}\n")
+        return {"events": [], "score": {"outcome": "stalemate"},
+                "run_path": str(run_path), "exercise_cost": 0.0,
+                "spend_cap_hit": False}
+
+    monkeypatch.setattr(api, "_run_live_exercise", fake)
+    first = client.post("/api/exercise/start",
+                        json={"agents": "scripted"}).json()
+    assert re.fullmatch(r"exercise-\d{8}T\d{4}", first["exercise_id"])
+    assert _wait_idle(client)
+    second = client.post("/api/exercise/start",
+                         json={"agents": "scripted"}).json()
+    assert second["exercise_id"] != first["exercise_id"]
+    assert second["exercise_id"].startswith(first["exercise_id"])
+    assert _wait_idle(client)
 
 
 def test_start_model_open_needs_both_keys(client, monkeypatch):

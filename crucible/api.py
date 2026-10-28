@@ -578,8 +578,13 @@ def start_exercise(body: ExerciseStart) -> dict:
                 detail="exercise_id may only hold letters, digits, dot, dash, underscore",
             )
     else:
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M")
         exercise_id = f"exercise-{stamp}"
+        stem = exercise_id
+        suffix = 2
+        while (_runs_dir() / f"{exercise_id}.jsonl").exists():
+            exercise_id = f"{stem}-{suffix}"
+            suffix += 1
 
     warning = None
     if agents in ("model", "ai_with_override", "model_open"):

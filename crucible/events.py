@@ -76,7 +76,7 @@ def validate_event(event: dict) -> dict:
 
 def new_run_path(exercise_id: str | None = None) -> Path:
     """Return a fresh jsonl path under runs/ for one exercise."""
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M")
     name = exercise_id or f"exercise-{stamp}"
     if not name.endswith(".jsonl"):
         name += ".jsonl"
