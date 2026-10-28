@@ -57,7 +57,7 @@ flowchart LR
 | Blue team, open-weights variant | Muse Spark Open (`meta-models/muse-spark-open-1026`) on Baseten |
 | Auditor and referee | Muse Wonder (`muse-wonder-1.0`) |
 | Voice takeover transcription | Muse Voice Transcribe (`muse-voice-transcribe-1.0`) |
-| Dashboard art | Muse Image (`muse-image-1.0`, generated at build time) |
+| Dashboard art | Muse Image (`muse-image-1.0`, generated at build time; [provenance](dashboard/assets/art/PROVENANCE.md)) |
 | Dev and bulk runs | Muse Spark contributor (`muse-spark-1.3-contributor`) |
 
 Chat models run through the Meta Model API (`https://api.meta.ai/v1`, OpenAI compatible); the open-weights blue variant runs on Baseten under a separate key. Every model call passes one client wrapper with retries, a disk cache, per-exercise spend logging, and a hard daily spend guard.
@@ -186,17 +186,19 @@ Both held every episode. Open reported later but contained at the same median tu
 
 - Demo video: TBD (link to be added).
 - X post: TBD (link to be added).
-- Screenshots: TBD (`docs/media/` shot 1 and shot 2, or one GIF, to be added).
+- Screenshots: [opening](dashboard/screenshots/opening.png), [lobby](dashboard/screenshots/lobby.png), [mid-exercise](dashboard/screenshots/mid-exercise.png), [end-held](dashboard/screenshots/end-held.png).
 
 ## What was built during the hackathon
 
-From git history: 197 commits, Oct 26 11:34 PT (initial commit) through Oct 27 17:14 PT (latest at time of writing), all inside the event window so far.
+From git history: 265 commits, Oct 26 11:34 PT (initial commit) through Oct 28 (latest at time of writing), all inside the event window so far. Per-day counts use author dates in PT: 123 on Oct 26, 128 on Oct 27, 14 on Oct 28. Every item below maps to commits in this repo between those timestamps; verify with `git log --format=%ad --date=short | sort | uniq -c` and `git log --reverse --format="%ad %s" --date=iso`.
 
 Oct 26, 123 commits. Repo skeleton, PRD and build spec, model client with cache and spend guard, Docker sandbox growing from 3 to 4 toy hosts (web, app, db, workstation), allowlisted tools, event schema, orchestrator turn loop and scoring, scripted baselines, model agents with tool calling, batch runner, API backend plus dashboard v1, auditor with live judging and an eval harness, referee with playbook memory and campaigns, then the contamination diagnosis and the per-episode log scoping fix.
 
-Oct 27, 74 commits. Arena and canvas dashboard scenes, removal of the no-effect block tool, asset inventory, deterministic sensor alerts with an on/off flag, intrusion-conditional scoring, the controlled benchmark harness, Baseten open-model blue with effort probes, the scenario generator with simulator proof and train/held-out seeds, the config-driven toy host image with compose renderer and parity harness, frozen playbooks, Stage 3 prep (paired seeds, scrub hardening, runbook, merge and suspicion checks), and voice takeover (command parser, transcribe client with a verified live probe, human blue mode, takeover routes).
+Oct 27, 128 commits. Arena rebuilt as a canvas scene driven by real events; asset inventory, deterministic sensor alerts with an on/off flag, intrusion-conditional scoring, and the controlled benchmark harness; dashboard show release with lobby and opening slate; Baseten open-model blue with effort probes; scenario generator with simulator, train/held-out seeds, and design docs; config-driven toyhost image, compose renderer, and parity harness with hermetic tests; scenario layouts wired through events, lobby, arena, and map; judge-first lobby with canvas thumbnails and live exercises on picked scenarios; generated cinematic art plus the cinematic stage renderer (lanes, entities, clash orb, beams, callouts); bench pairing, freeze, and audit cells with Stage 3 scripts and runbook; voice takeover (command parser, transcribe client, human blue, routes, verified live probe); sample exercise log; campaign and sensor results write-ups, README headline results, MIT license, and docs index; Stage 3 replan to solver red with the frozen 8-rule playbook; sensor fixes on generated nets; submission checklist; evening show-release push (story tab, learning tab, thumbnails, finish plans).
 
-TODO: review this timeline against the organizers' answer about the Oct 26 start before submitting, and confirm every listed item counts as event work.
+Oct 28, 14 commits. Arena melt finish (dissolve into code glyphs, white-hot peel, melt cloud); Stage 3 corrected sensors rerun merged into the report with the void original kept; void-by-name gate marks with per-bench duplicate and spend scoping; --no-cache plumbed to the auditor across bench, single-exercise, and live runs; replayed-verdict note in README and results; live agents built after scenario activation; defender orders logged as human and scored as blue; submission cleanup (checklist, this timeline).
+
+TODO: confirm with the organizers that work from Oct 26 11:34 PT counts as inside the event window before submitting. The history side is verified: the initial commit is the earliest timestamp in the repo, so every listed item is Oct 26 11:34 PT or later.
 
 ## Responsible design
 
