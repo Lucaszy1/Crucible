@@ -51,6 +51,7 @@ CELL_C = "solver-sensors-on-memory-on"
 CELL_BONUS = "solver-sensors-off-memory-on"
 BRIEFED_CELL = "model-briefed-sensors-on-memory-off"
 BRIEFED_LABEL = "briefed-red-vs-Spark-Open"
+BRIEFED_SPARK_LABEL = "briefed-red-vs-Spark"
 
 # Benches whose sensors-on episodes are void: the collector bug kept
 # every lookup missing on generated nets (fixed in 1224db4).
@@ -524,6 +525,28 @@ def render_markdown(payload: dict) -> str:
                      f"{_num(cell['median_detection_delay'])}, med relevant "
                      f"{_num(cell['median_relevant_delay'])}, med contain "
                      f"{_num(cell['median_time_to_contain'])}.")
+    parity = payload.get("parity")
+    if parity is not None:
+        shared_n = parity["same_networks"]["shared_n"]
+        lines += ["",
+                  "## Open-weight parity (briefed red, Open vs Spark blue)",
+                  "",
+                  "| blue | n | same nets | intrusions | contained | "
+                  "secret reads | med delay | med relevant | med contain | "
+                  "downtime | downtime cont | cost | red fb | blue fb |",
+                  "|------|---|-----------|------------|-----------|"
+                  "--------------|-----------|--------------|-------------|"
+                  "----------|---------------|------|--------|---------|"]
+        lines.append(_parity_row("Open", parity["open"], shared_n))
+        lines.append(_parity_row("Spark", parity["spark"], shared_n))
+        lines += ["",
+                  "Same nets reads shared seeds over arm episodes; med "
+                  "delay is the median first-report delay, med relevant "
+                  "the median relevant delay; downtime is the mean over "
+                  "all episodes, downtime cont the mean over contained "
+                  "episodes; red/blue fb read fallbacks over turns.",
+                  ""]
+        lines += [f"- {sentence}" for sentence in parity["sentences"]]
     lines += ["", "## Claims", ""]
     lines += [f"- {claim}" for claim in payload["claims"]]
     lines += ["", "## Non-claims", ""]
@@ -608,6 +631,222 @@ def build_claims(comparisons: list, cells: dict, reference: dict,
     return claims
 
 
+def _scenario_seeds(bench_dir: Path, key: str) -> list:
+    """Sorted scenario seeds for one cell, as strings."""
+    seeds = []
+    for row in _csv_rows(bench_dir):
+        if row.get("cell") != key:
+            continue
+        seed = (row.get("scenario_seed") or "").strip()
+        if seed:
+            seeds.append(seed)
+    return sorted(set(seeds), key=lambda value: (len(value), value))
+
+
+def _lower_wins(open_val, spark_val, noun: str) -> str:
+    """Neutral winner phrase for lower-is-better metrics."""
+    if open_val is None and spark_val is None:
+        return "neither reported"
+    if open_val is None:
+        return "Spark reported, Open did not"
+    if spark_val is None:
+        return "Open reported, Spark did not"
+    if open_val == spark_val:
+        return "tied"
+    if open_val < spark_val:
+        return f"Open {noun}"
+    return f"Spark {noun}"
+
+
+def _higher_wins(open_val, spark_val, noun: str) -> str:
+    """Neutral winner phrase for higher-is-better metrics."""
+    if open_val is None and spark_val is None:
+        return "neither applies"
+    if open_val is None:
+        return "Spark applies, Open n/a"
+    if spark_val is None:
+        return "Open applies, Spark n/a"
+    if open_val == spark_val:
+        return "tied"
+    if open_val > spark_val:
+        return f"Open {noun}"
+    return f"Spark {noun}"
+
+
+def _rate_of(cell: dict, key: str):
+    entry = cell.get(key, {}) or {}
+    if not entry.get("n"):
+        return None
+    return entry.get("rate")
+
+
+def build_parity(open_dir: Path, spark_dir: Path, open_cell: dict,
+                 spark_cell: dict) -> dict:
+    """Compare the two briefed-red runs, Open blue vs Spark blue.
+
+    Returns shared seeds plus neutral per-metric sentences that name
+    whichever arm does better. Makes no parity claim; callers add the
+    disclaimer that pairing is approximate because briefed red
+    re-rolled between benches.
+    """
+    open_seeds = _scenario_seeds(open_dir, BRIEFED_CELL)
+    spark_seeds = _scenario_seeds(spark_dir, BRIEFED_CELL)
+    shared = sorted(set(open_seeds) & set(spark_seeds),
+                    key=lambda value: (len(value), value))
+    return {"open_bench": str(open_dir), "spark_bench": str(spark_dir),
+            "cell": BRIEFED_CELL,
+            "same_networks": {"shared": shared, "shared_n": len(shared),
+                              "open_n": len(open_seeds),
+                              "spark_n": len(spark_seeds),
+                              "open_only": sorted(set(open_seeds)
+                                                  - set(spark_seeds)),
+                              "spark_only": sorted(set(spark_seeds)
+                                                   - set(open_seeds))},
+            "open": open_cell, "spark": spark_cell,
+            "sentences": _parity_sentences(open_cell, spark_cell, shared,
+                                           len(open_seeds),
+                                           len(spark_seeds))}
+
+
+def _seed_span(shared: list) -> str:
+    if not shared:
+        return "none"
+    if len(shared) <= 10:
+        return ", ".join(shared)
+    nums = sorted(int(seed) for seed in shared if seed.isdigit())
+    if nums and nums == list(range(nums[0], nums[0] + len(nums))):
+        return f"{nums[0]}-{nums[-1]} ({len(shared)} seeds)"
+    return f"{len(shared)} seeds"
+
+
+def _parity_sentences(open_cell: dict, spark_cell: dict, shared: list,
+                      open_n: int, spark_n: int) -> list:
+    """Neutral per-metric sentences; each names the better arm or ties."""
+    intr_o = open_cell["intrusion"]
+    intr_s = spark_cell["intrusion"]
+    cont_o = open_cell["contained_after_intrusion"]
+    cont_s = spark_cell["contained_after_intrusion"]
+    sec_o = open_cell["secret_read"]
+    sec_s = spark_cell["secret_read"]
+    if open_n == spark_n:
+        nets = (f"Same networks: {len(shared)} of {open_n} seeds overlap "
+                f"({_seed_span(shared)}).")
+    else:
+        nets = (f"Same networks: {len(shared)} shared "
+                f"({open_n} Open, {spark_n} Spark; {_seed_span(shared)}).")
+    intr = (f"Intrusions: Open {intr_o['hits']}/{intr_o['n']}, Spark "
+            f"{intr_s['hits']}/{intr_s['n']} "
+            f"({_lower_wins(_rate_of(open_cell, 'intrusion'),
+                            _rate_of(spark_cell, 'intrusion'), 'fewer')}).")
+    cont = (f"Containment given intrusion: Open {cont_o['hits']}/"
+            f"{cont_o['n']}, Spark {cont_s['hits']}/{cont_s['n']} "
+            f"({_higher_wins(_rate_of(open_cell,
+                                      'contained_after_intrusion'),
+                             _rate_of(spark_cell,
+                                      'contained_after_intrusion'),
+                             'higher')}).")
+    sec = (f"Secret reads: Open {sec_o['hits']}/{sec_o['n']}, Spark "
+           f"{sec_s['hits']}/{sec_s['n']} "
+           f"({_lower_wins(_rate_of(open_cell, 'secret_read'),
+                           _rate_of(spark_cell, 'secret_read'),
+                           'fewer')}).")
+    delay = (f"Median relevant detection delay: Open "
+             f"{_num(open_cell['median_relevant_delay'])}, Spark "
+             f"{_num(spark_cell['median_relevant_delay'])} events "
+             f"({_lower_wins(open_cell['median_relevant_delay'],
+                             spark_cell['median_relevant_delay'],
+                             'faster')}).")
+    contain = (f"Median time to contain: Open "
+               f"{_num(open_cell['median_time_to_contain'])}, Spark "
+               f"{_num(spark_cell['median_time_to_contain'])} events "
+               f"({_lower_wins(open_cell['median_time_to_contain'],
+                               spark_cell['median_time_to_contain'],
+                               'faster')}).")
+    down = (f"Mean downtime: Open {_num(open_cell['mean_downtime_pct'])}%, "
+            f"Spark {_num(spark_cell['mean_downtime_pct'])}% "
+            f"({_lower_wins(open_cell['mean_downtime_pct'],
+                            spark_cell['mean_downtime_pct'], 'lower')}; "
+            f"contained means Open "
+            f"{_num(open_cell['mean_downtime_contained_pct'])}%, Spark "
+            f"{_num(spark_cell['mean_downtime_contained_pct'])}%).")
+    cost = (f"Cost (Meta): Open ${open_cell['total_cost_usd']:.2f}, Spark "
+            f"${spark_cell['total_cost_usd']:.2f} "
+            f"({_lower_wins(open_cell['total_cost_usd'],
+                            spark_cell['total_cost_usd'], 'lower')}).")
+    census_o = open_cell.get("fallback_census") or {}
+    census_s = spark_cell.get("fallback_census") or {}
+    fall = (f"Baseline fallbacks: red Open {census_o.get('red_fallbacks', 0)}"
+            f" of {census_o.get('red_turns', 0)}, Spark "
+            f"{census_s.get('red_fallbacks', 0)} of "
+            f"{census_s.get('red_turns', 0)}; blue Open "
+            f"{census_o.get('blue_fallbacks', 0)} of "
+            f"{census_o.get('blue_turns', 0)}, Spark "
+            f"{census_s.get('blue_fallbacks', 0)} of "
+            f"{census_s.get('blue_turns', 0)}.")
+    note = (f"Descriptive only at n={open_cell['n']} Open and "
+            f"n={spark_cell['n']} Spark; briefed red re-rolled between "
+            f"benches, so pairing is approximate. This section compares "
+            f"the two runs; it does not conclude parity.")
+    return [nets, intr, cont, sec, delay, contain, down, cost, fall, note]
+
+
+def _parity_row(label: str, cell: dict, shared_n: int) -> str:
+    intr = cell["intrusion"]
+    cont = cell["contained_after_intrusion"]
+    sec = cell["secret_read"]
+    census = cell.get("fallback_census") or {}
+    return (
+        f"| {label} | {cell['n']} | {shared_n}/{cell['n']} "
+        f"| {intr['hits']}/{intr['n']} "
+        f"| {cont['hits']}/{cont['n']} "
+        f"| {sec['hits']}/{sec['n']} "
+        f"| {_num(cell['median_detection_delay'])} "
+        f"| {_num(cell['median_relevant_delay'])} "
+        f"| {_num(cell['median_time_to_contain'])} "
+        f"| {_num(cell['mean_downtime_pct'])}% "
+        f"| {_num(cell['mean_downtime_contained_pct'])}% "
+        f"| ${cell['total_cost_usd']:.2f} "
+        f"| {census.get('red_fallbacks', 0)}/{census.get('red_turns', 0)} "
+        f"| {census.get('blue_fallbacks', 0)}/"
+        f"{census.get('blue_turns', 0)} |")
+
+
+def build_parity_claims(parity: dict) -> list:
+    """Short neutral claims for the parity runs (no parity conclusion)."""
+    open_cell = parity["open"]
+    spark_cell = parity["spark"]
+    shared_n = parity["same_networks"]["shared_n"]
+    intr_o = open_cell["intrusion"]
+    intr_s = spark_cell["intrusion"]
+    cont_o = open_cell["contained_after_intrusion"]
+    cont_s = spark_cell["contained_after_intrusion"]
+    sec_o = open_cell["secret_read"]
+    sec_s = spark_cell["secret_read"]
+    return [
+        f"Briefed-red blue comparison on {shared_n} shared networks "
+        f"(descriptive only): Open intrusions {intr_o['hits']}/"
+        f"{intr_o['n']}, Spark {intr_s['hits']}/{intr_s['n']}; "
+        f"containment Open {cont_o['hits']}/{cont_o['n']}, Spark "
+        f"{cont_s['hits']}/{cont_s['n']}; secret reads Open "
+        f"{sec_o['hits']}/{sec_o['n']}, Spark {sec_s['hits']}/"
+        f"{sec_s['n']}.",
+        f"Briefed-red delays and cost: median relevant delay Open "
+        f"{_num(open_cell['median_relevant_delay'])} vs Spark "
+        f"{_num(spark_cell['median_relevant_delay'])}, median time to "
+        f"contain Open {_num(open_cell['median_time_to_contain'])} vs "
+        f"Spark {_num(spark_cell['median_time_to_contain'])}, cost Open "
+        f"${open_cell['total_cost_usd']:.2f} vs Spark "
+        f"${spark_cell['total_cost_usd']:.2f}.",
+    ]
+
+
+PARITY_NON_CLAIM = (
+    "The Open-vs-Spark blue comparison pairs across benches by scenario; "
+    "briefed red re-rolled between benches, so pairing is approximate and "
+    "descriptive only at n=20 per arm."
+)
+
+
 # Verified by timestamp attribution of runs/spend.jsonl: 14 cached
 # entries, all muse-wonder-1.0 auditor calls during the rerun, zero
 # for blue, red, or referee.
@@ -658,6 +897,10 @@ def parse_args(argv=None):
     parser.add_argument("--xcheck", default="runs/bench-stage3-xcheck")
     parser.add_argument("--briefed",
                         default="runs/bench-stage3-briefed-heldout")
+    parser.add_argument("--briefed-spark",
+                        default="runs/bench-stage3-briefed-heldout-blue-spark",
+                        help="Spark-blue repeat of the briefed held-out bench; "
+                        "the parity section is skipped quietly when missing")
     parser.add_argument("--frozen",
                         default="runs/stage3/frozen-playbook.json")
     parser.add_argument("--out-md", default="docs/STAGE3_RESULTS.md")
@@ -726,22 +969,48 @@ def main(argv=None) -> int:
                 briefed, episodes)
             cell["fallback_census"] = _fallback_census(briefed, episodes)
             reference[BRIEFED_LABEL] = cell
+    briefed_spark = Path(args.briefed_spark)
+    if (briefed_spark / "summary.csv").exists():
+        cell = summarize_cell(briefed_spark, BRIEFED_CELL)
+        if cell["n"]:
+            episodes = [row.get("episode", "") for row in
+                        _csv_rows(briefed_spark)
+                        if row.get("cell") == BRIEFED_CELL]
+            cell["baseten_tokens"] = _briefed_baseten_tokens(
+                briefed_spark, episodes)
+            cell["fallback_census"] = _fallback_census(
+                briefed_spark, episodes)
+            reference[BRIEFED_SPARK_LABEL] = cell
+    benches = {"heldout": str(heldout), "sensors": str(sensors),
+               "noisyref": str(noisyref), "xcheck": str(xcheck),
+               "briefed": str(briefed)}
+    parity = None
+    open_cell = reference.get(BRIEFED_LABEL)
+    spark_cell = reference.get(BRIEFED_SPARK_LABEL)
+    if open_cell is not None and spark_cell is not None:
+        parity = build_parity(briefed, briefed_spark, open_cell, spark_cell)
+        benches["briefed_spark"] = str(briefed_spark)
+    claims = build_claims(comparisons, cells, reference, void)
+    non_claims = list(NON_CLAIMS)
+    if parity is not None:
+        claims += build_parity_claims(parity)
+        non_claims.append(PARITY_NON_CLAIM)
+    claims += [REPLAY_NOTE]
     payload = {
         "stage": 3,
         "generated": datetime.now(timezone.utc).isoformat(),
         "frozen_sha256": hashlib.sha256(
             frozen.read_bytes()).hexdigest(),
-        "benches": {"heldout": str(heldout), "sensors": str(sensors),
-                    "noisyref": str(noisyref), "xcheck": str(xcheck),
-                    "briefed": str(briefed)},
+        "benches": benches,
         "cells": cells,
         "comparisons": comparisons,
         "void": void,
         "reference": reference,
-        "claims": build_claims(comparisons, cells, reference, void)
-        + [REPLAY_NOTE],
-        "non_claims": list(NON_CLAIMS),
+        "claims": claims,
+        "non_claims": non_claims,
     }
+    if parity is not None:
+        payload["parity"] = parity
     md_path = Path(args.out_md)
     md_path.parent.mkdir(parents=True, exist_ok=True)
     md_path.write_text(render_markdown(payload), encoding="utf-8")
