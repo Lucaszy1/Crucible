@@ -1,16 +1,39 @@
 # Crucible
 
+Simulated range where AI defenders practice containment judgment, audited and replayable.
+
+Crucible runs containment exercises on simulated company networks. One side probes for a way in while the other watches logs and decides what to shut down. Every move is logged and checked, so any exercise can be replayed and scored.
+
+Theme: Push the Frontier (software and security)
+Track: Indie (solo)
+
+Demo video: [DEMO VIDEO LINK]
+X post: [X POST LINK]
+Live replay site: [LIVE REPLAY SITE LINK]
+
+## Try it
+
+Static replay site: [LIVE REPLAY SITE LINK] (no install, no keys, works from static hosting).
+
+Run locally:
+
+```bash
+python -m crucible.serve --port 8123
+```
+
+Then open http://127.0.0.1:8123 in a browser. Use the control bar to run a scripted exercise or replay a past run.
+
 Somewhere right now, an AI agent is being trusted with a company's systems, and nobody can say how good its judgment really is. You can't test it on the real thing, because a wrong call there costs uptime, money, or customer data. Crucible is where you find out first.
 
 Two AI teams play out a containment exercise on a simulated company network. One probes for a way in. The other watches the logs and decides what to shut down. A third, independent model audits every defensive decision against the exact evidence the defender had in front of it. Every move is logged, so any exercise can be replayed, scored, and argued with.
 
 This is Crucible. A crucible is a trial that shows what something is really made of, and that is what this gives AI defenders.
 
-I built it alone during the Meta Global AI Developer Hackathon, with Muse Code and Meta's Muse models.
+I built it alone during the Meta Global AI Developer Hackathon, using Meta Muse models.
 
 The first results were wrong. A bug in my own test setup made the defender look smarter than it was. I caught it, threw out the whole campaign, and ran everything again. That habit of measuring, doubting, and measuring again is the point of this project.
 
-With sensor alerts turned on, the defender contained 10 of 10 intrusions in our controlled runs and never lost the secret. With them off, the secret was read in 19 of 20. Below is exactly how we measured that, and what it does not prove.
+With sensor alerts turned on, the defender contained 20 of 20 intrusions in our scripted runs and never lost the secret. With them off, the secret was read in 19 of 20. Below is exactly how we measured that, and what it does not prove.
 
 ![Crucible architecture](docs/architecture.svg)
 
@@ -20,9 +43,11 @@ Red probes, blue defends, and the auditor judges every defensive decision, all i
 
 - With sensor alerts on, Spark blue contained all 20 scripted intrusions and never lost the secret; with them off, the secret was read in 19 of 20 (chain p < 0.0001, noisy p = 0.0001, Fisher exact, computed). Limit: scripted red intrudes every episode by construction, one scenario, 10 episodes per cell.
 - Against model red at 10 episodes per arm, the sensors gap was within noise (secret reads 0/10 versus 4/10, p = 0.087). Limit: small sample against a stochastic intruder, so this run concludes nothing about sensors there.
-- Frozen-playbook memory on 20 held-out networks against solver red: with working sensors both memory arms contained 20 of 20 intrusions with 0 of 20 secret reads (ceiling effect, memory not distinguishable, B vs C p = 1.0); with sensors off, memory cut secret reads to 7 of 20 from 18 of 20 (paired exact p = 0.0010). Limit: solver red follows a known path, the briefed model red run covers 20 networks and is descriptive only, and the first sensors-on run is void because sensors were silently broken on generated networks (found by our own gate, fixed in two commits, reran).
+- Frozen-playbook memory on 20 held-out networks against solver red: with working sensors both memory arms contained 20 of 20 intrusions with 0 of 20 secret reads (ceiling effect, memory not distinguishable, B vs C p = 1.0); with sensors off, secret reads were 7 of 20 with memory and 18 of 20 without (paired exact p = 0.0010). Limit: solver red follows a known path, the briefed model red run covers 20 networks and is descriptive only, and the first sensors-on run is void because sensors were silently broken on generated networks (found by our own gate, fixed in two commits, reran).
 - Spark and Spark Open blue each held all 20 scripted episodes with sensors on, though Open reported later (median first report 15 to 17 events versus 1 to 3). Limit: descriptive only at n = 10, with unmatched noisy-red draws across the two runs.
 - Briefed model red on the same 20 held-out networks, Open blue versus Spark blue: intrusions 18/20 Open and 20/20 Spark; both contained every intrusion (18/18, 20/20) with no secret reads (0/18, 0/20). Median relevant detection delay 7 events Open versus 1 Spark, median time to contain 22 versus 24, mean downtime 6.30% versus 6.85%, Meta cost $13.16 versus $17.93. Limit: descriptive only at n = 20 per arm, briefed red re-rolled between benches so pairing is approximate, and this does not conclude parity.
+
+Frontier tier results: pending
 
 Details, intervals, and limits: `docs/SENSOR_RESULTS.md`, `docs/CAMPAIGN_RESULTS.md`, and `docs/STAGE3_RESULTS.md`. Full narrative: `docs/WRITEUP.md`; per-exercise spend: `docs/COST.md`.
 
@@ -134,7 +159,7 @@ All numbers below come from `docs/CAMPAIGN_RESULTS.md` (20 episodes per arm, cla
 
 Validation story first. Our first campaign looked like a win for memory, then analysis showed the result was contaminated: container logs were never cleared between episodes, so blue read stale success lines, quoted them in reports, and red (which could then see blue report text) reused the leaked account names. We threw that campaign out, fixed the design (per-episode log scoping with clean-start checks, and prompts where neither team sees the other team's report text), and reran from scratch. The rerun is the only campaign we report.
 
-Memory versus control (model red and model blue, one scenario, 20 episodes per arm): the memory arm held 16 of 20, control held 10 of 20 (Fisher exact two-sided p = 0.096, not significant at 0.05). Mean blue score was 79.9 versus 49.9 on a bimodal 0-or-100 scale, so the mean restates the win counts. Red probed the exposed admin page in 4 of 20 memory episodes versus 10 of 20 control, and that probe predicted the outcome perfectly; red is blind to blue by construction, so that gap is sampling variation, not something blue caused. That non-finding is specific to its setting (model red, online playbook, one scenario): the gap is within noise, every perfect score came with zero containment against a red that never authenticated, and blue contained 0 of its 4 real intrusions. The frozen-playbook held-out test below is the stronger memory evidence, and it goes the other way.
+Memory versus control (model red and model blue, one scenario, 20 episodes per arm): the memory arm held 16 of 20, control held 10 of 20 (Fisher exact two-sided p = 0.096, not significant at 0.05). Mean blue score was 79.9 versus 49.9 on a bimodal 0-or-100 scale, so the mean restates the win counts. Red probed the exposed admin page in 4 of 20 memory episodes versus 10 of 20 control, and that probe predicted the outcome perfectly; red is blind to blue by construction, so that gap is sampling variation, not something blue caused. That non-finding is specific to its setting (model red, online playbook, one scenario): the gap is within noise, every perfect score came with zero containment against a red that never authenticated, and blue contained 0 of its 4 real intrusions. The frozen-playbook held-out test below uses a stronger design and is reported separately.
 
 Sensors with scripted red (`runs/bench-bench1`, classic scenario, Spark blue, memory off, 10 episodes per cell):
 
@@ -156,13 +181,13 @@ Stage 3 held-out results (frozen 8-rule playbook from solver train seeds 1001 to
 | sensors on (rerun) | off | 20/20 | 0/20 | 20/20 |
 | sensors on (rerun) | on | 20/20 | 0/20 | 20/20 |
 
-Secret-read Wilson 95 percent: 18/20 (69.9, 97.2), 7/20 (18.1, 56.7), 0/20 (0.0, 16.1), 0/20 (0.0, 16.1). Paired exact (McNemar) two-sided per network: with working sensors the memory comparison is all ties on outcomes (B vs C secret reads 0-0 discordant, p = 1.0; containment 20/20 in both arms), a ceiling effect, so memory is not distinguishable with working sensors; detection delay leans faster with memory (11-4, p = 0.12) and downtime ties (4-4, p = 1.0), both within noise. The corrected sensors comparison pairs across benches by scenario (approximate, because red re-rolled between benches): secret reads 18-0 discordant (p < 0.0001), containment 0-16 (p < 0.0001), downtime 0-20 (p < 0.0001, the cost of containing), detection delay 2-0 (p = 0.50, only 2 paired reports). With sensors off, memory still helps on the valid within-run pairing: secret reads 11-0 (p = 0.0010), containment 0-10 (p = 0.0020).
+Secret-read Wilson 95 percent: 18/20 (69.9, 97.2), 7/20 (18.1, 56.7), 0/20 (0.0, 16.1), 0/20 (0.0, 16.1). Paired exact (McNemar) two-sided per network: with working sensors the memory comparison is all ties on outcomes (B vs C secret reads 0-0 discordant, p = 1.0; containment 20/20 in both arms), a ceiling effect, so memory is not distinguishable with working sensors; detection delay leans faster with memory (11-4, p = 0.12) and downtime ties (4-4, p = 1.0), both within noise. The corrected sensors comparison pairs across benches by scenario (approximate, because red re-rolled between benches): secret reads 18-0 discordant (p < 0.0001), containment 0-16 (p < 0.0001), downtime 0-20 (p < 0.0001, the cost of containing), detection delay 2-0 (p = 0.50, only 2 paired reports). With sensors off, memory differed on the valid within-run pairing: secret reads 11-0 (p = 0.0010), containment 0-10 (p = 0.0020).
 
 The first run's sensors-on half is void: sensors were silently broken on generated networks (the reader polled the classic host list while generated networks use spec hosts, so every lookup missed), our own gate caught the zero-alert pattern, and two commits fixed it (bb567af for generated-net sensors plus the silent-bench failure, 1224db4 for collecting alerts on every blue turn plus the owed-silence check) before the rerun. The void arms read 17 of 20 secret reads without memory and 11 of 20 with memory (B vs C 6-0, p = 0.031), shown in `docs/STAGE3_RESULTS.md` for the record, not as evidence. `bench-stage3-train-solver` is void by the same bug.
 
 Reference rows: noisy red with working sensors, 20 of 20 contained and 0 of 20 secret reads in both memory arms; Spark blue cross-check on 3 networks, 6 of 6 contained and 0 of 6 secret reads with median first report 3 events; briefed model red against Open blue on 20 held-out networks (descriptive only at n = 20): 18 of 20 networks had an intrusion, and all 18 were contained; red did not get a foothold on the other 2. Secret reads 0 of 18, median relevant detection delay 7 events and median time to contain 22 events, mean downtime 6.96%, cost $13.16, Baseten tokens 1,547,043. 1 of 600 red turns and 11 of 600 blue turns used a safe baseline move after model replies with no usable tool call, across 9 of 20 episodes.
 
-Limits, stated plainly: solver red replays a known path with seeded noise, so this proves blue contains a known-path intruder on unseen networks, not that it stops an adaptive attacker; the briefed model red run covers 20 networks and is descriptive only, so it describes one sample; with working sensors every intrusion was contained in both memory arms, a ceiling effect, so memory is not distinguishable there; the sensors comparison pairs across benches because the rerun re-rolled red, so it is approximate; 20 networks are one pilot, not coverage; the playbook was learned against the solver's path distribution, where list-before-read always holds, and on train episodes whose sensors were void too, so its rules were learned without sensor input. Audit covered the rerun B and C cells only (justified 249 of 400 without memory, 230 of 400 with memory). Baseten tokens for the rerun, timestamp-attributed because the rerun reused episode ids: 800 calls, 1.90M in / 187k out / 114k reasoning; the void first run used 889 calls, 2.06M in / 162k out / 82k reasoning; check the invoice for dollars. Meta spend was $12.86 on the rerun (auditor calls) and $13.16 on the 20-network briefed run ($3.84 red, $9.31 auditor; per-role breakdown in `docs/COST.md`). 14 auditor verdicts in the corrected held-out rerun were replayed from the voided original run on byte-identical prompts; no blue, red, or referee response was cached and outcomes are unaffected.
+Limits, stated plainly: solver red replays a known path with seeded noise, so this proves blue contains a known-path intruder on unseen networks, not that it stops an adaptive intruder; the briefed model red run covers 20 networks and is descriptive only, so it describes one sample; with working sensors every intrusion was contained in both memory arms, a ceiling effect, so memory is not distinguishable there; the sensors comparison pairs across benches because the rerun re-rolled red, so it is approximate; 20 networks are one pilot, not coverage; the playbook was learned against the solver's path distribution, where list-before-read always holds, and on train episodes whose sensors were void too, so its rules were learned without sensor input. Audit covered the rerun B and C cells only (justified 249 of 400 without memory, 230 of 400 with memory). Baseten tokens for the rerun, timestamp-attributed because the rerun reused episode ids: 800 calls, 1.90M in / 187k out / 114k reasoning; the void first run used 889 calls, 2.06M in / 162k out / 82k reasoning; check the invoice for dollars. Meta spend was $12.86 on the rerun (auditor calls) and $13.16 on the 20-network briefed run ($3.84 red, $9.31 auditor; per-role breakdown in `docs/COST.md`). 14 auditor verdicts in the corrected held-out rerun were replayed from the voided original run on byte-identical prompts; no blue, red, or referee response was cached and outcomes are unaffected.
 
 ## Open-weights blue
 
@@ -223,8 +248,9 @@ Limit: one run against a stochastic intruder concludes nothing general; check th
 
 ## Demo
 
-- Demo video: TBD (link to be added).
-- X post: TBD (link to be added).
+- Demo video: [DEMO VIDEO LINK]
+- X post: [X POST LINK]
+- Live replay site: [LIVE REPLAY SITE LINK]
 - Screenshots: [opening](dashboard/screenshots/opening.png), [lobby](dashboard/screenshots/lobby.png), [mid-exercise](dashboard/screenshots/mid-exercise.png), [end-held](dashboard/screenshots/end-held.png).
 
 ## What was built during the hackathon
