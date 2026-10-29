@@ -13,6 +13,50 @@ export const CONFIRM_MS = 1500;
 export const STATE_POLL_MS = 3000;
 export const MIC_RATE = 16000;
 
+// MediaRecorder tuning: a short timeslice keeps chunks arriving while
+// the judge speaks, and a stop inside the guard window is a mistap.
+export const RECORD_TIMESLICE_MS = 250;
+export const MIN_RECORD_MS = 400;
+export const LISTEN_TICK_MS = 500;
+export const RECORDER_MIME_CANDIDATES = [
+  "audio/webm;codecs=opus",
+  "audio/webm",
+  "audio/mp4",
+  "audio/ogg;codecs=opus",
+];
+export const NO_AUDIO_MESSAGE =
+  "No audio captured. Hold for a couple of seconds and check your Chrome microphone setting.";
+export const TOO_QUICK_MESSAGE = "Still starting — speak first, then press Stop.";
+
+// First candidate the browser accepts, or "" for its default.
+// Pure, so the unsupported-mime fallback stays testable in node.
+export function pickRecorderMimeType(MediaRecorderLike) {
+  const check = MediaRecorderLike && MediaRecorderLike.isTypeSupported;
+  if (typeof check !== "function") return "";
+  for (const candidate of RECORDER_MIME_CANDIDATES) {
+    try {
+      if (check.call(MediaRecorderLike, candidate)) return candidate;
+    } catch {
+      // One rejected probe never blocks the rest.
+    }
+  }
+  return "";
+}
+
+// Decode recorder bytes to mono PCM via an offline context. The bar
+// uses this by default; tests inject a stub through deps.
+export async function defaultDecodeAudioData(raw) {
+  const scope = typeof window !== "undefined" ? window : {};
+  const OfflineCtx = scope.OfflineAudioContext || scope.webkitOfflineAudioContext;
+  if (!OfflineCtx) throw new Error("this browser cannot decode audio");
+  const probe = new OfflineCtx(1, 1, 44100);
+  const decoded = await probe.decodeAudioData(raw.slice(0));
+  return {
+    samples: Array.from(decoded.getChannelData(0)),
+    sampleRate: decoded.sampleRate,
+  };
+}
+
 const TOOL_VERBS = {
   isolate_host: "Isolate",
   patch_service: "Patch",
@@ -131,7 +175,21 @@ export function initCommandBar(els, deps) {
     timer: null,
     poller: null,
     pending: null,
+    startedAt: 0,
+    listenTimer: null,
+    holdNoteUntil: 0,
   };
+
+  // Browser globals resolve through deps first so node tests can
+  // inject a fake recorder, clock, and document. Production passes
+  // only hosts/jewel and keeps the real globals.
+  const MediaRecorderLike = api.MediaRecorder
+    || (typeof MediaRecorder !== "undefined" ? MediaRecorder : undefined);
+  const mediaDevices = api.mediaDevices
+    || (typeof navigator !== "undefined" ? navigator.mediaDevices : undefined);
+  const doc = api.document
+    || (typeof document !== "undefined" ? document : null);
+  const now = () => (typeof api.now === "function" ? api.now() : Date.now());
 
   function show(message) {
     if (els.note) {
@@ -204,26 +262,31 @@ export function initCommandBar(els, deps) {
     ctl.timer = setTimeout(() => void executePending(), CONFIRM_MS);
   }
 
-  async function stopRecorder() {
-    const rec = ctl.media && ctl.media.recorder;
-    ctl.recording = false;
-    if (els.mic) {
-      els.mic.classList.remove("live");
-      els.mic.setAttribute("aria-pressed", "false");
-      setText(els.mic, "Speak");
+  function listenLine() {
+    const elapsed = Math.max(0, (now() - ctl.startedAt) / 1000);
+    return `Listening… ${elapsed.toFixed(0)}s — press Stop to transcribe, Esc to cancel.`;
+  }
+
+  function stopListenTimer() {
+    if (ctl.listenTimer) {
+      clearInterval(ctl.listenTimer);
+      ctl.listenTimer = null;
     }
-    if (!rec) return;
-    const chunks = ctl.chunks;
-    ctl.chunks = [];
-    const stopped = new Promise((resolve) => {
-      rec.onstop = () => resolve();
-    });
-    try {
-      rec.stop();
-    } catch {
-      return;
+  }
+
+  function startListenTimer() {
+    stopListenTimer();
+    show(listenLine());
+    ctl.listenTimer = setInterval(() => {
+      if (now() < ctl.holdNoteUntil) return;
+      show(listenLine());
+    }, LISTEN_TICK_MS);
+    if (ctl.listenTimer && typeof ctl.listenTimer.unref === "function") {
+      ctl.listenTimer.unref();
     }
-    await stopped;
+  }
+
+  function stopStreamTracks() {
     if (ctl.media && ctl.media.stream) {
       for (const track of ctl.media.stream.getTracks()) {
         try {
@@ -233,21 +296,60 @@ export function initCommandBar(els, deps) {
         }
       }
     }
+  }
+
+  async function stopRecorder(opts) {
+    const force = Boolean(opts && opts.force);
+    if (ctl.recording && !force && ctl.startedAt > 0
+        && now() - ctl.startedAt < MIN_RECORD_MS) {
+      ctl.holdNoteUntil = now() + CONFIRM_MS;
+      show(TOO_QUICK_MESSAGE);
+      return;
+    }
+    const rec = ctl.media && ctl.media.recorder;
+    ctl.recording = false;
+    ctl.startedAt = 0;
+    stopListenTimer();
+    if (els.mic) {
+      els.mic.classList.remove("live");
+      els.mic.setAttribute("aria-pressed", "false");
+      setText(els.mic, "Speak");
+    }
+    if (!rec) return;
+    if (typeof rec.requestData === "function" && rec.state !== "inactive") {
+      try {
+        rec.requestData();
+      } catch {
+        // The stop flush still delivers the tail chunk.
+      }
+    }
+    let done = null;
+    const stopped = new Promise((resolve) => {
+      done = resolve;
+      rec.onstop = () => resolve();
+    });
+    try {
+      rec.stop();
+    } catch {
+      if (done) done();
+    }
+    await stopped;
+    stopStreamTracks();
     ctl.media = null;
-    if (chunks.length === 0) {
-      show("No audio captured: type the order instead.");
+    // Chunks read here, after onstop: the final dataavailable lands
+    // during stop, so an earlier snapshot always looks empty.
+    const blob = new Blob(ctl.chunks, { type: rec.mimeType || "audio/webm" });
+    ctl.chunks = [];
+    if (!blob.size) {
+      show(NO_AUDIO_MESSAGE);
       return;
     }
     show("Transcribing…");
     try {
-      const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
       const raw = await blob.arrayBuffer();
-      const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-      if (!OfflineCtx) throw new Error("this browser cannot decode audio");
-      const probe = new OfflineCtx(1, 1, 44100);
-      const decoded = await probe.decodeAudioData(raw.slice(0));
-      const channel = decoded.getChannelData(0);
-      const small = downsampleLinear(Array.from(channel), decoded.sampleRate, MIC_RATE);
+      const decode = api.decodeAudioData || defaultDecodeAudioData;
+      const { samples, sampleRate } = await decode(raw.slice(0));
+      const small = downsampleLinear(samples, sampleRate, MIC_RATE);
       const wav = encodeWavPCM(small, MIC_RATE);
       const reply = await api.sendAudio(wav);
       ctl.pending = null;
@@ -264,27 +366,41 @@ export function initCommandBar(els, deps) {
       return;
     }
     clearConfirm();
-    if (typeof MediaRecorder === "undefined" || !navigator.mediaDevices) {
+    if (!MediaRecorderLike || !mediaDevices) {
       show("This browser cannot record: type the order instead.");
       if (els.input) els.input.focus();
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      const stream = await mediaDevices.getUserMedia({ audio: true });
+      const mimeType = pickRecorderMimeType(MediaRecorderLike);
+      let recorder;
+      try {
+        recorder = mimeType
+          ? new MediaRecorderLike(stream, { mimeType })
+          : new MediaRecorderLike(stream);
+      } catch {
+        recorder = new MediaRecorderLike(stream);
+      }
       ctl.chunks = [];
       recorder.ondataavailable = (ev) => {
         if (ev.data && ev.data.size > 0) ctl.chunks.push(ev.data);
       };
-      recorder.start();
+      try {
+        recorder.start(RECORD_TIMESLICE_MS);
+      } catch {
+        recorder.start();
+      }
       ctl.media = { recorder, stream };
       ctl.recording = true;
+      ctl.startedAt = now();
+      ctl.holdNoteUntil = 0;
       if (els.mic) {
         els.mic.classList.add("live");
         els.mic.setAttribute("aria-pressed", "true");
         setText(els.mic, "Stop");
       }
-      show("Listening… press Stop to transcribe, Esc to cancel.");
+      startListenTimer();
     } catch (err) {
       show(`Microphone blocked (${(err && err.message) || err}): type the order instead.`);
       if (els.input) els.input.focus();
@@ -325,7 +441,7 @@ export function initCommandBar(els, deps) {
     if (ev.key === "Escape" && (ctl.pending || ctl.recording)) {
       ev.stopPropagation();
       if (ctl.recording) {
-        void stopRecorder();
+        void stopRecorder({ force: true });
         show("Recording cancelled.");
       } else {
         clearConfirm();
@@ -368,7 +484,7 @@ export function initCommandBar(els, deps) {
     }
     void refreshState();
   });
-  document.addEventListener("keydown", onKeydown);
+  if (doc) doc.addEventListener("keydown", onKeydown);
 
   ctl.refresh = refreshState;
   ctl.start = () => {
@@ -380,6 +496,7 @@ export function initCommandBar(els, deps) {
       clearInterval(ctl.poller);
       ctl.poller = null;
     }
+    stopListenTimer();
     clearConfirm();
   };
   return ctl;
