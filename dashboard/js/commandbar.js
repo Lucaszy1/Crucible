@@ -18,6 +18,7 @@ export const MIC_RATE = 16000;
 export const RECORD_TIMESLICE_MS = 250;
 export const MIN_RECORD_MS = 400;
 export const LISTEN_TICK_MS = 500;
+export const STOP_TIMEOUT_MS = 2000;
 export const RECORDER_MIME_CANDIDATES = [
   "audio/webm;codecs=opus",
   "audio/webm",
@@ -247,6 +248,12 @@ export function initCommandBar(els, deps) {
     listenTimer: null,
     holdNoteUntil: 0,
     ptt: false,
+    // Speak clicks and hold-V share one recorder: starting covers
+    // the getUserMedia window, stopping covers stop through chunk
+    // assembly, and stopRequested cancels a start already in flight.
+    starting: false,
+    stopping: false,
+    stopRequested: false,
   };
 
   // Browser globals resolve through deps first so node tests can
@@ -376,6 +383,11 @@ export function initCommandBar(els, deps) {
       show(TOO_QUICK_MESSAGE);
       return;
     }
+    // One stop at a time: a second stop would steal onstop and hang
+    // the first, and a restart mid-stop would reset chunks the old
+    // recorder still owns. The flag clears once chunks are consumed.
+    if (ctl.stopping) return;
+    ctl.stopping = true;
     const rec = ctl.media && ctl.media.recorder;
     ctl.recording = false;
     ctl.startedAt = 0;
@@ -385,7 +397,10 @@ export function initCommandBar(els, deps) {
       els.mic.setAttribute("aria-pressed", "false");
       setText(els.mic, "Speak");
     }
-    if (!rec) return;
+    if (!rec) {
+      ctl.stopping = false;
+      return;
+    }
     if (typeof rec.requestData === "function" && rec.state !== "inactive") {
       try {
         rec.requestData();
@@ -403,41 +418,71 @@ export function initCommandBar(els, deps) {
     } catch {
       if (done) done();
     }
-    await stopped;
+    // A broken recorder must never wedge the bar: stop proceeds
+    // with whatever chunks arrived.
+    let stopTimer = null;
+    const stopTimeout = new Promise((resolve) => {
+      stopTimer = setTimeout(resolve, STOP_TIMEOUT_MS);
+    });
+    await Promise.race([stopped, stopTimeout]);
+    if (stopTimer) clearTimeout(stopTimer);
     stopStreamTracks();
     ctl.media = null;
     // Chunks read here, after onstop: the final dataavailable lands
     // during stop, so an earlier snapshot always looks empty.
     const blob = new Blob(ctl.chunks, { type: rec.mimeType || "audio/webm" });
     ctl.chunks = [];
+    ctl.stopping = false;
     if (!blob.size) {
       show(NO_AUDIO_MESSAGE);
       return;
     }
     show("Transcribing…");
+    let wav;
     try {
       const raw = await blob.arrayBuffer();
       const decode = api.decodeAudioData || defaultDecodeAudioData;
       const { samples, sampleRate } = await decode(raw.slice(0));
       const small = downsampleLinear(samples, sampleRate, MIC_RATE);
-      const wav = encodeWavPCM(small, MIC_RATE);
-      const reply = await api.sendAudio(wav);
-      ctl.pending = null;
-      await previewText(reply.transcript || "", "voice");
+      wav = encodeWavPCM(small, MIC_RATE);
     } catch (err) {
-      show(`Voice failed (${(err && err.message) || err}): type the order instead.`);
+      show(`Voice failed at decode (${(err && err.message) || err}): type the order instead.`);
       if (els.input) els.input.focus();
+      return;
     }
+    let reply;
+    try {
+      reply = await api.sendAudio(wav);
+    } catch (err) {
+      // A status means the bytes reached the server and transcription
+      // refused or failed there; without one the upload never landed.
+      const stage = err && err.status ? "transcribe" : "upload";
+      show(`Voice failed at ${stage} (${(err && err.message) || err}): type the order instead.`);
+      if (els.input) els.input.focus();
+      return;
+    }
+    ctl.pending = null;
+    await previewText(reply.transcript || "", "voice");
   }
 
   async function startMic() {
-    if (ctl.recording) return;
+    if (ctl.recording || ctl.stopping) return;
+    // A second trigger during the getUserMedia window adopts the
+    // pending start instead of opening a second recorder whose
+    // chunks would mix into (and corrupt) this recording.
+    if (ctl.starting) {
+      ctl.stopRequested = false;
+      return;
+    }
     clearConfirm();
     if (!MediaRecorderLike || !mediaDevices) {
       show("This browser cannot record: type the order instead.");
       if (els.input) els.input.focus();
       return;
     }
+    ctl.starting = true;
+    ctl.stopRequested = false;
+    if (els.mic) setText(els.mic, "Starting…");
     try {
       const stream = await mediaDevices.getUserMedia({ audio: true });
       const mimeType = pickRecorderMimeType(MediaRecorderLike);
@@ -460,6 +505,7 @@ export function initCommandBar(els, deps) {
       }
       ctl.media = { recorder, stream };
       ctl.recording = true;
+      ctl.starting = false;
       ctl.startedAt = now();
       ctl.holdNoteUntil = 0;
       if (els.mic) {
@@ -468,7 +514,16 @@ export function initCommandBar(els, deps) {
         setText(els.mic, "Stop");
       }
       startListenTimer();
+      // A V tap or Esc landed mid-start: stop at once instead of
+      // orphaning a recording the user already released.
+      if (ctl.stopRequested) {
+        ctl.stopRequested = false;
+        await stopRecorder({ force: true });
+      }
     } catch (err) {
+      ctl.starting = false;
+      ctl.stopRequested = false;
+      if (els.mic) setText(els.mic, "Speak");
       show(`Microphone blocked (${(err && err.message) || err}): type the order instead.`);
       if (els.input) els.input.focus();
     }
@@ -557,12 +612,17 @@ export function initCommandBar(els, deps) {
   // Hold V to talk, release to stop. Ignored while typing, while
   // the bar is detached, and on key repeat; release always stops,
   // even inside the mistap window, since letting go means done.
+  // Both triggers share startMic/stopRecorder and its guards, so
+  // hold-V and Speak/Stop run the identical record path.
   function onKeydown(ev) {
-    if (ev.key === "Escape" && (ctl.pending || ctl.recording)) {
+    if (ev.key === "Escape" && (ctl.pending || ctl.recording || ctl.starting)) {
       ev.stopPropagation();
       ctl.ptt = false;
       if (ctl.recording) {
         void stopRecorder({ force: true });
+        show("Recording cancelled.");
+      } else if (ctl.starting) {
+        ctl.stopRequested = true;
         show("Recording cancelled.");
       } else {
         clearConfirm();
@@ -574,7 +634,7 @@ export function initCommandBar(els, deps) {
         && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
       const tag = (ev.target && ev.target.tagName) || "";
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      if (!ctl.visible || ctl.recording) return;
+      if (!ctl.visible || ctl.recording || ctl.stopping) return;
       ev.preventDefault();
       ctl.ptt = true;
       void startMic();
@@ -584,6 +644,12 @@ export function initCommandBar(els, deps) {
   function onKeyup(ev) {
     if ((ev.key === "v" || ev.key === "V") && ctl.ptt) {
       ctl.ptt = false;
+      // A release during the getUserMedia window cannot stop yet:
+      // the pending start auto-stops on completion instead.
+      if (ctl.starting) {
+        ctl.stopRequested = true;
+        return;
+      }
       if (ctl.recording) void stopRecorder({ force: true });
     }
   }

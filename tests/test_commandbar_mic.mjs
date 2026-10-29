@@ -139,10 +139,10 @@ function makeFakeRecorder({ supported, during = [], onStop = [] } = {}) {
   };
 }
 
-function mount({ recorderOptions, uploads, transcripts, parseResult } = {}) {
+function mount({ recorderOptions, uploads, transcripts, parseResult, decode, sendAudioImpl } = {}) {
   const { els, handlers, live } = makeEls();
   const order = [];
-  const stream = makeStream(order);
+  const streams = [];
   const FakeRecorder = makeFakeRecorder(recorderOptions);
   let nowMs = 10000;
   let liveState = { attached: true, hosts: [] };
@@ -151,14 +151,18 @@ function mount({ recorderOptions, uploads, transcripts, parseResult } = {}) {
     document: { addEventListener: (event, fn) => {
       handlers[`doc:${event}`] = fn;
     } },
-    mediaDevices: { getUserMedia: async () => stream },
+    mediaDevices: { getUserMedia: async () => {
+      const stream = makeStream(order);
+      streams.push(stream);
+      return stream;
+    } },
     MediaRecorder: FakeRecorder,
     now: () => nowMs,
-    decodeAudioData: async () => ({ samples: [0, 0.1, -0.1, 0.2], sampleRate: 16000 }),
-    sendAudio: async (wav) => {
+    decodeAudioData: decode || (async () => ({ samples: [0, 0.1, -0.1, 0.2], sampleRate: 16000 })),
+    sendAudio: sendAudioImpl || (async (wav) => {
       calls.audio.push(wav);
       return { transcript: (transcripts && transcripts.shift()) || "isolate the willow host" };
-    },
+    }),
     parseOrder: async () => {
       calls.parse += 1;
       return parseResult || { status: "ok", tool: "isolate_host", args: { host: "willow" } };
@@ -176,8 +180,10 @@ function mount({ recorderOptions, uploads, transcripts, parseResult } = {}) {
   };
   const recorder = () => FakeRecorder.instances[FakeRecorder.instances.length - 1];
   return {
-    els, handlers, live, ctl, stream, order, calls,
-    recorder, setNow: (value) => {
+    els, handlers, live, ctl, streams, order, calls,
+    recorder,
+    recorders: () => FakeRecorder.instances.slice(),
+    setNow: (value) => {
       nowMs = value;
     },
     now: () => nowMs,
@@ -227,7 +233,7 @@ describe("mic recording", () => {
     bar.setNow(bar.now() + MIN_RECORD_MS + 100);
     await bar.clickMic();
     assert.equal(bar.recorder().requestDataCalls, 1);
-    assert.ok(bar.stream.track.stopped);
+    assert.ok(bar.streams[0].track.stopped);
     assert.equal(bar.calls.audio.length, 1);
     const wav = bar.calls.audio[0];
     assert.ok(wav instanceof Uint8Array);
@@ -417,6 +423,154 @@ describe("push to talk", () => {
     bar.handlers["doc:keydown"]({ key: "v", target: { tagName: "INPUT" } });
     await settle();
     assert.equal(bar.els.mic.textContent, "Speak");
+    bar.ctl.stop();
+  });
+});
+
+function pressV(bar) {
+  bar.handlers["doc:keydown"]({
+    key: "v", target: { tagName: "DIV" }, preventDefault() {},
+  });
+}
+
+function releaseV(bar) {
+  bar.handlers["doc:keyup"]({ key: "v" });
+}
+
+function allQuiet(bar) {
+  assert.ok(bar.recorders().every((rec) => rec.state === "inactive"),
+    "no recorder left running");
+  assert.ok(bar.streams.every((stream) => stream.track.stopped),
+    "no stream left live");
+}
+
+describe("overlapping starts", () => {
+  it("collapses a double click on Speak into one recorder", async () => {
+    const bar = mount({ recorderOptions: { onStop: [audioChunk()] } });
+    bar.handlers["mic:click"]();
+    bar.handlers["mic:click"]();
+    await settle();
+    assert.equal(bar.recorders().length, 1);
+    assert.equal(bar.els.mic.textContent, "Stop");
+    bar.setNow(bar.now() + MIN_RECORD_MS + 100);
+    await bar.clickMic();
+    assert.equal(bar.calls.audio.length, 1);
+    assert.equal(bar.els.mic.textContent, "Speak");
+    allQuiet(bar);
+    bar.ctl.stop();
+  });
+
+  it("V during a pending click start shares the one recorder", async () => {
+    const bar = mount({ recorderOptions: { onStop: [audioChunk()] } });
+    bar.setState({ attached: true, hosts: [] });
+    await bar.refresh();
+    bar.handlers["mic:click"]();
+    pressV(bar);
+    await settle();
+    assert.equal(bar.recorders().length, 1);
+    releaseV(bar);
+    await settle();
+    assert.equal(bar.calls.audio.length, 1);
+    allQuiet(bar);
+    bar.ctl.stop();
+  });
+
+  it("ignores a click while a V start is pending", async () => {
+    const bar = mount({ recorderOptions: { onStop: [audioChunk()] } });
+    bar.setState({ attached: true, hosts: [] });
+    await bar.refresh();
+    pressV(bar);
+    bar.handlers["mic:click"]();
+    await settle();
+    assert.equal(bar.recorders().length, 1);
+    releaseV(bar);
+    await settle();
+    assert.equal(bar.calls.audio.length, 1);
+    allQuiet(bar);
+    bar.ctl.stop();
+  });
+});
+
+describe("tap and restart", () => {
+  it("a V tap stops the pending start instead of orphaning it", async () => {
+    const bar = mount();
+    bar.setState({ attached: true, hosts: [] });
+    await bar.refresh();
+    pressV(bar);
+    releaseV(bar);
+    await settle();
+    assert.equal(bar.els.mic.textContent, "Speak");
+    assert.equal(bar.calls.audio.length, 0);
+    assert.ok(bar.els.note.textContent.includes("No audio captured"));
+    allQuiet(bar);
+    bar.ctl.stop();
+  });
+
+  it("a restart during stop waits instead of corrupting", async () => {
+    const bar = mount({ recorderOptions: { onStop: [audioChunk()] } });
+    await bar.clickMic();
+    bar.setNow(bar.now() + MIN_RECORD_MS + 100);
+    bar.handlers["mic:click"]();
+    bar.handlers["mic:click"]();
+    await settle();
+    assert.equal(bar.calls.audio.length, 1);
+    assert.equal(bar.els.mic.textContent, "Speak");
+    await bar.clickMic();
+    assert.equal(bar.els.mic.textContent, "Stop");
+    bar.setNow(bar.now() + MIN_RECORD_MS + 100);
+    await bar.clickMic();
+    assert.equal(bar.calls.audio.length, 2);
+    allQuiet(bar);
+    bar.ctl.stop();
+  });
+});
+
+describe("staged voice errors", () => {
+  async function recordAndStop(bar) {
+    await bar.clickMic();
+    bar.setNow(bar.now() + MIN_RECORD_MS + 100);
+    await bar.clickMic();
+  }
+
+  it("names the decode stage", async () => {
+    const bar = mount({
+      recorderOptions: { onStop: [audioChunk()] },
+      decode: async () => {
+        throw new Error("cannot decode");
+      },
+    });
+    await recordAndStop(bar);
+    assert.ok(bar.els.note.textContent.includes("Voice failed at decode"),
+      bar.els.note.textContent);
+    assert.equal(bar.calls.audio.length, 0);
+    bar.ctl.stop();
+  });
+
+  it("names the upload stage on network failure", async () => {
+    const bar = mount({
+      recorderOptions: { onStop: [audioChunk()] },
+      sendAudioImpl: async () => {
+        throw new Error("fetch failed");
+      },
+    });
+    await recordAndStop(bar);
+    assert.ok(bar.els.note.textContent.includes("Voice failed at upload"),
+      bar.els.note.textContent);
+    bar.ctl.stop();
+  });
+
+  it("names the transcribe stage on server failure", async () => {
+    const bar = mount({
+      recorderOptions: { onStop: [audioChunk()] },
+      sendAudioImpl: async () => {
+        const err = new Error("/api/audio returned 502");
+        err.status = 502;
+        throw err;
+      },
+    });
+    await recordAndStop(bar);
+    assert.ok(bar.els.note.textContent.includes("Voice failed at transcribe"),
+      bar.els.note.textContent);
     bar.ctl.stop();
   });
 });
