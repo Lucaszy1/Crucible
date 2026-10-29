@@ -27,7 +27,7 @@ REQUIRED_FIELDS = (
 )
 
 # Benches whose sensors-on episodes ran with silently broken
-# sensors (zero alerts in every episode; fixed in c9dd960). Their
+# sensors (zero alerts in every episode; fixed in 1224db4). Their
 # sensors-on results are void; sensors-off episodes stay valid.
 VOID_SENSOR_BENCHES = frozenset({
     "bench-stage3-train-solver",

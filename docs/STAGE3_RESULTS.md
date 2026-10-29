@@ -2,7 +2,7 @@
 
 Generated 2026-10-29T00:54:22.421249+00:00 from `heldout`, `sensors`, `noisyref`, `xcheck`, `briefed`.
 Frozen playbook sha256: `76c925e82ddeb30bd592ffe3511bba067aca8dc32db1130185ed8c2422a2c0d8`.
-Corrected headline: sensors-on arms come from the rerun `runs/bench-stage3-heldout-sensors` (working sensors); sensors-off arms come from the valid half of `runs/bench-stage3-heldout`. The first run's sensors-on half is void (documented sensor bug, fixed in c9dd960) and appears only in the void section.
+Corrected headline: sensors-on arms come from the rerun `runs/bench-stage3-heldout-sensors` (working sensors); sensors-off arms come from the valid half of `runs/bench-stage3-heldout`. The first run's sensors-on half is void (documented sensor bug, fixed in 1224db4) and appears only in the void section.
 Rates carry Wilson 95% intervals; paired p-values are exact two-sided (McNemar for binary outcomes, sign test for delays and downtime). p >= 0.05 is reported as within noise.
 
 ## Held-out cells (solver red, paired scenarios)
@@ -34,7 +34,7 @@ A vs B: cross-bench pairing by scenario; red re-rolled between benches, so this 
 
 ## Void original (for the record, not evidence)
 
-The first run's sensors-on arms ran with silently broken sensors (zero alerts in every episode) and are void by name (`bench-stage3-train-solver`, `bench-stage3-heldout`; documented sensor bug, fixed in c9dd960). Original cells and p-values:
+The first run's sensors-on arms ran with silently broken sensors (zero alerts in every episode) and are void by name (`bench-stage3-train-solver`, `bench-stage3-heldout`; documented sensor bug, fixed in 1224db4). Original cells and p-values:
 
 | arm | n | intrusions | secret reads | contained | med delay | med contain | downtime | audit just |
 |-----|---|------------|--------------|-----------|-----------|-------------|----------|------------|

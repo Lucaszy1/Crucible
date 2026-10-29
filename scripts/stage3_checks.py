@@ -48,7 +48,7 @@ DIFFICULTIES = ("easy", "medium", "hard")
 
 # Benches whose sensors-on silence is the documented collector bug,
 # not evidence: sensors read the classic host list on generated nets,
-# so every lookup missed (fixed in c9dd960; rerun as
+# so every lookup missed (fixed in 1224db4; rerun as
 # bench-stage3-heldout-sensors). Zero-alert findings on these two are
 # marked void by name instead of failing; every other check still
 # applies to them, and silence still fails everywhere else.
@@ -504,7 +504,7 @@ def check_episodes(report: Report, bench_dirs: list) -> None:
                 report.add(OK, f"{bench_dir.name}: void by name: "
                                f"{len(silent_owed)} sensors-on {noun} with "
                                f"zero sensor alerts not failed (documented "
-                               f"sensor bug, fixed in c9dd960)")
+                               f"sensor bug, fixed in 1224db4)")
             else:
                 report.add(FAIL, f"{bench_dir.name}: {len(silent_owed)} "
                                  f"sensors-on {noun} with intrusions showed "

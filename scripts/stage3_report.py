@@ -16,7 +16,7 @@ metric from the saved CSVs and jsonls, and writes:
 The headline sensors-on arms come from the corrected rerun
 (--sensors); the sensors-off arms come from the valid half of the
 first run (--heldout). The first run's sensors-on half is void
-(documented sensor bug, fixed in c9dd960) and is shown only in the
+(documented sensor bug, fixed in 1224db4) and is shown only in the
 void section, with its original p-values, for the record.
 
 Cells carry n, intrusion/secret/containment rates with Wilson bounds,
@@ -53,7 +53,7 @@ BRIEFED_CELL = "model-briefed-sensors-on-memory-off"
 BRIEFED_LABEL = "briefed-red-vs-Spark-Open"
 
 # Benches whose sensors-on episodes are void: the collector bug kept
-# every lookup missing on generated nets (fixed in c9dd960).
+# every lookup missing on generated nets (fixed in 1224db4).
 VOID_BENCH_NAMES = ("bench-stage3-train-solver", "bench-stage3-heldout")
 
 SPEND_FILE = ROOT / "runs" / "spend.jsonl"
@@ -447,7 +447,7 @@ def render_markdown(payload: dict) -> str:
              "(working sensors); sensors-off arms come from the valid half "
              f"of `{benches.get('heldout', 'runs/bench-stage3-heldout')}`. "
              "The first run's sensors-on half is void (documented sensor "
-             "bug, fixed in c9dd960) and appears only in the void section.",
+             "bug, fixed in 1224db4) and appears only in the void section.",
              "Rates carry Wilson 95% intervals; paired p-values are exact "
              "two-sided (McNemar for binary outcomes, sign test for delays "
              "and downtime). p >= 0.05 is reported as within noise.",
@@ -496,7 +496,7 @@ def render_markdown(payload: dict) -> str:
                   "The first run's sensors-on arms ran with silently "
                   "broken sensors (zero alerts in every episode) and are "
                   f"void by name ({names}; documented sensor bug, fixed "
-                  "in c9dd960). Original cells and p-values:",
+                  "in 1224db4). Original cells and p-values:",
                   "",
                   "| arm | n | intrusions | secret reads | contained | "
                   "med delay | med contain | downtime | audit just |",

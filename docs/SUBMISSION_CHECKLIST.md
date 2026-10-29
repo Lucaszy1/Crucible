@@ -20,8 +20,8 @@ night of Nov 3 so Nov 4 is buffer for form or video fixes.
   with links.
 - [x] README Demo screenshots now link to the real files under
   `dashboard/screenshots/` (opening, lobby, mid-exercise, end-held).
-- [x] README "What was built" updated to real history counts (265
-  commits: 123 Oct 26, 128 Oct 27, 14 Oct 28, author dates PT) with
+- [x] README "What was built" updated to real history counts (313
+  commits: 123 Oct 26, 128 Oct 27, 62 Oct 28, author dates PT) with
   a verify command. The history side of the Oct 26 start TODO is
   resolved (initial commit is the earliest timestamp); confirming
   the window with the organizers stays a README TODO.
@@ -30,7 +30,7 @@ night of Nov 3 so Nov 4 is buffer for form or video fixes.
   muse-image-1.0 generated with prompts on file).
 - [x] Fix the stale Baseten URL in the `crucible/bench.py` docstring
   (`api.baseten.co` is now `inference.baseten.co`, landed in
-  `666dfa4`); repo-wide grep shows no other stale base URL or
+  `782de3a`); repo-wide grep shows no other stale base URL or
   model name (the `1.2-contributor` mention lives only in the
   superseded PRD).
 - [ ] Qualify two shorthand paths in `docs/STAGE2_NOTES.md` as
@@ -39,7 +39,7 @@ night of Nov 3 so Nov 4 is buffer for form or video fixes.
 - [ ] Get the tree clean and run the routine gates once:
   `python -m pytest tests -m "not live" -q` and
   `node --test tests/*.mjs`. Node gate is 292/292 green; pytest
-  is green on committed `15f2635` but `666dfa4` has one red test
+  is green on committed `7528543` but `782de3a` has one red test
   (`test_bench_csv_appends_effort_column`, from the new
   `assisted` CSV column) and the working tree holds in-progress
   voice/human-blue edits with more failures. Re-run both gates
