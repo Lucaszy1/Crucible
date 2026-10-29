@@ -66,7 +66,7 @@ def _scaffold(tmp_path: Path) -> dict:
 
 
 def _run_report(tmp_path: Path, scaffold: dict, *, briefed: Path,
-                spark: Path) -> tuple:
+                spark: Path, frontier: Path | None = None) -> tuple:
     out_md = tmp_path / "out.md"
     out_json = tmp_path / "out.json"
     code = stage3_report.main([
@@ -76,6 +76,8 @@ def _run_report(tmp_path: Path, scaffold: dict, *, briefed: Path,
         "--xcheck", str(tmp_path / "missing-xcheck"),
         "--briefed", str(briefed),
         "--briefed-spark", str(spark),
+        "--frontier", str(frontier) if frontier is not None
+        else str(tmp_path / "missing-frontier"),
         "--frozen", str(scaffold["frozen"]),
         "--out-md", str(out_md), "--out-json", str(out_json)])
     assert code == 0
@@ -282,3 +284,74 @@ def test_cost_only_requires_briefed_bench(tmp_path):
         "--cost-only", "--briefed", str(tmp_path / "missing"),
         "--out-cost", str(tmp_path / "COST.md")])
     assert code == 1
+
+
+# --- frontier tier ---
+
+
+def _frontier_row(seed: int, *, intrusion=True, contained=True, secret=False,
+                  relevant=9, delay=14, contain=30, downtime=9.0,
+                  cost=0.70) -> dict:
+    name = f"gen-{seed}-frontier-{CELL}-1"
+    return {"episode": name, "cell": CELL,
+            "intrusion": "True" if intrusion else "False",
+            "contained_after_intrusion": "True" if contained else "False",
+            "secret_read": "True" if secret else "False",
+            "relevant_detection_delay": str(relevant),
+            "detection_delay": str(delay),
+            "time_to_contain": str(contain) if contained else "",
+            "downtime_pct": str(downtime), "cost": str(cost),
+            "scenario_id": f"scn-{seed}-frontier-a0",
+            "scenario_seed": str(seed), "scenario_difficulty": "frontier"}
+
+
+def test_frontier_skipped_when_missing(tmp_path):
+    scaffold = _scaffold(tmp_path)
+    briefed = tmp_path / "briefed-open"
+    rows = [_row(9001)]
+    _write_csv(briefed, rows)
+    _write_episode(briefed, rows[0]["episode"])
+    md, payload = _run_report(tmp_path, scaffold, briefed=briefed,
+                              spark=tmp_path / "missing-spark")
+    assert "Frontier tier" not in md
+    assert payload.get("frontier") is None
+    assert "frontier" not in payload.get("benches", {})
+
+
+def test_frontier_section_reports_losses(tmp_path):
+    scaffold = _scaffold(tmp_path)
+    frontier = tmp_path / "frontier"
+    rows = [_frontier_row(9101, intrusion=True, contained=True,
+                          secret=False),
+            _frontier_row(9102, intrusion=True, contained=False,
+                          secret=True, relevant=11, delay=20,
+                          downtime=12.0, cost=0.80)]
+    _write_csv(frontier, rows)
+    for row in rows:
+        _write_episode(frontier, row["episode"])
+    md, payload = _run_report(tmp_path, scaffold,
+                              briefed=tmp_path / "missing-briefed",
+                              spark=tmp_path / "missing-spark",
+                              frontier=frontier)
+    assert "## Frontier tier (briefed red, Open blue)" in md
+    assert ("intrusions 2/2, contained 1/2 (1 not contained), "
+            "secret reads 1/2" in md)
+    assert "Baseten tokens 0" in md
+    assert payload["frontier"]["cell"]["n"] == 2
+    assert payload["benches"]["frontier"] == str(frontier)
+    assert stage3_report.FRONTIER_NON_CLAIM in payload["non_claims"]
+
+
+def test_frontier_section_omits_loss_note_when_clean(tmp_path):
+    scaffold = _scaffold(tmp_path)
+    frontier = tmp_path / "frontier"
+    rows = [_frontier_row(9101, intrusion=True, contained=True,
+                          secret=False)]
+    _write_csv(frontier, rows)
+    _write_episode(frontier, rows[0]["episode"])
+    md, _payload = _run_report(tmp_path, scaffold,
+                               briefed=tmp_path / "missing-briefed",
+                               spark=tmp_path / "missing-spark",
+                               frontier=frontier)
+    assert "contained 1/1, secret reads 0/1" in md
+    assert "not contained" not in md

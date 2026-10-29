@@ -696,6 +696,12 @@ def render_markdown(payload: dict) -> str:
                   "episodes; red/blue fb read fallbacks over turns.",
                   ""]
         lines += [f"- {sentence}" for sentence in parity["sentences"]]
+    frontier = payload.get("frontier")
+    if frontier is not None:
+        lines += ["",
+                  "## Frontier tier (briefed red, Open blue)",
+                  ""]
+        lines += [f"- {sentence}" for sentence in frontier["sentences"]]
     lines += ["", "## Claims", ""]
     lines += [f"- {claim}" for claim in payload["claims"]]
     lines += ["", "## Non-claims", ""]
@@ -996,6 +1002,39 @@ PARITY_NON_CLAIM = (
 )
 
 
+def build_frontier_sentences(cell: dict) -> list:
+    """Neutral outcome sentences for the frontier tier run.
+
+    States intrusions, containment, and secret reads with
+    denominators, naming uncontained intrusions outright when any
+    happened, plus delays, downtime, cost, and Baseten tokens.
+    Makes no comparison against the held-out cells.
+    """
+    intr = cell["intrusion"]
+    cont = cell["contained_after_intrusion"]
+    sec = cell["secret_read"]
+    uncontained = intr["hits"] - cont["hits"]
+    outcome = (f"Frontier tier on {cell['n']} frontier networks "
+               f"(descriptive only): intrusions {intr['hits']}/"
+               f"{intr['n']}, contained {cont['hits']}/{cont['n']}"
+               + (f" ({uncontained} not contained)" if uncontained else "")
+               + f", secret reads {sec['hits']}/{sec['n']}.")
+    timing = (f"Median relevant detection delay "
+              f"{_num(cell['median_relevant_delay'])} events, median time "
+              f"to contain {_num(cell['median_time_to_contain'])} events, "
+              f"mean downtime {_num(cell['mean_downtime_pct'])}%, cost "
+              f"${cell['total_cost_usd']:.2f}, Baseten tokens "
+              f"{cell.get('baseten_tokens', 0):,}.")
+    return [outcome, timing]
+
+
+FRONTIER_NON_CLAIM = (
+    "The frontier tier run is descriptive only on harder networks; "
+    "it does not compare against the held-out cells, whose networks "
+    "and difficulties differ."
+)
+
+
 # Verified by timestamp attribution of runs/spend.jsonl: 14 cached
 # entries, all muse-wonder-1.0 auditor calls during the rerun, zero
 # for blue, red, or referee.
@@ -1050,6 +1089,10 @@ def parse_args(argv=None):
                         default="runs/bench-stage3-briefed-heldout-blue-spark",
                         help="Spark-blue repeat of the briefed held-out bench; "
                         "the parity section is skipped quietly when missing")
+    parser.add_argument("--frontier",
+                        default="runs/bench-stage3-frontier",
+                        help="Frontier-tier bench; the frontier section is "
+                        "skipped quietly when missing")
     parser.add_argument("--frozen",
                         default="runs/stage3/frozen-playbook.json")
     parser.add_argument("--out-md", default="docs/STAGE3_RESULTS.md")
@@ -1165,6 +1208,21 @@ def main(argv=None) -> int:
             cell["fallback_census"] = _fallback_census(
                 briefed_spark, episodes)
             reference[BRIEFED_SPARK_LABEL] = cell
+    # The frontier bench reuses the briefed cell key (same red,
+    # sensors, and memory); the bench dir and frontier seeds tell
+    # it apart from the held-out run.
+    frontier_dir = Path(args.frontier)
+    frontier = None
+    if (frontier_dir / "summary.csv").exists():
+        frontier_cell = summarize_cell(frontier_dir, BRIEFED_CELL)
+        if frontier_cell["n"]:
+            frontier_episodes = _cell_episodes(frontier_dir, BRIEFED_CELL)
+            frontier_cell["baseten_tokens"] = _briefed_baseten_tokens(
+                frontier_dir, frontier_episodes)
+            frontier_cell["fallback_census"] = _fallback_census(
+                frontier_dir, frontier_episodes)
+            frontier = {"bench": str(frontier_dir), "cell": frontier_cell,
+                        "sentences": build_frontier_sentences(frontier_cell)}
     benches = {"heldout": str(heldout), "sensors": str(sensors),
                "noisyref": str(noisyref), "xcheck": str(xcheck),
                "briefed": str(briefed)}
@@ -1174,11 +1232,16 @@ def main(argv=None) -> int:
     if open_cell is not None and spark_cell is not None:
         parity = build_parity(briefed, briefed_spark, open_cell, spark_cell)
         benches["briefed_spark"] = str(briefed_spark)
+    if frontier is not None:
+        benches["frontier"] = str(frontier_dir)
     claims = build_claims(comparisons, cells, reference, void)
     non_claims = list(NON_CLAIMS)
     if parity is not None:
         claims += build_parity_claims(parity)
         non_claims.append(PARITY_NON_CLAIM)
+    if frontier is not None:
+        claims += frontier["sentences"]
+        non_claims.append(FRONTIER_NON_CLAIM)
     claims += [REPLAY_NOTE]
     payload = {
         "stage": 3,
@@ -1195,6 +1258,8 @@ def main(argv=None) -> int:
     }
     if parity is not None:
         payload["parity"] = parity
+    if frontier is not None:
+        payload["frontier"] = frontier
     md_path = Path(args.out_md)
     md_path.parent.mkdir(parents=True, exist_ok=True)
     md_path.write_text(render_markdown(payload), encoding="utf-8")
