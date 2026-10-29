@@ -6,6 +6,8 @@ metric from the saved CSVs and jsonls, and writes:
 
 - docs/STAGE3_RESULTS.md: per-cell tables, Wilson intervals, exact
   paired p-values, README-ready claims and explicit non-claims
+- docs/COST.md: per-exercise cost and token averages by role for
+  the end-to-end (briefed red vs open blue) bench (--cost-only)
 - dashboard/results.json: the same numbers for the Results tab:
 
   {"stage": 3, "generated": iso, "frozen_sha256": hex-or-null,
@@ -61,6 +63,16 @@ SPEND_FILE = ROOT / "runs" / "spend.jsonl"
 ARCHIVE_DIR = ROOT / "runs" / "archive"
 _SPEND_TAIL_S = 300.0
 
+# Cost table models (mirror crucible/llm.py ROLE_MODELS): stage3 blue
+# runs the open-weights model on Baseten while red and the auditor
+# bill Meta. Auditor, referee, and debrief share muse-wonder-1.0,
+# but the stage3 benches froze the playbook (referee never called)
+# and never run debrief, so every wonder entry in bench scope is
+# the auditor.
+RED_MODEL = "muse-spark-1.3"
+AUDIT_MODEL = "muse-wonder-1.0"
+COST_ROLES = ("red", "blue", "auditor", "referee", "debrief")
+
 
 def _log_mtime(path: Path) -> float | None:
     try:
@@ -69,18 +81,14 @@ def _log_mtime(path: Path) -> float | None:
         return None
 
 
-def _briefed_baseten_tokens(bench_dir: Path, episodes: list) -> int:
-    """Sum one bench's Baseten tokens, excluding archived reruns.
-
-    Reruns reuse episode ids, and the spend log still holds the
-    archived 401 run under the same ids, so entries at or before
-    each archived log's mtime are cut; the rest, up to this bench's
-    log plus a referee tail, is this bench's run.
-    """
-    if not SPEND_FILE.exists():
-        return 0
+def _read_spend(spend_file: Path) -> dict:
+    """Map exercise id to its spend entries; blanks and bad lines skipped."""
     by_episode: dict = {}
-    for line in SPEND_FILE.read_text(encoding="utf-8").splitlines():
+    try:
+        text = spend_file.read_text(encoding="utf-8")
+    except OSError:
+        return by_episode
+    for line in text.splitlines():
         line = line.strip()
         if not line:
             continue
@@ -88,15 +96,31 @@ def _briefed_baseten_tokens(bench_dir: Path, episodes: list) -> int:
             entry = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if entry.get("host") != "baseten":
-            continue
-        by_episode.setdefault(entry.get("exercise_id", ""), []).append(entry)
+        if isinstance(entry, dict):
+            by_episode.setdefault(entry.get("exercise_id", ""), []).append(entry)
+    return by_episode
+
+
+def _archive_dirs(archive_dir: Path) -> list:
     try:
-        archived = [path for path in ARCHIVE_DIR.iterdir()
-                    if path.is_dir()]
+        return [path for path in archive_dir.iterdir() if path.is_dir()]
     except OSError:
-        archived = []
-    total = 0
+        return []
+
+
+def _scoped_spend(bench_dir: Path, episodes: list, *,
+                 spend_file: Path = SPEND_FILE,
+                 archive_dir: Path = ARCHIVE_DIR) -> list:
+    """Spend entries plausibly written by this bench's run.
+
+    Reruns reuse episode ids, and the spend log still holds the
+    archived 401 run under the same ids, so entries at or before
+    each archived log's mtime are cut; the rest, up to this bench's
+    log plus a referee tail, is this bench's run.
+    """
+    by_episode = _read_spend(spend_file)
+    archived = _archive_dirs(archive_dir)
+    scoped = []
     for episode in episodes:
         mine = _log_mtime(bench_dir / f"{episode}.jsonl")
         if mine is None:
@@ -112,9 +136,134 @@ def _briefed_baseten_tokens(bench_dir: Path, episodes: list) -> int:
             except (TypeError, ValueError):
                 continue
             if when > floor and when <= mine + _SPEND_TAIL_S:
-                total += int(entry.get("input_tokens", 0) or 0)
-                total += int(entry.get("output_tokens", 0) or 0)
+                scoped.append(entry)
+    return scoped
+
+
+def _briefed_baseten_tokens(bench_dir: Path, episodes: list) -> int:
+    """Sum one bench's Baseten tokens, excluding archived reruns.
+
+    Reruns reuse episode ids, and the spend log still holds the
+    archived 401 run under the same ids, so entries at or before
+    each archived log's mtime are cut; the rest, up to this bench's
+    log plus a referee tail, is this bench's run.
+    """
+    total = 0
+    for entry in _scoped_spend(bench_dir, episodes):
+        if entry.get("host") != "baseten":
+            continue
+        total += int(entry.get("input_tokens", 0) or 0)
+        total += int(entry.get("output_tokens", 0) or 0)
     return total
+
+
+def _cell_episodes(bench_dir: Path, cell: str) -> list:
+    """Episode ids for one cell from the bench summary."""
+    return [row.get("episode", "") for row in _csv_rows(bench_dir)
+            if row.get("cell") == cell]
+
+
+def build_cost_table(bench_dir: Path, episodes: list, *,
+                     cell: str = BRIEFED_CELL,
+                     spend_file: Path = SPEND_FILE,
+                     archive_dir: Path = ARCHIVE_DIR) -> dict:
+    """Per-exercise cost and token averages by role for one bench.
+
+    Spend is scoped with the archive-aware window, so the archived
+    invalid run under the same episode ids is not double counted.
+    Baseten-hosted entries count as blue tokens (the Baseten price
+    is unknown, so dollars are never shown for blue). Meta
+    muse-spark-1.3 entries count as red and Meta muse-wonder-1.0 as
+    auditor: the stage3 benches froze the playbook (referee never
+    called) and never run debrief, so referee and debrief are zero
+    by construction. Cached entries cost $0 in the spend log and
+    count $0 here.
+    """
+    scoped = _scoped_spend(bench_dir, episodes, spend_file=spend_file,
+                           archive_dir=archive_dir)
+    red_usd = 0.0
+    audit_usd = 0.0
+    unattributed_usd = 0.0
+    blue_tokens = 0
+    for entry in scoped:
+        if entry.get("host") == "baseten":
+            blue_tokens += (int(entry.get("input_tokens", 0) or 0)
+                            + int(entry.get("output_tokens", 0) or 0))
+            continue
+        try:
+            cost = float(entry.get("cost_usd", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            cost = 0.0
+        model = entry.get("model", "")
+        if model == AUDIT_MODEL:
+            audit_usd += cost
+        elif model == RED_MODEL:
+            red_usd += cost
+        else:
+            unattributed_usd += cost
+    count = len(episodes)
+    red_usd = round(red_usd, 4)
+    audit_usd = round(audit_usd, 4)
+    unattributed_usd = round(unattributed_usd, 4)
+    meta_usd = round(red_usd + audit_usd + unattributed_usd, 4)
+    roles = {
+        "red": {"meta_usd": red_usd, "baseten_tokens": 0,
+                "meta_per_exercise": round(red_usd / count, 4) if count else 0.0,
+                "tokens_per_exercise": 0},
+        "blue": {"meta_usd": 0.0, "baseten_tokens": blue_tokens,
+                 "meta_per_exercise": 0.0,
+                 "tokens_per_exercise": round(blue_tokens / count) if count else 0},
+        "auditor": {"meta_usd": audit_usd, "baseten_tokens": 0,
+                    "meta_per_exercise": round(audit_usd / count, 4) if count else 0.0,
+                    "tokens_per_exercise": 0},
+        "referee": {"meta_usd": 0.0, "baseten_tokens": 0,
+                    "meta_per_exercise": 0.0, "tokens_per_exercise": 0},
+        "debrief": {"meta_usd": 0.0, "baseten_tokens": 0,
+                    "meta_per_exercise": 0.0, "tokens_per_exercise": 0},
+    }
+    return {"bench": str(bench_dir), "cell": cell, "n": count,
+            "roles": roles, "meta_usd": meta_usd,
+            "meta_per_exercise": round(meta_usd / count, 4) if count else 0.0,
+            "baseten_tokens": blue_tokens,
+            "tokens_per_exercise": round(blue_tokens / count) if count else 0,
+            "unattributed_usd": unattributed_usd}
+
+
+def _usd(value: float) -> str:
+    return f"${value:.2f}"
+
+
+def render_cost_markdown(table: dict) -> str:
+    """Render the cost page: one small table plus three sentences."""
+    roles = table["roles"]
+    blue_tok = roles["blue"]["tokens_per_exercise"]
+    lines = ["# Exercise cost: briefed red vs open blue",
+             "",
+             "| role | Meta $/exercise | Baseten tokens/exercise |",
+             "|------|-----------------|-------------------------|",
+             f"| red | {_usd(roles['red']['meta_per_exercise'])} | n/a |",
+             f"| blue | n/a | {blue_tok:,} |",
+             f"| auditor | {_usd(roles['auditor']['meta_per_exercise'])} | n/a |",
+             f"| referee | "
+             f"{_usd(roles['referee']['meta_per_exercise'])} | n/a |",
+             "| debrief | n/a | n/a |",
+             f"| total | {_usd(table['meta_per_exercise'])} | "
+             f"{table['tokens_per_exercise']:,} |",
+             "",
+             f"One end-to-end exercise, briefed model red against "
+             f"open-weight blue with end-of-episode audit (n={table['n']}), "
+             f"costs {_usd(table['meta_per_exercise'])} in Meta credits. "
+             f"The open-weight blue uses {blue_tok:,} Baseten tokens per "
+             f"exercise, billed separately at an unknown price, so the "
+             f"table shows tokens only and no dollar figure for blue. "
+             f"Audit averages "
+             f"{_usd(roles['auditor']['meta_per_exercise'])} per exercise; "
+             f"the referee never runs under the frozen playbook, debrief "
+             f"is dashboard-only, and spend is attributed per episode "
+             f"with the archive-aware timestamp window from the results "
+             f"report so the archived invalid 401 run is not double "
+             f"counted."]
+    return "\n".join(lines) + "\n"
 
 
 def _fallback_census(bench_dir: Path, episodes: list) -> dict:
@@ -905,11 +1054,46 @@ def parse_args(argv=None):
                         default="runs/stage3/frozen-playbook.json")
     parser.add_argument("--out-md", default="docs/STAGE3_RESULTS.md")
     parser.add_argument("--out-json", default="dashboard/results.json")
+    parser.add_argument("--out-cost", default=None,
+                        help="Write the per-role cost table here "
+                        "(default: skipped in full runs, docs/COST.md "
+                        "with --cost-only)")
+    parser.add_argument("--spend-file", default=str(SPEND_FILE),
+                        help="Spend log for cost attribution")
+    parser.add_argument("--archive-dir", default=str(ARCHIVE_DIR),
+                        help="Archived benches whose reruns share "
+                        "episode ids")
+    parser.add_argument("--cost-only", action="store_true",
+                        help="Write only the cost table, skipping "
+                        "the results report")
     return parser.parse_args(argv)
+
+
+def _cost_only(args) -> int:
+    briefed = Path(args.briefed)
+    if not (briefed / "summary.csv").exists():
+        print(f"report: no finished briefed bench at {briefed}",
+              file=sys.stderr)
+        return 1
+    episodes = _cell_episodes(briefed, BRIEFED_CELL)
+    if not episodes:
+        print(f"report: no {BRIEFED_CELL} episodes at {briefed}",
+              file=sys.stderr)
+        return 1
+    table = build_cost_table(
+        briefed, episodes, spend_file=Path(args.spend_file),
+        archive_dir=Path(args.archive_dir))
+    out_cost = Path(args.out_cost) if args.out_cost else Path("docs/COST.md")
+    out_cost.parent.mkdir(parents=True, exist_ok=True)
+    out_cost.write_text(render_cost_markdown(table), encoding="utf-8")
+    print(f"wrote {out_cost}")
+    return 0
 
 
 def main(argv=None) -> int:
     args = parse_args(argv)
+    if args.cost_only:
+        return _cost_only(args)
     heldout = Path(args.heldout)
     sensors = Path(args.sensors)
     frozen = Path(args.frozen)
@@ -1018,6 +1202,19 @@ def main(argv=None) -> int:
     json_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(json.dumps(payload, indent=2) + "\n",
                          encoding="utf-8")
+    if args.out_cost and (briefed / "summary.csv").exists():
+        cost_episodes = _cell_episodes(briefed, BRIEFED_CELL)
+        if cost_episodes:
+            cost_table = build_cost_table(
+                briefed, cost_episodes,
+                spend_file=Path(args.spend_file),
+                archive_dir=Path(args.archive_dir))
+            cost_path = Path(args.out_cost)
+            cost_path.parent.mkdir(parents=True, exist_ok=True)
+            cost_path.write_text(render_cost_markdown(cost_table),
+                                 encoding="utf-8")
+            print(f"wrote {md_path}, {json_path}, and {cost_path}")
+            return 0
     print(f"wrote {md_path} and {json_path}")
     return 0
 

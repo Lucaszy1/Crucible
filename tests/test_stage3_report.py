@@ -6,6 +6,7 @@ only scripts/stage3_report.py runs, against local summary and jsonl files.
 
 import csv
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -165,3 +166,119 @@ def test_parity_reports_whichever_better(tmp_path):
         _write_episode(spark, row["episode"])
     md, _ = _run_report(tmp_path, scaffold, briefed=briefed, spark=spark)
     assert "spark fewer" in md.lower()
+
+
+# --- cost table ---
+
+
+def _touch(path: Path, moment: float) -> None:
+    os.utime(path, (moment, moment))
+
+
+def _write_spend(path: Path, entries: list) -> None:
+    with path.open("w", encoding="utf-8") as fh:
+        for entry in entries:
+            fh.write(json.dumps(entry) + "\n")
+
+
+def _cost_scaffold(tmp_path: Path) -> dict:
+    """Briefed bench (2 episodes) plus an older archived same-id run.
+
+    The spend log holds both runs under the same episode ids; the
+    archived run's entries land at or before the archived log mtime
+    and must not be counted.
+    """
+    briefed = tmp_path / "briefed"
+    rows = [_row(9001), _row(9002)]
+    _write_csv(briefed, rows)
+    archive = tmp_path / "archive" / "bench-401"
+    archive.mkdir(parents=True)
+    base = 1793225000.0
+    for row in rows:
+        _write_episode(briefed, row["episode"])
+        (archive / f"{row['episode']}.jsonl").write_text(
+            "{}\n", encoding="utf-8")
+        _touch(archive / f"{row['episode']}.jsonl", base)
+        _touch(briefed / f"{row['episode']}.jsonl", base + 5000.0)
+    spend = tmp_path / "spend.jsonl"
+    entries = []
+    for row in rows:
+        episode = row["episode"]
+        entries.append({"day": "2026-10-28", "ts": base - 100.0,
+                        "model": "muse-spark-1.3", "exercise_id": episode,
+                        "input_tokens": 100000, "output_tokens": 100000,
+                        "cost_usd": 99.0, "cached": False, "host": "meta"})
+        entries.append({"day": "2026-10-28", "ts": base + 5100.0,
+                        "model": "muse-spark-1.3", "exercise_id": episode,
+                        "input_tokens": 1000, "output_tokens": 100,
+                        "cost_usd": 0.0026, "cached": False, "host": "meta"})
+        entries.append({"day": "2026-10-28", "ts": base + 5200.0,
+                        "model": "muse-wonder-1.0", "exercise_id": episode,
+                        "input_tokens": 2000, "output_tokens": 200,
+                        "cost_usd": 0.013, "cached": False, "host": "meta"})
+        entries.append({"day": "2026-10-28", "ts": base + 5300.0,
+                        "model": "meta-models/muse-spark-open-1026",
+                        "exercise_id": episode, "input_tokens": 70000,
+                        "output_tokens": 7000, "reasoning_tokens": 500,
+                        "cost_usd": 0.0, "cached": False, "host": "baseten"})
+    _write_spend(spend, entries)
+    return {"briefed": briefed, "rows": rows, "spend": spend,
+            "archive": tmp_path / "archive"}
+
+
+def _cost_table(scaffold: dict) -> dict:
+    episodes = [row["episode"] for row in scaffold["rows"]]
+    return stage3_report.build_cost_table(
+        scaffold["briefed"], episodes, spend_file=scaffold["spend"],
+        archive_dir=scaffold["archive"])
+
+
+def test_cost_table_attributes_roles_and_cuts_archive(tmp_path):
+    table = _cost_table(_cost_scaffold(tmp_path))
+    assert table["n"] == 2
+    assert table["roles"]["red"]["meta_usd"] == round(0.0026 * 2, 4)
+    assert table["roles"]["auditor"]["meta_usd"] == round(0.013 * 2, 4)
+    assert table["roles"]["blue"]["baseten_tokens"] == 77000 * 2
+    assert table["roles"]["referee"] == {"meta_usd": 0.0,
+                                         "baseten_tokens": 0,
+                                         "meta_per_exercise": 0.0,
+                                         "tokens_per_exercise": 0}
+    assert table["roles"]["debrief"] == {"meta_usd": 0.0,
+                                         "baseten_tokens": 0,
+                                         "meta_per_exercise": 0.0,
+                                         "tokens_per_exercise": 0}
+    assert table["meta_usd"] == round(0.0026 * 2 + 0.013 * 2, 4)
+    assert table["unattributed_usd"] == 0.0
+    assert table["tokens_per_exercise"] == 77000
+
+
+def test_cost_markdown_is_table_plus_three_sentences(tmp_path):
+    table = _cost_table(_cost_scaffold(tmp_path))
+    md = stage3_report.render_cost_markdown(table)
+    assert "| red | $0.00 | n/a |" in md
+    assert "| blue | n/a | 77,000 |" in md
+    assert "| auditor | $0.01 | n/a |" in md
+    assert "| total | $0.02 | 77,000 |" in md
+    context = md.rsplit("\n\n", 1)[1].strip()
+    assert context.count(". ") == 2 and context.endswith(".")
+    assert "401" in context
+
+
+def test_cost_only_writes_cost_md(tmp_path):
+    scaffold = _cost_scaffold(tmp_path)
+    out_cost = tmp_path / "COST.md"
+    code = stage3_report.main([
+        "--cost-only", "--briefed", str(scaffold["briefed"]),
+        "--spend-file", str(scaffold["spend"]),
+        "--archive-dir", str(scaffold["archive"]),
+        "--out-cost", str(out_cost)])
+    assert code == 0
+    text = out_cost.read_text(encoding="utf-8")
+    assert "| blue | n/a | 77,000 |" in text
+
+
+def test_cost_only_requires_briefed_bench(tmp_path):
+    code = stage3_report.main([
+        "--cost-only", "--briefed", str(tmp_path / "missing"),
+        "--out-cost", str(tmp_path / "COST.md")])
+    assert code == 1
