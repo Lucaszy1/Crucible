@@ -1,6 +1,6 @@
 # Stage 3 results: frozen playbook on held-out networks
 
-Generated 2026-10-29T00:54:22.421249+00:00 from `heldout`, `sensors`, `noisyref`, `xcheck`, `briefed`.
+Generated 2026-10-29T07:10:18.245094+00:00 from `heldout`, `sensors`, `noisyref`, `xcheck`, `briefed`, `briefed_spark`.
 Frozen playbook sha256: `76c925e82ddeb30bd592ffe3511bba067aca8dc32db1130185ed8c2422a2c0d8`.
 Corrected headline: sensors-on arms come from the rerun `runs/bench-stage3-heldout-sensors` (working sensors); sensors-off arms come from the valid half of `runs/bench-stage3-heldout`. The first run's sensors-on half is void (documented sensor bug, fixed in 1224db4) and appears only in the void section.
 Rates carry Wilson 95% intervals; paired p-values are exact two-sided (McNemar for binary outcomes, sign test for delays and downtime). p >= 0.05 is reported as within noise.
@@ -58,6 +58,27 @@ The first run's sensors-on arms ran with silently broken sensors (zero alerts in
 - noisy-sensors-on-memory-on (n=20): intrusions 20/20, secret reads 0/20, contained 20/20, med delay 10, med relevant 5, med contain 8.
 - spark-blue:solver-sensors-on-memory-off (n=6): intrusions 6/6, secret reads 0/6, contained 6/6, med delay 3, med relevant 1, med contain 6.
 - briefed-red-vs-Spark-Open (n=20): intrusions 18/20, secret reads 0/18, contained 18/18, med delay 12, med relevant 7, med contain 22.
+- briefed-red-vs-Spark (n=20): intrusions 20/20, secret reads 0/20, contained 20/20, med delay 5, med relevant 1, med contain 24.
+
+## Open-weight parity (briefed red, Open vs Spark blue)
+
+| blue | n | same nets | intrusions | contained | secret reads | med delay | med relevant | med contain | downtime | downtime cont | cost | red fb | blue fb |
+|------|---|-----------|------------|-----------|--------------|-----------|--------------|-------------|----------|---------------|------|--------|---------|
+| Open | 20 | 20/20 | 18/20 | 18/18 | 0/18 | 12 | 7 | 22 | 6.30% | 6.96% | $13.16 | 1/600 | 11/600 |
+| Spark | 20 | 20/20 | 20/20 | 20/20 | 0/20 | 5 | 1 | 24 | 6.85% | 6.85% | $17.93 | 1/600 | 1/600 |
+
+Same nets reads shared seeds over arm episodes; med delay is the median first-report delay, med relevant the median relevant delay; downtime is the mean over all episodes, downtime cont the mean over contained episodes; red/blue fb read fallbacks over turns.
+
+- Same networks: 20 of 20 seeds overlap (9001-9020 (20 seeds)).
+- Intrusions: Open 18/20, Spark 20/20 (Open fewer).
+- Containment given intrusion: Open 18/18, Spark 20/20 (tied).
+- Secret reads: Open 0/18, Spark 0/20 (tied).
+- Median relevant detection delay: Open 7, Spark 1 events (Spark faster).
+- Median time to contain: Open 22, Spark 24 events (Open faster).
+- Mean downtime: Open 6.30%, Spark 6.85% (Open lower; contained means Open 6.96%, Spark 6.85%).
+- Cost (Meta): Open $13.16, Spark $17.93 (Open lower).
+- Baseline fallbacks: red Open 1 of 600, Spark 1 of 600; blue Open 11 of 600, Spark 1 of 600.
+- Descriptive only at n=20 Open and n=20 Spark; briefed red re-rolled between benches, so pairing is approximate. This section compares the two runs; it does not conclude parity.
 
 ## Claims
 
@@ -69,6 +90,8 @@ The first run's sensors-on arms ran with silently broken sensors (zero alerts in
 - Briefed model red against Open blue (n=20, descriptive only): 18 of 20 networks had an intrusion, and all 18 were contained; red did not get a foothold on the other 2. Secret reads 0/18 (0.0%), median relevant detection delay 7 events, median time to contain 22 events, mean downtime 6.96%, cost $13.16, Baseten tokens 1,547,043.
 - 1 of 600 red turns and 11 of 600 blue turns used a safe baseline move after model replies with no usable tool call, across 9 of 20 episodes.
 - Void record only: the void run's B vs C secret-read gap was discordant pairs 6-0 over 20 pairs (p=0.0312); it is not evidence.
+- Briefed-red blue comparison on 20 shared networks (descriptive only): Open intrusions 18/20, Spark 20/20; containment Open 18/18, Spark 20/20; secret reads Open 0/18, Spark 0/20.
+- Briefed-red delays and cost: median relevant delay Open 7 vs Spark 1, median time to contain Open 22 vs Spark 24, cost Open $13.16 vs Spark $17.93.
 - 14 auditor verdicts in the corrected held-out rerun were replayed from the voided original run on byte-identical prompts; no blue, red, or referee response was cached and outcomes are unaffected.
 
 ## Non-claims
@@ -80,3 +103,4 @@ The first run's sensors-on arms ran with silently broken sensors (zero alerts in
 - The main table uses a solver red with seeded imperfection, because unbriefed model red achieved no intrusion in 18 train episodes: results show blue contains a known-path intruder, not that blue stops an adaptive attacker. The briefed-red run is descriptive only at n=20: 18 of 20 networks had an intrusion, and all 18 were contained; red did not get a foothold on the other 2.
 - Audit justified rates cover the rerun B and C cells only; no other cell was audited.
 - The frozen playbook was learned on train episodes whose sensors were void too, so its rules were learned without sensor input; the rerun tests a deaf-learned playbook under working sensors.
+- The Open-vs-Spark blue comparison pairs across benches by scenario; briefed red re-rolled between benches, so pairing is approximate and descriptive only at n=20 per arm.
