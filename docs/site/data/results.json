@@ -2,6 +2,7 @@
   "benches": {
     "briefed": "runs/bench-stage3-briefed-heldout",
     "briefed_spark": "runs/bench-stage3-briefed-heldout-blue-spark",
+    "frontier": "runs/bench-stage3-frontier",
     "heldout": "runs/bench-stage3-heldout",
     "noisyref": "runs/bench-stage3-noisyref",
     "sensors": "runs/bench-stage3-heldout-sensors",
@@ -176,6 +177,10 @@
     "Void record only: the void run's B vs C secret-read gap was discordant pairs 6-0 over 20 pairs (p=0.0312); it is not evidence.",
     "Briefed-red blue comparison on 20 shared networks (descriptive only): Open intrusions 18/20, Spark 20/20; containment Open 18/18, Spark 20/20; secret reads Open 0/18, Spark 0/20.",
     "Briefed-red delays and cost: median relevant delay Open 7 vs Spark 1, median time to contain Open 22 vs Spark 24, cost Open $13.16 vs Spark $17.93.",
+    "Frontier tier on 10 frontier networks (descriptive only): intrusions 9/10, contained 9/9, secret reads 0/9.",
+    "Median relevant detection delay 7 events, median time to contain 20 events, mean downtime 4.26% over contained episodes, cost $6.38, Baseten tokens 807,490.",
+    "Baseline fallbacks: 2 of 300 red turns (0.7%) and 3 of 300 blue turns (1.0%) used a safe baseline move after model replies with no usable tool call, across 5 of 10 episodes.",
+    "Excluded from the frontier table: 1 classic-network episode the bench ran by accident: classic-model-briefed-sensors-on-memory-off-1 (no intrusion).",
     "14 auditor verdicts in the corrected held-out rerun were replayed from the voided original run on byte-identical prompts; no blue, red, or referee response was cached and outcomes are unaffected."
   ],
   "comparisons": [
@@ -291,8 +296,68 @@
       "pairs": 20
     }
   ],
+  "frontier": {
+    "bench": "runs/bench-stage3-frontier",
+    "cell": {
+      "audit_episodes": 10,
+      "audit_justified_rate": 0.7633333333333333,
+      "baseten_tokens": 807490,
+      "cell": "model-briefed-sensors-on-memory-off",
+      "contained_after_intrusion": {
+        "hits": 9,
+        "n": 9,
+        "rate": 1.0,
+        "wilson": [
+          0.7008472464490407,
+          1.0
+        ]
+      },
+      "fallback_census": {
+        "blue_fallbacks": 3,
+        "blue_turns": 300,
+        "episodes": 5,
+        "n": 10,
+        "red_fallbacks": 2,
+        "red_turns": 300
+      },
+      "intrusion": {
+        "hits": 9,
+        "n": 10,
+        "rate": 0.9,
+        "wilson": [
+          0.595843614502428,
+          0.9821242504842789
+        ]
+      },
+      "mean_downtime_contained_pct": 4.257777777777778,
+      "mean_downtime_pct": 3.851,
+      "median_detection_delay": 5.0,
+      "median_relevant_delay": 7.0,
+      "median_time_to_contain": 20.0,
+      "n": 10,
+      "secret_read": {
+        "hits": 0,
+        "n": 9,
+        "rate": 0.0,
+        "wilson": [
+          0.0,
+          0.2991527535509594
+        ]
+      },
+      "total_cost_usd": 6.3799
+    },
+    "excluded": [
+      "classic-model-briefed-sensors-on-memory-off-1"
+    ],
+    "sentences": [
+      "Frontier tier on 10 frontier networks (descriptive only): intrusions 9/10, contained 9/9, secret reads 0/9.",
+      "Median relevant detection delay 7 events, median time to contain 20 events, mean downtime 4.26% over contained episodes, cost $6.38, Baseten tokens 807,490.",
+      "Baseline fallbacks: 2 of 300 red turns (0.7%) and 3 of 300 blue turns (1.0%) used a safe baseline move after model replies with no usable tool call, across 5 of 10 episodes.",
+      "Excluded from the frontier table: 1 classic-network episode the bench ran by accident: classic-model-briefed-sensors-on-memory-off-1 (no intrusion)."
+    ]
+  },
   "frozen_sha256": "76c925e82ddeb30bd592ffe3511bba067aca8dc32db1130185ed8c2422a2c0d8",
-  "generated": "2026-10-29T07:10:18.245094+00:00",
+  "generated": "2026-10-29T14:38:01.119221+00:00",
   "non_claims": [
     "No result here shows the playbook generalizes beyond these held-out seeds and difficulties; 20 scenarios are one pilot, not coverage.",
     "A comparison within noise is no conclusion, not proof of no effect: with 20 pairs only large asymmetries can reach p < 0.05.",
@@ -301,7 +366,8 @@
     "The main table uses a solver red with seeded imperfection, because unbriefed model red achieved no intrusion in 18 train episodes: results show blue contains a known-path intruder, not that blue stops an adaptive attacker. The briefed-red run is descriptive only at n=20: 18 of 20 networks had an intrusion, and all 18 were contained; red did not get a foothold on the other 2.",
     "Audit justified rates cover the rerun B and C cells only; no other cell was audited.",
     "The frozen playbook was learned on train episodes whose sensors were void too, so its rules were learned without sensor input; the rerun tests a deaf-learned playbook under working sensors.",
-    "The Open-vs-Spark blue comparison pairs across benches by scenario; briefed red re-rolled between benches, so pairing is approximate and descriptive only at n=20 per arm."
+    "The Open-vs-Spark blue comparison pairs across benches by scenario; briefed red re-rolled between benches, so pairing is approximate and descriptive only at n=20 per arm.",
+    "The frontier tier run is descriptive only; it makes no claim that the tier is harder than other tiers and no claim that blue always holds."
   ],
   "parity": {
     "cell": "model-briefed-sensors-on-memory-off",
