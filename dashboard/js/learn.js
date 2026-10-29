@@ -133,8 +133,38 @@ function renderSection(doc, root, section, title, tag, label) {
   root.append(head, src, wrap, pairs, line);
 }
 
+// Glossary for first-time visitors: seven plain entries, no
+// server needed. Rendered on the Learning tab on both the live
+// page and the static replay site.
+export const GLOSSARY = [
+  { term: "intrusion", def: "Red signs in to a host without permission." },
+  { term: "containment", def: "Blue isolates or patches a host to stop the intrusion." },
+  { term: "auditor", def: "An independent check that rates each blue move from 0 to 10." },
+  { term: "sensors", def: "Log and status feeds that show blue what is happening. With sensors off, blue sees less." },
+  { term: "held-out", def: "A fresh network seed saved for testing, from 9001 to 9020. Frontier uses 9101 to 9110." },
+  { term: "assisted (human takeover)", def: "A run where a person takes the defender seat for some moves. Marked as assisted." },
+  { term: "frontier tier", def: "The hardest difficulty level, with new networks from seeds 9101 to 9110." },
+];
+
+export function renderGlossary(doc, root, entries) {
+  const list = entries || GLOSSARY;
+  const scope = doc || (typeof document !== "undefined" ? document : null);
+  if (!scope || !root) return;
+  root.innerHTML = "";
+  for (const entry of list) {
+    const term = scope.createElement("dt");
+    term.className = "glossary-term";
+    term.textContent = entry.term;
+    const def = scope.createElement("dd");
+    def.className = "glossary-def";
+    def.textContent = entry.def;
+    root.append(term, def);
+  }
+}
+
 export function renderLearning(els, data) {
   const doc = els.doc || document;
+  if (els.glossary) renderGlossary(doc, els.glossary, GLOSSARY);
   els.empty.hidden = Boolean(data);
   els.note.hidden = !data || !data.voidNote;
   if (data && data.voidNote) els.note.textContent = data.voidNote;

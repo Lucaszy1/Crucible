@@ -16,7 +16,8 @@ What the build does:
   orchestrator.score_events and outcome-checked.
 - Writes the API replacements as static JSON under site/data/:
   runs index, one replay per run, one Layer 1 debrief per run,
-  featured list, attack map, config, stage3 Learning numbers
+  featured list with the live lobby's plain card titles, attack
+  map, config, stage3 Learning numbers
   (derived from dashboard/results.json), frozen playbook, and
   results.json. Debriefs are precomputed with
   debrief.build_debrief, deterministic and model-free, so the
@@ -380,9 +381,19 @@ def write_data_files(out: Path, runs: dict) -> dict:
         debrief_payload = {"id": run_id, "debrief": runs[run_id]["debrief"]}
         write_json(data_dir / "debriefs" / f"{run_id}.json", debrief_payload)
 
+    curated = featured_curation()
+    live_titles = curated.get("titles") or {}
+    titles = {}
+    for source in SOURCES:
+        title = live_titles.get(source["episode"])
+        if not title:
+            raise SystemExit(
+                f"error: {source['id']} episode has no featured title")
+        titles[source["id"]] = title
     featured = {"_note": "Featured replays in the static bundle, "
-                         "in display order.",
-                "featured": list(RUN_IDS)}
+                         "in display order. Titles match the live lobby.",
+                "featured": list(RUN_IDS),
+                "titles": titles}
     write_json(data_dir / "featured.json", featured)
 
     attack_map = json.loads(
@@ -423,6 +434,7 @@ def write_data_files(out: Path, runs: dict) -> dict:
         "replays": embedded_replays,
         "debriefs": embedded_debriefs,
         "featured": read("featured.json")["featured"],
+        "featuredTitles": read("featured.json")["titles"],
         "attackMap": read("attack_map.json"),
         "config": read("config.json"),
         "stage3": read("stage3.json"),
@@ -454,7 +466,7 @@ function embedded() {
 }
 
 function localOnly() {
-  return new Error("Live exercises need a local server — run locally to try this.");
+  return new Error("Live exercises need a local server - run locally to try this.");
 }
 
 export function fetchRuns() {
@@ -480,7 +492,10 @@ export function fetchAttackMap() {
 }
 
 export function fetchFeatured() {
-  return Promise.resolve({ featured: embedded().featured || [] });
+  return Promise.resolve({
+    featured: embedded().featured || [],
+    titles: embedded().featuredTitles || {},
+  });
 }
 
 export function fetchConfig() {
@@ -556,7 +571,7 @@ APP_STATIC_BOOT = '''
 const STATIC_TRY_LOCAL = "run locally to try this";
 function staticModeBoot() {
   setServer(controls, "static", "Static replay");
-  const note = "Live exercises need a local server — " + STATIC_TRY_LOCAL + ".";
+  const note = "Live exercises need a local server - " + STATIC_TRY_LOCAL + ".";
   if (controls.run) { controls.run.disabled = true; controls.run.title = note; }
   if (controls.agents) { controls.agents.disabled = true; controls.agents.title = note; }
   if (els.liveBtn) { els.liveBtn.disabled = true; els.liveBtn.title = note; }
@@ -613,7 +628,7 @@ APP_PATCHES = [
 
 COMMANDBAR_STATIC_BAR = '''\
   function staticCommandBar() {
-    const note = "Defender orders need a live exercise — run locally to try this.";
+    const note = "Defender orders need a live exercise - run locally to try this.";
     ctl.visible = true;
     bar.hidden = false;
     if (els.mic) { els.mic.disabled = true; els.mic.title = note; }
@@ -796,12 +811,12 @@ HTML_PATCHES = [
      '<script src="app.bundle.js"></script>'),
     ('<button id="runBtn" class="btn primary">Start exercise</button>',
      '<button id="runBtn" class="btn primary" disabled '
-     'title="Live exercises need a local server — '
+     'title="Live exercises need a local server - '
      'run locally to try this.">Start exercise</button>'),
     ('<button id="liveBtn" class="btn primary hero-cta">'
      'Run a live exercise</button>',
      '<button id="liveBtn" class="btn primary hero-cta" disabled '
-     'title="Live exercises need a local server — '
+     'title="Live exercises need a local server - '
      'run locally to try this.">Run a live exercise</button>'),
     ('<span id="eventCount" class="event-count">0 events</span>',
      '<span id="eventCount" class="event-count">0 events</span>\n'

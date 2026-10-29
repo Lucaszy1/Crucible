@@ -195,3 +195,110 @@ def test_static_site_disables_live_controls(tmp_path):
     bundle = (out / "app.bundle.js").read_text(encoding="utf-8")
     assert "run locally to try this" in bundle
     assert "window.CRUCIBLE_STATIC" in bundle
+
+
+def test_static_site_has_ux_polish_copy(tmp_path):
+    out, _builder = build_to(tmp_path)
+    html = (out / "index.html").read_text(encoding="utf-8")
+    bundle = (out / "app.bundle.js").read_text(encoding="utf-8")
+    # Disabled reasons and the stuck hint with its exact command.
+    assert "A range is already running" in bundle
+    assert "Starting the range, about 40 seconds" in bundle
+    assert "If this looks stuck, restart the server" in html
+    assert "docker ps -aq --filter name=crucible- | xargs docker rm -f" in html
+    assert 'id="runReason"' in html
+    assert 'id="liveReason"' in html
+    # Boot progress line.
+    assert "Booting the range:" in bundle
+    assert "of about " in bundle
+    assert "BOOT_EXPECTED_SEC" in bundle
+    # Takeover and mic copy, never a bare code.
+    assert "Takeover works while an exercise is live" in bundle
+    assert "Microphone is blocked" in bundle
+    assert "set Microphone to Allow" in bundle
+    # Start-here strip and its three lines.
+    assert 'id="startHere"' in html
+    assert "Red tries to read a protected file" in html
+    assert "Blue watches the hosts" in html
+    assert "Click Watch a replay first" in html
+    # Score, speed, and auditor tooltips.
+    assert "Contained means blue stopped the intrusion" in html
+    assert "Replay speed. Brackets change it" in html
+    assert "rates each blue move from 0 to 10" in html
+    # Glossary shell and its seven terms in the bundle.
+    assert 'id="glossaryList"' in html
+    for term in ("intrusion", "containment", "auditor", "sensors",
+                 "held-out", "assisted (human takeover)", "frontier tier"):
+        assert term in bundle, f"glossary term missing: {term}"
+    # Tour button, overlay, and its four captions.
+    assert 'id="tourBtn"' in html
+    assert "Watch the tour" in html
+    assert 'id="tourOverlay"' in html
+    for caption in ("Red thought: what red tries next",
+                    "Blue thought: how blue answers",
+                    "Auditor verdict: was the blue move fair",
+                    "End card: how the exercise ended"):
+        assert caption in bundle, f"tour caption missing: {caption}"
+    assert "Try a live exercise next" in bundle
+    assert "Watch another replay next" in bundle
+
+
+def test_static_site_ux_copy_has_no_em_dash(tmp_path):
+    out, _builder = build_to(tmp_path)
+    html = (out / "index.html").read_text(encoding="utf-8")
+    bundle = (out / "app.bundle.js").read_text(encoding="utf-8")
+    # New UX copy uses hyphens, never em dashes. The static notes
+    # changed with it; old code may still hold em dashes elsewhere,
+    # so only the UX strings are checked here.
+    for text in (
+        "A range is already running",
+        "Starting the range, about 40 seconds",
+        "If this looks stuck",
+        "Booting the range:",
+        "Takeover works while an exercise is live",
+        "Microphone is blocked",
+        "Red tries to read a protected file",
+        "Watch the tour",
+        "run locally to try this",
+    ):
+        assert text in html or text in bundle, f"missing UX copy: {text}"
+    assert "— run locally to try this" not in html
+    assert "— run locally to try this" not in bundle
+
+
+def test_static_site_featured_cards_use_plain_titles(tmp_path):
+    out, builder = build_to(tmp_path)
+    live = json.loads((ROOT / "dashboard" / "featured.json")
+                      .read_text(encoding="utf-8"))
+    expected = {source["id"]: live["titles"][source["episode"]]
+                for source in builder.SOURCES}
+    assert expected == {
+        "scn-9001-contained": "Easy exercise, contained",
+        "briefed-medium-contained": "Medium exercise, contained",
+        "heldout-hard-contained": "Hard exercise, contained",
+        "sensorsoff-hard-exposed": "Hard exercise, file exposed",
+    }
+    # Same runs shown, with the live lobby's plain titles on each.
+    featured = json.loads((out / "data" / "featured.json")
+                          .read_text(encoding="utf-8"))
+    assert set(featured["featured"]) == set(expected)
+    assert featured["titles"] == expected
+    text = (out / "data.js").read_text(encoding="utf-8")
+    blob = text.split("=", 1)[1].strip().rstrip(";\n")
+    embedded = json.loads(blob)
+    assert embedded["featuredTitles"] == expected
+    bundle = (out / "app.bundle.js").read_text(encoding="utf-8")
+    assert "featuredTitles" in bundle
+    assert "function cardTitle" in bundle
+    # The Real run badge still renders from replay provenance.
+    assert "Real run" in bundle
+
+
+def test_static_site_tour_sits_above_the_stage(tmp_path):
+    out, _builder = build_to(tmp_path)
+    css = (out / "css" / "style.css").read_text(encoding="utf-8")
+    assert "inset: 12px 16px auto 16px" in css
+    assert "inset: auto 16px 16px 16px" not in css
+    bundle = (out / "app.bundle.js").read_text(encoding="utf-8")
+    assert "tourPlacement" in bundle
+    assert "TOUR_PLACE" in bundle

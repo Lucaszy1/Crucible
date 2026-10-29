@@ -3,7 +3,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  HELDOUT_MAX, HELDOUT_MIN, drawLiveScenario,
+  HELDOUT_MAX, HELDOUT_MIN, cardTitle, drawLiveScenario,
   formatDuration, hostNoun, partitionLobby, provText, storyLine,
   titleOutcomeKey, voidNoteText,
 } from "../dashboard/js/lobby.js";
@@ -182,5 +182,23 @@ describe("voidNoteText", () => {
     assert.equal(voidNoteText(false), "");
     assert.equal(voidNoteText(null), "");
     assert.equal(voidNoteText(undefined), "");
+  });
+});
+
+describe("cardTitle", () => {
+  it("shows the plain curated title instead of the raw run id", () => {
+    assert.equal(
+      cardTitle({ id: "scn-9001-contained", title: "Easy exercise, contained" }),
+      "Easy exercise, contained",
+    );
+    assert.equal(
+      cardTitle({ id: "sensorsoff-hard-exposed", title: "Hard exercise, file exposed" }),
+      "Hard exercise, file exposed",
+    );
+  });
+
+  it("falls back to the raw id without a title", () => {
+    assert.equal(cardTitle({ id: "scn-9001-contained" }), "scn-9001-contained");
+    assert.equal(cardTitle({ id: "scn-9001-contained", title: "" }), "scn-9001-contained");
   });
 });

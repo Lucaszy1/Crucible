@@ -65,7 +65,8 @@ export function verdictChip(verdict, score) {
   chip.className = "verdict";
   chip.dataset.tone = verdictTone(verdict);
   chip.textContent = score === null || score === undefined ? verdict : `${verdict} ${score}/10`;
-  chip.title = `Auditor verdict: ${verdict}`;
+  const num = score === null || score === undefined ? "" : ` ${score}/10`;
+  chip.title = `Auditor verdict: ${verdict}${num}. The auditor checks if the blue move was fair.`;
   return chip;
 }
 

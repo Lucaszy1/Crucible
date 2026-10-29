@@ -1171,6 +1171,56 @@ canvas.lobby-thumb:focus-visible { outline: 2px solid #8fb8ff; outline-offset: 2
   .move-strip { width: 100%; }
 }
 
+/* UX polish: disabled reasons, stuck hint, start-here strip,
+   glossary, and the guided tour. Plain boxes that match the
+   existing panels; no glow, no gradients. */
+.run-wrap { display: flex; align-items: center; gap: 8px; }
+.btn-reason { font-size: 12px; color: var(--muted); }
+.btn-reason[hidden] { display: none; }
+.hero-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+#liveReason { margin: 8px 0 0; }
+.stuck-hint {
+  margin-top: 8px; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--panel-2); font-size: 12px;
+}
+.stuck-hint[hidden] { display: none; }
+.stuck-text { margin: 0 0 6px; color: var(--text); }
+.stuck-cmd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.stuck-cmd code {
+  font-family: var(--mono); font-size: 12px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 6px; padding: 4px 8px;
+  overflow-x: auto; max-width: 100%;
+}
+.start-here {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px 16px; margin-bottom: 16px;
+}
+.start-here[hidden] { display: none; }
+.start-here-text h2 { margin: 0 0 4px; font-size: 13px; color: var(--muted); }
+.start-here-text p { margin: 0; font-size: 13px; }
+.glossary { margin: 0; display: grid; gap: 8px; }
+.glossary-term { font-weight: 700; font-size: 13px; }
+.glossary-def { margin: 0 0 4px 0; font-size: 13px; color: var(--text); }
+/* Tour captions sit above the stage, never over the transport
+   controls and move strip below it. */
+.tour-overlay {
+  position: fixed; inset: 12px 16px auto 16px; z-index: 60;
+  display: flex; justify-content: center; pointer-events: none;
+}
+.tour-overlay[hidden] { display: none; }
+.tour-box {
+  pointer-events: auto;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px 16px;
+  max-width: 560px; width: 100%;
+}
+.tour-caption { margin: 0 0 8px; font-size: 14px; }
+.tour-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.tour-highlight { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+
 .light[data-state="static"] { background: var(--accent); }
 .static-note {
   margin: 10px 0 0;

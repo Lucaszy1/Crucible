@@ -27,7 +27,22 @@ export const RECORDER_MIME_CANDIDATES = [
 ];
 export const NO_AUDIO_MESSAGE =
   "No audio captured. Hold for a couple of seconds and check your Chrome microphone setting.";
-export const TOO_QUICK_MESSAGE = "Still starting — speak first, then press Stop.";
+export const TOO_QUICK_MESSAGE = "Still starting, speak first, then press Stop.";
+export const TAKEOVER_NOT_LIVE =
+  "Takeover works while an exercise is live. Start one, then click Take over blue.";
+export const MIC_BLOCKED_MESSAGE =
+  "Microphone is blocked. In Chrome, click the tune icon left of the address bar, set Microphone to Allow, reload the page, then try again. You can also type the order instead.";
+
+// Friendly takeover failure, never a bare code. A 409 or a no
+// live exercise note both mean the same plain thing.
+export function takeoverMessage(err) {
+  const status = err && err.status;
+  const text = String((err && err.message) || err || "");
+  if (status === 409 || /no live exercise/i.test(text)) return TAKEOVER_NOT_LIVE;
+  const detail = text.replace(/\b40[0-9]\b/g, "").replace(/\s+/g, " ").trim();
+  if (!detail) return TAKEOVER_NOT_LIVE;
+  return `Takeover did not work: ${detail} Start a live exercise, then try again.`;
+}
 
 // First candidate the browser accepts, or "" for its default.
 // Pure, so the unsupported-mime fallback stays testable in node.
@@ -89,6 +104,14 @@ export function exampleOrders(hosts) {
   ];
 }
 
+// Plain tooltip for a host chip: what it is and what a click
+// does. Pure, so the copy stays testable in node.
+export function chipTitle(id, role) {
+  const name = String(id || "host");
+  const caption = chipRole(role);
+  return `Host ${name} (${caption}). Click to add it to your order.`;
+}
+
 // One chip button per host: name plus role caption. Clicks resolve
 // through delegation on the container (data-host).
 export function chipsHtml(hosts) {
@@ -97,7 +120,7 @@ export function chipsHtml(hosts) {
     .map((h) => {
       const id = typeof h === "string" ? h : h.id;
       const role = typeof h === "string" ? "" : h.role;
-      return `<button type="button" class="cmd-chip" data-host="${escapeHtml(id)}">`
+      return `<button type="button" class="cmd-chip" data-host="${escapeHtml(id)}" title="${escapeHtml(chipTitle(id, role))}">`
         + `<span class="cmd-chip-name">${escapeHtml(id)}</span>`
         + `<span class="cmd-chip-role">${escapeHtml(chipRole(role))}</span></button>`;
     })
@@ -524,7 +547,8 @@ export function initCommandBar(els, deps) {
       ctl.starting = false;
       ctl.stopRequested = false;
       if (els.mic) setText(els.mic, "Speak");
-      show(`Microphone blocked (${(err && err.message) || err}): type the order instead.`);
+      void err;
+      show(MIC_BLOCKED_MESSAGE);
       if (els.input) els.input.focus();
     }
   }
@@ -679,13 +703,17 @@ export function initCommandBar(els, deps) {
     try {
       state = await api.fetchCommandState();
     } catch (err) {
-      show(`Takeover failed: ${(err && err.message) || err}`);
+      show(takeoverMessage(err));
+      return;
+    }
+    if (!state || !state.attached) {
+      show(TAKEOVER_NOT_LIVE);
       return;
     }
     try {
       await api.sendTakeover(!(state && state.latched));
     } catch (err) {
-      show(`Takeover failed: ${(err && err.message) || err}`);
+      show(takeoverMessage(err));
       return;
     }
     void refreshState();

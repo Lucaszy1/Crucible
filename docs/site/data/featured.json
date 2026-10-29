@@ -1,9 +1,15 @@
 {
-  "_note": "Featured replays in the static bundle, in display order.",
+  "_note": "Featured replays in the static bundle, in display order. Titles match the live lobby.",
   "featured": [
     "scn-9001-contained",
     "briefed-medium-contained",
     "heldout-hard-contained",
     "sensorsoff-hard-exposed"
-  ]
+  ],
+  "titles": {
+    "briefed-medium-contained": "Medium exercise, contained",
+    "heldout-hard-contained": "Hard exercise, contained",
+    "scn-9001-contained": "Easy exercise, contained",
+    "sensorsoff-hard-exposed": "Hard exercise, file exposed"
+  }
 }
