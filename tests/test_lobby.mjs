@@ -3,8 +3,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  HELDOUT_MAX, HELDOUT_MIN, drawLiveScenario, formatDuration, hostNoun,
-  partitionLobby, provText, storyLine, titleOutcomeKey, voidNoteText,
+  FRONTIER_MAX, FRONTIER_MIN, HELDOUT_MAX, HELDOUT_MIN, drawLiveScenario,
+  formatDuration, hostNoun, partitionLobby, provText, storyLine,
+  titleOutcomeKey, voidNoteText,
 } from "../dashboard/js/lobby.js";
 
 function ev(id, actor, tool, args, result) {
@@ -20,8 +21,8 @@ const SECRET = ev("s", "red", "read_file", { host: "db" },
 const SCAN = ev("q", "red", "scan_host", { host: "web" }, { ok: true });
 
 describe("drawLiveScenario", () => {
-  it("draws held-out seeds with medium/hard weight", () => {
-    const counts = { easy: 0, medium: 0, hard: 0 };
+  it("draws held-out seeds with medium/hard weight and a frontier slice", () => {
+    const counts = { easy: 0, medium: 0, hard: 0, frontier: 0 };
     let s = 42;
     const rand = () => {
       s = (s * 1103515245 + 12345) % 2147483648;
@@ -29,17 +30,22 @@ describe("drawLiveScenario", () => {
     };
     for (let i = 0; i < 2000; i += 1) {
       const draw = drawLiveScenario(rand);
-      assert.ok(draw.seed >= HELDOUT_MIN && draw.seed <= HELDOUT_MAX);
+      if (draw.difficulty === "frontier") {
+        assert.ok(draw.seed >= FRONTIER_MIN && draw.seed <= FRONTIER_MAX);
+      } else {
+        assert.ok(draw.seed >= HELDOUT_MIN && draw.seed <= HELDOUT_MAX);
+      }
       assert.equal(draw.token, `gen:${draw.seed}:${draw.difficulty}`);
       counts[draw.difficulty] += 1;
     }
     assert.ok(counts.easy > 250 && counts.easy < 550, `easy=${counts.easy}`);
-    assert.ok(counts.medium > 650 && counts.medium < 950, `medium=${counts.medium}`);
-    assert.ok(counts.hard > 650 && counts.hard < 950, `hard=${counts.hard}`);
+    assert.ok(counts.medium > 550 && counts.medium < 850, `medium=${counts.medium}`);
+    assert.ok(counts.hard > 550 && counts.hard < 850, `hard=${counts.hard}`);
+    assert.ok(counts.frontier > 100 && counts.frontier < 330, `frontier=${counts.frontier}`);
   });
 
   it("maps roll boundaries to difficulties", () => {
-    const seq = [0.0, 0.19, 0.0, 0.2, 0.0, 0.59, 0.0, 0.6, 0.0, 0.99];
+    const seq = [0.0, 0.19, 0.0, 0.2, 0.0, 0.54, 0.0, 0.55, 0.0, 0.89, 0.0, 0.9, 0.0, 0.99];
     let at = 0;
     const rand = () => seq[at++ % seq.length];
     assert.equal(drawLiveScenario(rand).difficulty, "easy");
@@ -47,6 +53,12 @@ describe("drawLiveScenario", () => {
     assert.equal(drawLiveScenario(rand).difficulty, "medium");
     assert.equal(drawLiveScenario(rand).difficulty, "hard");
     assert.equal(drawLiveScenario(rand).difficulty, "hard");
+    const first = drawLiveScenario(rand);
+    assert.equal(first.difficulty, "frontier");
+    assert.ok(first.seed >= FRONTIER_MIN && first.seed <= FRONTIER_MAX);
+    const second = drawLiveScenario(rand);
+    assert.equal(second.difficulty, "frontier");
+    assert.ok(second.seed >= FRONTIER_MIN && second.seed <= FRONTIER_MAX);
   });
 });
 

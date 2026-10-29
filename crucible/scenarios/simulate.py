@@ -390,15 +390,19 @@ def validate_spec(spec: dict) -> list:
     if not pages or weak.get("host") != pages[-1].get("leaks_host") or \
             weak.get("account") != pages[-1].get("leaks_account"):
         errors.append("final page leak must name the weak sign-in target")
-    leak = None
-    for kind in ("config_creds", "backup_creds"):
-        for step in by_kind.get(kind, []):
-            leak = step
-    for known in by_kind.get("signin_known", []):
-        if leak is None or known.get("host") != leak.get("reveals_host") \
-                or known.get("account") != leak.get("reveals_account") \
-                or known.get("password") != leak.get("reveals_password"):
-            errors.append("known sign-in must use the file leak")
+    last_file = None
+    for step in path:
+        if step.get("kind") in ("config_creds", "backup_creds"):
+            last_file = step
+        elif step.get("kind") == "signin_known":
+            known = step
+            if last_file is None \
+                    or known.get("host") != last_file.get("reveals_host") \
+                    or known.get("account") != \
+                    last_file.get("reveals_account") \
+                    or known.get("password") != \
+                    last_file.get("reveals_password"):
+                errors.append("known sign-in must use the file leak")
     if path and path[-1].get("host") != jewel_host:
         errors.append("path must end on the jewel host")
     if by_name[jewel_host].get("role") not in ("database", "backup",

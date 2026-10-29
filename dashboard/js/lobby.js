@@ -21,17 +21,25 @@ export function titleOutcomeKey(title) {
 
 export const HELDOUT_MIN = 9001;
 export const HELDOUT_MAX = 9020;
+export const FRONTIER_MIN = 9101;
+export const FRONTIER_MAX = 9110;
 export const MAX_FEATURED = 6;
 
 // One random unseen network: a held-out seed plus a difficulty
-// weighted toward medium and hard. randomFn defaults to Math.random
-// and is injectable for tests.
+// weighted toward medium and hard, with a small frontier slice.
+// Frontier draws remap into the 9101-9110 frontier range.
+// randomFn defaults to Math.random and is injectable for tests.
 export function drawLiveScenario(randomFn) {
   const rand = typeof randomFn === "function" ? randomFn : Math.random;
   const seed = HELDOUT_MIN + Math.floor(rand() * (HELDOUT_MAX - HELDOUT_MIN + 1));
   const roll = rand();
-  const difficulty = roll < 0.2 ? "easy" : roll < 0.6 ? "medium" : "hard";
-  return { seed, difficulty, token: `gen:${seed}:${difficulty}` };
+  const difficulty = roll < 0.2 ? "easy" : roll < 0.55 ? "medium" : roll < 0.9 ? "hard" : "frontier";
+  if (difficulty !== "frontier") {
+    return { seed, difficulty, token: `gen:${seed}:${difficulty}` };
+  }
+  const span = FRONTIER_MAX - FRONTIER_MIN + 1;
+  const frontierSeed = FRONTIER_MIN + ((seed - HELDOUT_MIN) % span);
+  return { seed: frontierSeed, difficulty, token: `gen:${frontierSeed}:${difficulty}` };
 }
 
 // Plain noun for a host role, for story lines. Never a hostname.

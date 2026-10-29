@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass, field
 
 from crucible.scenarios import words
 
-DIFFICULTIES = ("easy", "medium", "hard")
+DIFFICULTIES = ("easy", "medium", "hard", "frontier")
 
 WEAKNESS_KINDS = (
     "exposed_page",
@@ -25,7 +25,7 @@ WEAKNESS_KINDS = (
 STEP_KINDS = WEAKNESS_KINDS + ("signin_known", "jewel_read")
 
 # Path lengths per difficulty: weaknesses plus the final jewel read.
-PATH_LENGTHS = {"easy": 3, "medium": 4, "hard": 5}
+PATH_LENGTHS = {"easy": 3, "medium": 4, "hard": 5, "frontier": 7}
 
 MIN_HOSTS = 6
 MAX_HOSTS = 10
@@ -66,7 +66,7 @@ SCENARIO_SCHEMA = {
         },
         "entry_host": {"type": "string"},
         "path": {
-            "type": "array", "minItems": 3, "maxItems": 5,
+            "type": "array", "minItems": 3, "maxItems": 7,
             "items": {
                 "type": "object",
                 "required": ["kind", "host"],

@@ -18,7 +18,7 @@ import { renderScoreboard, renderScoreDetails } from "./scoreboard.js";
 import { focusEvidenceRef, renderEvidence } from "./evidence.js";
 import { initControls, serverStatus, setServer, showConfirm } from "./controls.js";
 import {
-  HELDOUT_MAX, HELDOUT_MIN, arenaThumb, drawLiveScenario, formatDuration, hideDeal, partitionLobby,
+  FRONTIER_MAX, FRONTIER_MIN, HELDOUT_MAX, HELDOUT_MIN, arenaThumb, drawLiveScenario, formatDuration, hideDeal, partitionLobby,
   renderDeal, renderLobby, storyLine, titleOutcomeKey, voidNoteText,
 } from "./lobby.js";
 import { playOpening } from "./opening.js";
@@ -1042,8 +1042,10 @@ function dealDraw() {
   let seed = drawn.seed;
   if (raw !== "") {
     seed = Number(raw);
-    if (!Number.isInteger(seed) || seed < HELDOUT_MIN || seed > HELDOUT_MAX) {
-      return { error: `Seed must hold ${HELDOUT_MIN} to ${HELDOUT_MAX}.` };
+    const inHeldout = seed >= HELDOUT_MIN && seed <= HELDOUT_MAX;
+    const inFrontier = seed >= FRONTIER_MIN && seed <= FRONTIER_MAX;
+    if (!Number.isInteger(seed) || (!inHeldout && !inFrontier)) {
+      return { error: `Seed must hold ${HELDOUT_MIN} to ${HELDOUT_MAX} or ${FRONTIER_MIN} to ${FRONTIER_MAX}.` };
     }
   }
   const picked = els.dealDifficulty ? els.dealDifficulty.value : "random";

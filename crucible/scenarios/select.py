@@ -11,9 +11,11 @@ possible.
 from __future__ import annotations
 
 from crucible.scenarios.schema import DIFFICULTIES
-from crucible.scenarios.seeds import HELDOUT_SEEDS, TRAIN_SEEDS
+from crucible.scenarios.seeds import FRONTIER_SEEDS, HELDOUT_SEEDS, TRAIN_SEEDS
 
-SETS = {"train": list(TRAIN_SEEDS), "heldout": list(HELDOUT_SEEDS)}
+SETS = {"train": list(TRAIN_SEEDS),
+        "heldout": list(HELDOUT_SEEDS),
+        "frontier": list(FRONTIER_SEEDS)}
 
 
 def parse_token(text: str):

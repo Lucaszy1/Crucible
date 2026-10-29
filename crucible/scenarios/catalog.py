@@ -53,7 +53,8 @@ WEAKNESSES = {
 # sign-in is load-bearing: weak steps gate file reads through their
 # session, and every target comes only from the previous leak, so no
 # step can be skipped. Stale reuse appears in dead ends, where
-# ordering does not matter.
+# ordering does not matter. Frontier chains two file-leak hops, so
+# its crown jewel sits three hosts past the entry.
 TEMPLATES = {
     "easy": [
         ["exposed_page", "weak_creds", "jewel_read"],
@@ -66,5 +67,11 @@ TEMPLATES = {
          "jewel_read"],
         ["exposed_page", "weak_creds", "backup_creds", "signin_known",
          "jewel_read"],
+    ],
+    "frontier": [
+        ["exposed_page", "weak_creds", "config_creds", "signin_known",
+         "config_creds", "signin_known", "jewel_read"],
+        ["exposed_page", "weak_creds", "backup_creds", "signin_known",
+         "config_creds", "signin_known", "jewel_read"],
     ],
 }

@@ -42,7 +42,7 @@ def parse_args(argv=None):
     parser.add_argument(
         "--difficulty",
         default=",".join(DIFFICULTIES),
-        help="Comma list of easy, medium, hard (default: all three)",
+        help="Comma list of easy, medium, hard, frontier (default: all four)",
     )
     parser.add_argument(
         "--leave-up",
