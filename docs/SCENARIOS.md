@@ -144,7 +144,9 @@ sign-in follows an earlier sign-in, hence only on hard.)
 - `TRAIN_SEEDS`: 1001-1040 (40 seeds, playbook training).
 - `HELDOUT_SEEDS`: 9001-9020 (20 seeds, generalization eval,
   never touched in training).
-- `FRONTIER_SEEDS`: 9101-9110 (10 seeds, frontier tier only).
+- `FRONTIER_SEEDS`: 9101-9110 (10 seeds, frontier tier only,
+  dealt by the lobby only through the Advanced difficulty or an
+  explicit seed, never on a random draw).
 - `SMOKE_SEEDS`: 1, 2, 3 for quick checks.
 
 ## Scripted chain red
