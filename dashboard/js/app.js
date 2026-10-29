@@ -24,6 +24,7 @@ import {
 import { playOpening } from "./opening.js";
 import { initThoughtHeads, renderThoughts, setThoughtsCollapsed } from "./thoughts.js";
 import { endCardVisible, hideEndCard, initEndCard, setEndNext, showEndCard } from "./endcard.js";
+import { buildCardModel, cardFilename, downloadResultCard, drawResultCard } from "./sharecard.js";
 import { clearArenaThumbCache, thumbnailState } from "./thumbnail.js";
 import { initCommandBar } from "./commandbar.js";
 import {
@@ -36,7 +37,7 @@ import {
   stageFinish, stageNotify,
 } from "./stage.js";
 import {
-  classicLayout, layoutFromEvents, layoutHosts, layoutWeights, scenarioMeta, scenarioText,
+  classicLayout, edgesOf, layoutFromEvents, layoutHosts, layoutWeights, scenarioMeta, scenarioText,
 } from "./layout.js";
 
 const REPLAY_INTERVAL_MS = 1600;
@@ -55,6 +56,7 @@ const els = {
   blueTech: document.getElementById("blueLabelList"),
   feed: document.getElementById("feedList"),
   storyOutcome: document.getElementById("storyOutcome"),
+  storySaveBtn: document.getElementById("storySaveBtn"),
   debriefBody: document.getElementById("debriefBody"),
   momentList: document.getElementById("momentList"),
   presentLatest: document.getElementById("presentLatest"),
@@ -126,6 +128,7 @@ const els = {
   endReplay: document.getElementById("endReplay"),
   endNextBtn: document.getElementById("endNextBtn"),
   endLobbyBtn: document.getElementById("endLobbyBtn"),
+  endSaveBtn: document.getElementById("endSaveBtn"),
   storyView: document.getElementById("storyView"),
   detailsView: document.getElementById("detailsView"),
   learnView: document.getElementById("learnView"),
@@ -232,7 +235,7 @@ function endEls() {
   return {
     root: els.endCard, eyebrow: els.endEyebrow, title: els.endTitle, score: els.endScore,
     stats: els.endStats, line: els.endLine, nextUp: els.endNext,
-    replay: els.endReplay, next: els.endNextBtn, lobby: els.endLobbyBtn,
+    replay: els.endReplay, next: els.endNextBtn, lobby: els.endLobbyBtn, save: els.endSaveBtn,
   };
 }
 
@@ -356,6 +359,7 @@ function onEvidenceRef(ref) {
 function applyLayout(layout, meta) {
   store.layout = layout && layout.hosts ? layout : classicLayout();
   store.scenario = scenarioText(meta || { id: "classic" });
+  store.runMeta = meta && typeof meta === "object" ? { ...meta } : { id: "classic", seed: null, difficulty: null };
   store.weights = { ...layoutWeights(store.layout) };
   if (arenaRefs) setArenaLayout(arenaRefs, store.layout);
   if (stageRefs) setStageLayout(stageRefs, store.layout);
@@ -464,6 +468,7 @@ function render(animate) {
   renderScoreDetails(scoreEls(), store.events, store.cursor, store.weights, store.spend, store.finalScore);
   renderEvidence({ chips: els.chips, tabs: els.tabs, viewer: els.viewer }, store.events, store.cursor, hosts);
   els.eventCount.textContent = `${store.events.length} event${store.events.length === 1 ? "" : "s"}`;
+  els.storySaveBtn.disabled = store.events.length === 0;
 }
 
 // Story tab panels: the honest outcome card plus the key-moment
@@ -756,6 +761,7 @@ async function openExercise(runId, opts) {
   store.events = (data.events || []).filter((ev) => ev && ev.actor !== "system");
   store.replayScore = data.score || null;
   store.runBench = data.bench || o.bench || null;
+  store.runProv = data.provenance || null;
   store.runVoid = data.void || false;
   assertFeaturedTitle(runId, store.events);
   loadDebrief(runId, store.runBench);
@@ -809,6 +815,7 @@ async function beginRun(agents, scenarioToken) {
     switchTab("arena");
     store.runId = null;
     store.runBench = null;
+    store.runProv = null;
     store.runVoid = false;
     store.events = [];
     store.cursor = 0;
@@ -1117,6 +1124,43 @@ function benchFor(id) {
   if (prov && prov.bench) return prov.bench;
   const card = (store.lobby.cards || []).find((entry) => entry && entry.id === id);
   return (card && card.bench) || null;
+}
+
+// Shareable result card: paint the current exercise as a 1200x675
+// PNG and download it. Shapes and system fonts only, so the
+// download works offline and from the static bundle. The Real run
+// line names the replay source; live exercises omit it.
+function saveResultCard() {
+  if (store.events.length === 0) {
+    notice("Open an exercise before saving a result card.", true);
+    return;
+  }
+  const display = displayOutcome(store.events);
+  const score = store.finalScore || store.replayScore || scoreEvents(store.events, store.weights);
+  const layout = store.layout || classicLayout();
+  const hosts = layoutHosts(layout);
+  const states = reduceHostStates(store.events, hosts);
+  const meta = store.runMeta || {};
+  const provenance = store.mode === "replay"
+    ? (store.runProv || { bench: store.runBench, episode: store.runId, seed: meta.seed ?? null })
+    : null;
+  const model = buildCardModel({
+    outcomeLabel: display.label,
+    tone: display.tone,
+    blueScore: score ? score.blue_score : null,
+    downtimePct: score ? score.downtime_pct : null,
+    eventCount: store.events.length,
+    difficulty: meta.difficulty || null,
+    hosts: hosts.map((id) => ({ id, state: states[id] || "clean", jewel: id === layout.jewel_host })),
+    edges: edgesOf(layout),
+    provenance,
+    assisted: Boolean(score && score.assisted),
+    runId: store.runId,
+    explanation: outcomeLine(display.key),
+  });
+  const canvas = document.createElement("canvas");
+  drawResultCard(canvas, model);
+  downloadResultCard(canvas, cardFilename(store.runId));
 }
 
 function showEndCardFor() {
@@ -1694,6 +1738,7 @@ async function boot() {
       if (next) openExercise(next, { bench: benchFor(next) });
     },
     onLobby: () => switchTab("lobby"),
+    onSave: () => saveResultCard(),
   });
   els.tabLobby.addEventListener("click", () => switchTab("lobby"));
   els.tabArena.addEventListener("click", () => switchTab("arena"));
@@ -1704,6 +1749,7 @@ async function boot() {
   els.presentBtn.addEventListener("click", togglePresent);
   els.liveBtn.addEventListener("click", () => onRunRequest(controls.agents.value));
   els.replayBtn.addEventListener("click", watchReplay);
+  els.storySaveBtn.addEventListener("click", () => saveResultCard());
   els.autoplayBox.addEventListener("change", () => {
     store.lobby.autoplay = els.autoplayBox.checked;
     saveBool("crucible-autoplay", store.lobby.autoplay);

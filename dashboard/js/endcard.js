@@ -13,6 +13,9 @@ export function initEndCard(els, callbacks) {
   els.replay.addEventListener("click", () => callbacks.onReplay());
   els.next.addEventListener("click", () => callbacks.onNext());
   els.lobby.addEventListener("click", () => callbacks.onLobby());
+  if (els.save) els.save.addEventListener("click", () => {
+    if (callbacks.onSave) callbacks.onSave();
+  });
 }
 
 export function showEndCard(els, stats, justifiedPct, nextId) {
