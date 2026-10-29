@@ -140,7 +140,9 @@ def _scoped_spend(bench_dir: Path, episodes: list, *,
     return scoped
 
 
-def _briefed_baseten_tokens(bench_dir: Path, episodes: list) -> int:
+def _briefed_baseten_tokens(bench_dir: Path, episodes: list, *,
+                          spend_file: Path = SPEND_FILE,
+                          archive_dir: Path = ARCHIVE_DIR) -> int:
     """Sum one bench's Baseten tokens, excluding archived reruns.
 
     Reruns reuse episode ids, and the spend log still holds the
@@ -149,7 +151,8 @@ def _briefed_baseten_tokens(bench_dir: Path, episodes: list) -> int:
     log plus a referee tail, is this bench's run.
     """
     total = 0
-    for entry in _scoped_spend(bench_dir, episodes):
+    for entry in _scoped_spend(bench_dir, episodes, spend_file=spend_file,
+                               archive_dir=archive_dir):
         if entry.get("host") != "baseten":
             continue
         total += int(entry.get("input_tokens", 0) or 0)
@@ -392,9 +395,22 @@ def _audit_rate(bench_dir: Path, rows: list) -> tuple:
     return justified / total, episodes
 
 
-def summarize_cell(bench_dir: Path, key: str) -> dict:
-    """Recompute one cell's metrics from its CSV rows and jsonls."""
-    rows = [row for row in _csv_rows(bench_dir) if row.get("cell") == key]
+def _is_frontier_row(row: dict) -> bool:
+    """True for frontier-tier rows; the classic stowaway has no difficulty."""
+    return (row.get("scenario_difficulty") or "").strip() == "frontier"
+
+
+def summarize_cell(bench_dir: Path, key: str, *,
+                   include=None) -> dict:
+    """Recompute one cell's metrics from its CSV rows and jsonls.
+
+    include is an optional row predicate; rows it rejects are left
+    out of every metric (used to keep the classic stowaway out of
+    the frontier tier numbers).
+    """
+    rows = [row for row in _csv_rows(bench_dir)
+            if row.get("cell") == key
+            and (include is None or include(row))]
     intruded = [row for row in rows if row.get("intrusion") == "True"]
     contained = [row for row in intruded
                  if row.get("contained_after_intrusion") == "True"]
@@ -1002,12 +1018,48 @@ PARITY_NON_CLAIM = (
 )
 
 
-def build_frontier_sentences(cell: dict) -> list:
+def _fallback_sentence(cell: dict) -> str:
+    """Baseline-fallback counts with turns, percent, and episodes."""
+    census = cell.get("fallback_census") or {}
+    red_fell = census.get("red_fallbacks", 0)
+    red_turns = census.get("red_turns", 0)
+    blue_fell = census.get("blue_fallbacks", 0)
+    blue_turns = census.get("blue_turns", 0)
+    red_pct = f"{100.0 * red_fell / red_turns:.1f}%" if red_turns else "n/a"
+    blue_pct = f"{100.0 * blue_fell / blue_turns:.1f}%" if blue_turns else "n/a"
+    return (f"Baseline fallbacks: {red_fell} of {red_turns} red turns "
+            f"({red_pct}) and {blue_fell} of {blue_turns} blue turns "
+            f"({blue_pct}) used a safe baseline move after model replies "
+            f"with no usable tool call, across {census.get('episodes', 0)} "
+            f"of {census.get('n', cell['n'])} episodes.")
+
+
+def _excluded_sentence(excluded: list) -> str:
+    """Labeled line for bench episodes left out of the frontier table."""
+    parts = []
+    for row in excluded:
+        name = row.get("episode", "?")
+        if row.get("intrusion") == "True":
+            held = ("contained" if row.get("contained_after_intrusion")
+                    == "True" else "not contained")
+            parts.append(f"{name} (intrusion, {held})")
+        else:
+            parts.append(f"{name} (no intrusion)")
+    noun = "episode" if len(parts) == 1 else "episodes"
+    joined = "; ".join(parts)
+    return (f"Excluded from the frontier table: {len(parts)} classic-network "
+            f"{noun} the bench ran by accident: {joined}.")
+
+
+def build_frontier_sentences(cell: dict, *, excluded: list | None = None,
+                             uncontained_episodes: list | None = None) -> list:
     """Neutral outcome sentences for the frontier tier run.
 
     States intrusions, containment, and secret reads with
     denominators, naming uncontained intrusions outright when any
-    happened, plus delays, downtime, cost, and Baseten tokens.
+    happened, plus delays, downtime, cost, Baseten tokens, and
+    baseline-fallback counts. Excluded non-frontier episodes get
+    their own labeled line, never folded into the main numbers.
     Makes no comparison against the held-out cells.
     """
     intr = cell["intrusion"]
@@ -1016,22 +1068,29 @@ def build_frontier_sentences(cell: dict) -> list:
     uncontained = intr["hits"] - cont["hits"]
     outcome = (f"Frontier tier on {cell['n']} frontier networks "
                f"(descriptive only): intrusions {intr['hits']}/"
-               f"{intr['n']}, contained {cont['hits']}/{cont['n']}"
-               + (f" ({uncontained} not contained)" if uncontained else "")
-               + f", secret reads {sec['hits']}/{sec['n']}.")
+               f"{intr['n']}, contained {cont['hits']}/{cont['n']}")
+    if uncontained:
+        names = ", ".join(uncontained_episodes or [])
+        outcome += f" ({uncontained} not contained" + (
+            f": {names}" if names else "") + ")"
+    outcome += f", secret reads {sec['hits']}/{sec['n']}."
     timing = (f"Median relevant detection delay "
               f"{_num(cell['median_relevant_delay'])} events, median time "
               f"to contain {_num(cell['median_time_to_contain'])} events, "
-              f"mean downtime {_num(cell['mean_downtime_pct'])}%, cost "
+              f"mean downtime {_num(cell['mean_downtime_contained_pct'])}% "
+              f"over contained episodes, cost "
               f"${cell['total_cost_usd']:.2f}, Baseten tokens "
               f"{cell.get('baseten_tokens', 0):,}.")
-    return [outcome, timing]
+    sentences = [outcome, timing, _fallback_sentence(cell)]
+    if excluded:
+        sentences.append(_excluded_sentence(excluded))
+    return sentences
 
 
 FRONTIER_NON_CLAIM = (
-    "The frontier tier run is descriptive only on harder networks; "
-    "it does not compare against the held-out cells, whose networks "
-    "and difficulties differ."
+    "The frontier tier run is descriptive only; it makes no claim "
+    "that the tier is harder than other tiers and no claim that blue "
+    "always holds."
 )
 
 
@@ -1193,7 +1252,8 @@ def main(argv=None) -> int:
                         _csv_rows(briefed)
                         if row.get("cell") == BRIEFED_CELL]
             cell["baseten_tokens"] = _briefed_baseten_tokens(
-                briefed, episodes)
+                briefed, episodes, spend_file=Path(args.spend_file),
+                archive_dir=Path(args.archive_dir))
             cell["fallback_census"] = _fallback_census(briefed, episodes)
             reference[BRIEFED_LABEL] = cell
     briefed_spark = Path(args.briefed_spark)
@@ -1204,7 +1264,8 @@ def main(argv=None) -> int:
                         _csv_rows(briefed_spark)
                         if row.get("cell") == BRIEFED_CELL]
             cell["baseten_tokens"] = _briefed_baseten_tokens(
-                briefed_spark, episodes)
+                briefed_spark, episodes, spend_file=Path(args.spend_file),
+                archive_dir=Path(args.archive_dir))
             cell["fallback_census"] = _fallback_census(
                 briefed_spark, episodes)
             reference[BRIEFED_SPARK_LABEL] = cell
@@ -1214,15 +1275,32 @@ def main(argv=None) -> int:
     frontier_dir = Path(args.frontier)
     frontier = None
     if (frontier_dir / "summary.csv").exists():
-        frontier_cell = summarize_cell(frontier_dir, BRIEFED_CELL)
+        frontier_cell = summarize_cell(frontier_dir, BRIEFED_CELL,
+                                       include=_is_frontier_row)
         if frontier_cell["n"]:
-            frontier_episodes = _cell_episodes(frontier_dir, BRIEFED_CELL)
+            bench_rows = [row for row in _csv_rows(frontier_dir)
+                          if row.get("cell") == BRIEFED_CELL]
+            frontier_rows = [row for row in bench_rows
+                             if _is_frontier_row(row)]
+            excluded_rows = [row for row in bench_rows
+                             if not _is_frontier_row(row)]
+            frontier_episodes = [row.get("episode", "")
+                                 for row in frontier_rows]
             frontier_cell["baseten_tokens"] = _briefed_baseten_tokens(
-                frontier_dir, frontier_episodes)
+                frontier_dir, frontier_episodes,
+                spend_file=Path(args.spend_file),
+                archive_dir=Path(args.archive_dir))
             frontier_cell["fallback_census"] = _fallback_census(
                 frontier_dir, frontier_episodes)
-            frontier = {"bench": str(frontier_dir), "cell": frontier_cell,
-                        "sentences": build_frontier_sentences(frontier_cell)}
+            uncontained = [row.get("episode", "") for row in frontier_rows
+                           if row.get("intrusion") == "True"
+                           and row.get("contained_after_intrusion") != "True"]
+            frontier = {
+                "bench": str(frontier_dir), "cell": frontier_cell,
+                "excluded": [row.get("episode", "") for row in excluded_rows],
+                "sentences": build_frontier_sentences(
+                    frontier_cell, excluded=excluded_rows,
+                    uncontained_episodes=uncontained)}
     benches = {"heldout": str(heldout), "sensors": str(sensors),
                "noisyref": str(noisyref), "xcheck": str(xcheck),
                "briefed": str(briefed)}

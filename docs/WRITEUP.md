@@ -64,7 +64,7 @@ Server scoring once used ambient sandbox weights, which lack generated host ids,
 
 ## 7. Limits and what comes next
 
-Blue wins almost always with working sensors: 20 of 20 twice in the solver cells, 18 of 18 in the briefed run. That ceiling motivates a harder frontier tier, still to build. n is small: 20 paired seeds only move large asymmetries to p<0.05. Hosts are toys with fixed pretend services and scripted log lines; weaknesses are toy misconfigurations like an open admin page and default credentials. This is not a real network. Next is the harder tier, more seeds, and repeated briefed runs past descriptive.
+With working sensors, blue contained every intrusion in the solver cells (20 of 20 twice) and in the briefed run (18 of 18). The frontier tier is built and benchmarked on 10 networks: briefed red against Open blue, 9 of 10 with an intrusion, all 9 contained, 0 of 9 secret reads, median relevant detection delay 7 events, median time to contain 20 events, mean downtime 4.26% over the 9 contained, cost $6.38, Baseten tokens 807,490, descriptive only at n=10. Blue contained every intrusion in the tier, so the tier did not yet find where blue breaks; a stronger or smarter red is the missing piece. The bench accidentally included one classic-network episode; it is excluded from the frontier numbers and reported on its own line. n is small: 20 paired seeds only move large asymmetries to p<0.05, and the frontier run is 10 networks. Hosts are toys with fixed pretend services and scripted log lines; weaknesses are toy misconfigurations like an open admin page and default credentials. This is not a real network. Next is a stronger red, more seeds, and repeated briefed runs past descriptive.
 
 ## 8. How to run it
 

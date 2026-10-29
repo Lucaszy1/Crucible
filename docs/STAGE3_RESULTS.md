@@ -1,6 +1,6 @@
 # Stage 3 results: frozen playbook on held-out networks
 
-Generated 2026-10-29T07:10:18.245094+00:00 from `heldout`, `sensors`, `noisyref`, `xcheck`, `briefed`, `briefed_spark`.
+Generated 2026-10-29T14:38:01.119221+00:00 from `heldout`, `sensors`, `noisyref`, `xcheck`, `briefed`, `briefed_spark`, `frontier`.
 Frozen playbook sha256: `76c925e82ddeb30bd592ffe3511bba067aca8dc32db1130185ed8c2422a2c0d8`.
 Corrected headline: sensors-on arms come from the rerun `runs/bench-stage3-heldout-sensors` (working sensors); sensors-off arms come from the valid half of `runs/bench-stage3-heldout`. The first run's sensors-on half is void (documented sensor bug, fixed in 1224db4) and appears only in the void section.
 Rates carry Wilson 95% intervals; paired p-values are exact two-sided (McNemar for binary outcomes, sign test for delays and downtime). p >= 0.05 is reported as within noise.
@@ -80,6 +80,13 @@ Same nets reads shared seeds over arm episodes; med delay is the median first-re
 - Baseline fallbacks: red Open 1 of 600, Spark 1 of 600; blue Open 11 of 600, Spark 1 of 600.
 - Descriptive only at n=20 Open and n=20 Spark; briefed red re-rolled between benches, so pairing is approximate. This section compares the two runs; it does not conclude parity.
 
+## Frontier tier (briefed red, Open blue)
+
+- Frontier tier on 10 frontier networks (descriptive only): intrusions 9/10, contained 9/9, secret reads 0/9.
+- Median relevant detection delay 7 events, median time to contain 20 events, mean downtime 4.26% over contained episodes, cost $6.38, Baseten tokens 807,490.
+- Baseline fallbacks: 2 of 300 red turns (0.7%) and 3 of 300 blue turns (1.0%) used a safe baseline move after model replies with no usable tool call, across 5 of 10 episodes.
+- Excluded from the frontier table: 1 classic-network episode the bench ran by accident: classic-model-briefed-sensors-on-memory-off-1 (no intrusion).
+
 ## Claims
 
 - A vs B on intrusion rate: discordant pairs 0-0 over 20 pairs, is within noise (p=1.0000).
@@ -92,6 +99,10 @@ Same nets reads shared seeds over arm episodes; med delay is the median first-re
 - Void record only: the void run's B vs C secret-read gap was discordant pairs 6-0 over 20 pairs (p=0.0312); it is not evidence.
 - Briefed-red blue comparison on 20 shared networks (descriptive only): Open intrusions 18/20, Spark 20/20; containment Open 18/18, Spark 20/20; secret reads Open 0/18, Spark 0/20.
 - Briefed-red delays and cost: median relevant delay Open 7 vs Spark 1, median time to contain Open 22 vs Spark 24, cost Open $13.16 vs Spark $17.93.
+- Frontier tier on 10 frontier networks (descriptive only): intrusions 9/10, contained 9/9, secret reads 0/9.
+- Median relevant detection delay 7 events, median time to contain 20 events, mean downtime 4.26% over contained episodes, cost $6.38, Baseten tokens 807,490.
+- Baseline fallbacks: 2 of 300 red turns (0.7%) and 3 of 300 blue turns (1.0%) used a safe baseline move after model replies with no usable tool call, across 5 of 10 episodes.
+- Excluded from the frontier table: 1 classic-network episode the bench ran by accident: classic-model-briefed-sensors-on-memory-off-1 (no intrusion).
 - 14 auditor verdicts in the corrected held-out rerun were replayed from the voided original run on byte-identical prompts; no blue, red, or referee response was cached and outcomes are unaffected.
 
 ## Non-claims
@@ -104,3 +115,4 @@ Same nets reads shared seeds over arm episodes; med delay is the median first-re
 - Audit justified rates cover the rerun B and C cells only; no other cell was audited.
 - The frozen playbook was learned on train episodes whose sensors were void too, so its rules were learned without sensor input; the rerun tests a deaf-learned playbook under working sensors.
 - The Open-vs-Spark blue comparison pairs across benches by scenario; briefed red re-rolled between benches, so pairing is approximate and descriptive only at n=20 per arm.
+- The frontier tier run is descriptive only; it makes no claim that the tier is harder than other tiers and no claim that blue always holds.
