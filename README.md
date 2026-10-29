@@ -47,7 +47,7 @@ Red probes, blue defends, and the auditor judges every defensive decision, all i
 - Spark and Spark Open blue each held all 20 scripted episodes with sensors on, though Open reported later (median first report 15 to 17 events versus 1 to 3). Limit: descriptive only at n = 10, with unmatched noisy-red draws across the two runs.
 - Briefed model red on the same 20 held-out networks, Open blue versus Spark blue: intrusions 18/20 Open and 20/20 Spark; both contained every intrusion (18/18, 20/20) with no secret reads (0/18, 0/20). Median relevant detection delay 7 events Open versus 1 Spark, median time to contain 22 versus 24, mean downtime 6.30% versus 6.85%, Meta cost $13.16 versus $17.93. Limit: descriptive only at n = 20 per arm, briefed red re-rolled between benches so pairing is approximate, and this does not conclude parity.
 
-Frontier tier results: pending
+Frontier tier results: the tier is built and benchmarked on 10 networks (briefed red, Open blue, descriptive only): 9 of 10 had an intrusion, all 9 contained, 0 of 9 secret reads, and red got no foothold on one. Median relevant detection delay 7 events, median time to contain 20 events, mean downtime 4.26% over the 9 contained. Blue contained every intrusion in the tier, so it did not yet find where blue breaks.
 
 Details, intervals, and limits: `docs/SENSOR_RESULTS.md`, `docs/CAMPAIGN_RESULTS.md`, and `docs/STAGE3_RESULTS.md`. Full narrative: `docs/WRITEUP.md`; per-exercise spend: `docs/COST.md`.
 
