@@ -1204,8 +1204,10 @@ canvas.lobby-thumb:focus-visible { outline: 2px solid #8fb8ff; outline-offset: 2
 .glossary { margin: 0; display: grid; gap: 8px; }
 .glossary-term { font-weight: 700; font-size: 13px; }
 .glossary-def { margin: 0 0 4px 0; font-size: 13px; color: var(--text); }
+/* Tour captions sit above the stage, never over the transport
+   controls and move strip below it. */
 .tour-overlay {
-  position: fixed; inset: auto 16px 16px 16px; z-index: 60;
+  position: fixed; inset: 12px 16px auto 16px; z-index: 60;
   display: flex; justify-content: center; pointer-events: none;
 }
 .tour-overlay[hidden] { display: none; }

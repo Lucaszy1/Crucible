@@ -264,3 +264,41 @@ def test_static_site_ux_copy_has_no_em_dash(tmp_path):
         assert text in html or text in bundle, f"missing UX copy: {text}"
     assert "— run locally to try this" not in html
     assert "— run locally to try this" not in bundle
+
+
+def test_static_site_featured_cards_use_plain_titles(tmp_path):
+    out, builder = build_to(tmp_path)
+    live = json.loads((ROOT / "dashboard" / "featured.json")
+                      .read_text(encoding="utf-8"))
+    expected = {source["id"]: live["titles"][source["episode"]]
+                for source in builder.SOURCES}
+    assert expected == {
+        "scn-9001-contained": "Easy exercise, contained",
+        "briefed-medium-contained": "Medium exercise, contained",
+        "heldout-hard-contained": "Hard exercise, contained",
+        "sensorsoff-hard-exposed": "Hard exercise, file exposed",
+    }
+    # Same runs shown, with the live lobby's plain titles on each.
+    featured = json.loads((out / "data" / "featured.json")
+                          .read_text(encoding="utf-8"))
+    assert set(featured["featured"]) == set(expected)
+    assert featured["titles"] == expected
+    text = (out / "data.js").read_text(encoding="utf-8")
+    blob = text.split("=", 1)[1].strip().rstrip(";\n")
+    embedded = json.loads(blob)
+    assert embedded["featuredTitles"] == expected
+    bundle = (out / "app.bundle.js").read_text(encoding="utf-8")
+    assert "featuredTitles" in bundle
+    assert "function cardTitle" in bundle
+    # The Real run badge still renders from replay provenance.
+    assert "Real run" in bundle
+
+
+def test_static_site_tour_sits_above_the_stage(tmp_path):
+    out, _builder = build_to(tmp_path)
+    css = (out / "css" / "style.css").read_text(encoding="utf-8")
+    assert "inset: 12px 16px auto 16px" in css
+    assert "inset: auto 16px 16px 16px" not in css
+    bundle = (out / "app.bundle.js").read_text(encoding="utf-8")
+    assert "tourPlacement" in bundle
+    assert "TOUR_PLACE" in bundle

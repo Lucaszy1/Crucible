@@ -248,7 +248,10 @@ function provenanceLine(model) {
   return line;
 }
 
-function cardTitle(model) {
+// Card title: the plain curated name when the lobby has one,
+// else the raw run id. Both the live lobby and the static
+// export feed titles through here.
+export function cardTitle(model) {
   return model.title || model.id;
 }
 

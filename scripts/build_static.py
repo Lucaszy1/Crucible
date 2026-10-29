@@ -16,7 +16,8 @@ What the build does:
   orchestrator.score_events and outcome-checked.
 - Writes the API replacements as static JSON under site/data/:
   runs index, one replay per run, one Layer 1 debrief per run,
-  featured list, attack map, config, stage3 Learning numbers
+  featured list with the live lobby's plain card titles, attack
+  map, config, stage3 Learning numbers
   (derived from dashboard/results.json), frozen playbook, and
   results.json. Debriefs are precomputed with
   debrief.build_debrief, deterministic and model-free, so the
@@ -380,9 +381,19 @@ def write_data_files(out: Path, runs: dict) -> dict:
         debrief_payload = {"id": run_id, "debrief": runs[run_id]["debrief"]}
         write_json(data_dir / "debriefs" / f"{run_id}.json", debrief_payload)
 
+    curated = featured_curation()
+    live_titles = curated.get("titles") or {}
+    titles = {}
+    for source in SOURCES:
+        title = live_titles.get(source["episode"])
+        if not title:
+            raise SystemExit(
+                f"error: {source['id']} episode has no featured title")
+        titles[source["id"]] = title
     featured = {"_note": "Featured replays in the static bundle, "
-                         "in display order.",
-                "featured": list(RUN_IDS)}
+                         "in display order. Titles match the live lobby.",
+                "featured": list(RUN_IDS),
+                "titles": titles}
     write_json(data_dir / "featured.json", featured)
 
     attack_map = json.loads(
@@ -423,6 +434,7 @@ def write_data_files(out: Path, runs: dict) -> dict:
         "replays": embedded_replays,
         "debriefs": embedded_debriefs,
         "featured": read("featured.json")["featured"],
+        "featuredTitles": read("featured.json")["titles"],
         "attackMap": read("attack_map.json"),
         "config": read("config.json"),
         "stage3": read("stage3.json"),
@@ -480,7 +492,10 @@ export function fetchAttackMap() {
 }
 
 export function fetchFeatured() {
-  return Promise.resolve({ featured: embedded().featured || [] });
+  return Promise.resolve({
+    featured: embedded().featured || [],
+    titles: embedded().featuredTitles || {},
+  });
 }
 
 export function fetchConfig() {

@@ -866,7 +866,10 @@ function fetchAttackMap() {
 }
 
 function fetchFeatured() {
-  return Promise.resolve({ featured: embedded().featured || [] });
+  return Promise.resolve({
+    featured: embedded().featured || [],
+    titles: embedded().featuredTitles || {},
+  });
 }
 
 function fetchConfig() {
@@ -1213,15 +1216,21 @@ const __mod_tour__ = (() => {
 "use strict";
 // Guided tour: one featured real replay with timed captions that
 // point at the red thought card, the blue thought card, the
-// auditor verdict, and the end card. Pausable, skippable, no
-// network beyond opening the replay itself. Works on the live
-// page and the static replay site.
+// auditor verdict, and the end card. Each caption sits above the
+// stage while a ring marks the card it names, so the box never
+// covers the transport controls below the stage. Pausable,
+// skippable, no network beyond opening the replay itself. Works
+// on the live page and the static replay site.
 const TOUR_STEPS = [
   { id: "red", target: "#thoughtRed", caption: "Red thought: what red tries next." },
   { id: "blue", target: "#thoughtBlue", caption: "Blue thought: how blue answers." },
   { id: "auditor", target: "#arenaAud", caption: "Auditor verdict: was the blue move fair?" },
   { id: "end", target: "#endCard", caption: "End card: how the exercise ended." },
 ];
+
+// Caption placement: "top" means above the stage, clear of the
+// transport controls and the move strip. Every step uses it.
+const TOUR_PLACE = "top";
 
 // Delay before each caption appears, in ms. Short enough to hold
 // attention, long enough to read the card behind it.
@@ -1238,6 +1247,10 @@ function tourCaption(index) {
 function tourTarget(index) {
   const step = TOUR_STEPS[index];
   return step ? step.target : "";
+}
+
+function tourPlacement(index) {
+  return TOUR_STEPS[index] ? TOUR_PLACE : "";
 }
 
 function nextTourStep(current) {
@@ -1302,6 +1315,7 @@ function initTour(deps) {
     }
     if (api.caption) api.caption.textContent = `${index + 1} of ${TOUR_STEPS.length}. ${step.caption}`;
     if (api.overlay) api.overlay.hidden = false;
+    if (api.overlay && api.overlay.dataset) api.overlay.dataset.place = tourPlacement(index);
     if (api.box) api.box.hidden = false;
     if (api.endWrap) api.endWrap.hidden = true;
     const node = find(step.target);
@@ -1342,6 +1356,14 @@ function initTour(deps) {
     if (api.overlay) api.overlay.hidden = true;
   }
 
+  function armFinish() {
+    if (ctl.timer) cancel(ctl.timer);
+    ctl.timer = later(() => {
+      ctl.timer = null;
+      if (ctl.running && !ctl.paused) finish();
+    }, 5000);
+  }
+
   function schedule(index, delay) {
     if (ctl.timer) cancel(ctl.timer);
     ctl.timer = later(() => {
@@ -1349,7 +1371,9 @@ function initTour(deps) {
       if (!ctl.running || ctl.paused) return;
       // The end step waits for the end card when the replay is
       // still running: recheck once per second instead of pointing
-      // at an empty slot.
+      // at an empty slot. Without an end hook the step still plays
+      // against the arena fallback and then ends on its timer, so
+      // step 4 never parks the tour.
       if (index === TOUR_STEPS.length - 1 && typeof api.endVisible === "function") {
         let visible = false;
         try {
@@ -1359,6 +1383,7 @@ function initTour(deps) {
         }
         if (!visible && typeof api.isEnded !== "function") {
           showStep(index);
+          armFinish();
           return;
         }
         if (!visible) {
@@ -1369,12 +1394,7 @@ function initTour(deps) {
       showStep(index);
       const next = nextTourStep(index);
       if (next >= 0) schedule(next, TOUR_DELAYS[next] || 5000);
-      else {
-        ctl.timer = later(() => {
-          ctl.timer = null;
-          if (ctl.running && !ctl.paused) finish();
-        }, 5000);
-      }
+      else armFinish();
     }, delay);
   }
 
@@ -1444,12 +1464,7 @@ function initTour(deps) {
       showStep(next);
       const after = nextTourStep(next);
       if (after >= 0) schedule(after, TOUR_DELAYS[after] || 5000);
-      else {
-        ctl.timer = later(() => {
-          ctl.timer = null;
-          if (ctl.running && !ctl.paused) finish();
-        }, 5000);
-      }
+      else armFinish();
     }
   };
 
@@ -1468,7 +1483,7 @@ function initTour(deps) {
   return ctl;
 }
 
-return { tourCaption, tourTarget, nextTourStep, tourEndLine, tourReplayId, initTour, TOUR_STEPS, TOUR_DELAYS, TOUR_DONE_LIVE, TOUR_DONE_STATIC };
+return { tourCaption, tourTarget, tourPlacement, nextTourStep, tourEndLine, tourReplayId, initTour, TOUR_STEPS, TOUR_PLACE, TOUR_DELAYS, TOUR_DONE_LIVE, TOUR_DONE_STATIC };
 })();
 const __mod_story__ = (() => {
 "use strict";
@@ -8872,6 +8887,9 @@ function provenanceLine(model) {
   return line;
 }
 
+// Card title: the plain curated name when the lobby has one,
+// else the raw run id. Both the live lobby and the static
+// export feed titles through here.
 function cardTitle(model) {
   return model.title || model.id;
 }
@@ -9130,7 +9148,7 @@ function hideDeal(slot) {
   slot.hidden = true;
 }
 
-return { titleOutcomeKey, startHereVisible, rememberStartHereDismissed, drawLiveScenario, hostNoun, storyLine, formatDuration, partitionLobby, thumbnail, arenaThumb, provText, voidNoteText, renderLobby, renderDeal, hideDeal, HELDOUT_MIN, HELDOUT_MAX, FRONTIER_MIN, FRONTIER_MAX, MAX_FEATURED, START_HERE_KEY, START_HERE_LINES };
+return { titleOutcomeKey, startHereVisible, rememberStartHereDismissed, drawLiveScenario, hostNoun, storyLine, formatDuration, partitionLobby, thumbnail, arenaThumb, provText, cardTitle, voidNoteText, renderLobby, renderDeal, hideDeal, HELDOUT_MIN, HELDOUT_MAX, FRONTIER_MIN, FRONTIER_MAX, MAX_FEATURED, START_HERE_KEY, START_HERE_LINES };
 })();
 const __mod_opening__ = (() => {
 "use strict";

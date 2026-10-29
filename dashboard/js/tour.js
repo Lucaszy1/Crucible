@@ -1,14 +1,20 @@
 // Guided tour: one featured real replay with timed captions that
 // point at the red thought card, the blue thought card, the
-// auditor verdict, and the end card. Pausable, skippable, no
-// network beyond opening the replay itself. Works on the live
-// page and the static replay site.
+// auditor verdict, and the end card. Each caption sits above the
+// stage while a ring marks the card it names, so the box never
+// covers the transport controls below the stage. Pausable,
+// skippable, no network beyond opening the replay itself. Works
+// on the live page and the static replay site.
 export const TOUR_STEPS = [
   { id: "red", target: "#thoughtRed", caption: "Red thought: what red tries next." },
   { id: "blue", target: "#thoughtBlue", caption: "Blue thought: how blue answers." },
   { id: "auditor", target: "#arenaAud", caption: "Auditor verdict: was the blue move fair?" },
   { id: "end", target: "#endCard", caption: "End card: how the exercise ended." },
 ];
+
+// Caption placement: "top" means above the stage, clear of the
+// transport controls and the move strip. Every step uses it.
+export const TOUR_PLACE = "top";
 
 // Delay before each caption appears, in ms. Short enough to hold
 // attention, long enough to read the card behind it.
@@ -25,6 +31,10 @@ export function tourCaption(index) {
 export function tourTarget(index) {
   const step = TOUR_STEPS[index];
   return step ? step.target : "";
+}
+
+export function tourPlacement(index) {
+  return TOUR_STEPS[index] ? TOUR_PLACE : "";
 }
 
 export function nextTourStep(current) {
@@ -89,6 +99,7 @@ export function initTour(deps) {
     }
     if (api.caption) api.caption.textContent = `${index + 1} of ${TOUR_STEPS.length}. ${step.caption}`;
     if (api.overlay) api.overlay.hidden = false;
+    if (api.overlay && api.overlay.dataset) api.overlay.dataset.place = tourPlacement(index);
     if (api.box) api.box.hidden = false;
     if (api.endWrap) api.endWrap.hidden = true;
     const node = find(step.target);
@@ -129,6 +140,14 @@ export function initTour(deps) {
     if (api.overlay) api.overlay.hidden = true;
   }
 
+  function armFinish() {
+    if (ctl.timer) cancel(ctl.timer);
+    ctl.timer = later(() => {
+      ctl.timer = null;
+      if (ctl.running && !ctl.paused) finish();
+    }, 5000);
+  }
+
   function schedule(index, delay) {
     if (ctl.timer) cancel(ctl.timer);
     ctl.timer = later(() => {
@@ -136,7 +155,9 @@ export function initTour(deps) {
       if (!ctl.running || ctl.paused) return;
       // The end step waits for the end card when the replay is
       // still running: recheck once per second instead of pointing
-      // at an empty slot.
+      // at an empty slot. Without an end hook the step still plays
+      // against the arena fallback and then ends on its timer, so
+      // step 4 never parks the tour.
       if (index === TOUR_STEPS.length - 1 && typeof api.endVisible === "function") {
         let visible = false;
         try {
@@ -146,6 +167,7 @@ export function initTour(deps) {
         }
         if (!visible && typeof api.isEnded !== "function") {
           showStep(index);
+          armFinish();
           return;
         }
         if (!visible) {
@@ -156,12 +178,7 @@ export function initTour(deps) {
       showStep(index);
       const next = nextTourStep(index);
       if (next >= 0) schedule(next, TOUR_DELAYS[next] || 5000);
-      else {
-        ctl.timer = later(() => {
-          ctl.timer = null;
-          if (ctl.running && !ctl.paused) finish();
-        }, 5000);
-      }
+      else armFinish();
     }, delay);
   }
 
@@ -231,12 +248,7 @@ export function initTour(deps) {
       showStep(next);
       const after = nextTourStep(next);
       if (after >= 0) schedule(after, TOUR_DELAYS[after] || 5000);
-      else {
-        ctl.timer = later(() => {
-          ctl.timer = null;
-          if (ctl.running && !ctl.paused) finish();
-        }, 5000);
-      }
+      else armFinish();
     }
   };
 
