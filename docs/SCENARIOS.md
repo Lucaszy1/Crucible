@@ -76,17 +76,21 @@ what it unlocks:
 
 ## Difficulty
 
-|              | easy   | medium | hard   |
-|--------------|--------|--------|--------|
-| path steps   | 3      | 4      | 5      |
-| hosts        | 6-7    | 7-8    | 9-10   |
-| dead ends    | 1      | 1      | 2      |
-| decoy pages  | 2      | 4      | 6      |
-| noise events | 4      | 8      | 12     |
+|              | easy   | medium | hard   | frontier |
+|--------------|--------|--------|--------|----------|
+| path steps   | 3      | 4      | 5      | 7        |
+| hosts        | 6-7    | 7-8    | 9-10   | 10       |
+| dead ends    | 1      | 1      | 2      | 3        |
+| decoy pages  | 2      | 4      | 6      | 6        |
+| decoy hosts  | 0      | 0      | 0      | 2        |
+| noise events | 4      | 8      | 12     | 20       |
 
 Templates: easy is page, weak sign-in, jewel read. Medium chains
 two pages before the sign-in. Hard adds a config/backup credential
-file and a second sign-in hop. Generation is fully deterministic
+file and a second sign-in hop. Frontier chains two file-leak hops
+over four hosts, so the jewel sits three hops past the entry, and
+adds two target-looking decoy hosts (data roles, holding nothing)
+plus busier sub-alert noise. Generation is fully deterministic
 per (seed, difficulty): one seeded RNG stream, re-rolls with a
 derived seed on validation failure (capped at 20, then an error).
 
@@ -140,6 +144,7 @@ sign-in follows an earlier sign-in, hence only on hard.)
 - `TRAIN_SEEDS`: 1001-1040 (40 seeds, playbook training).
 - `HELDOUT_SEEDS`: 9001-9020 (20 seeds, generalization eval,
   never touched in training).
+- `FRONTIER_SEEDS`: 9101-9110 (10 seeds, frontier tier only).
 - `SMOKE_SEEDS`: 1, 2, 3 for quick checks.
 
 ## Scripted chain red

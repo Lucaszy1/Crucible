@@ -328,7 +328,8 @@ def parse_args(argv=None):
     parser.add_argument("--scenarios", default=None,
                         help="Comma list of classic and "
                         "gen:<seed>:<difficulty> (default: classic only)")
-    parser.add_argument("--scenario-set", choices=("train", "heldout"),
+    parser.add_argument("--scenario-set",
+                        choices=("train", "heldout", "frontier"),
                         default=None,
                         help="Append the named seed set at --difficulty")
     parser.add_argument("--difficulty", choices=list(DIFFICULTIES),
