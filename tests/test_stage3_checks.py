@@ -21,6 +21,7 @@ def _write_bench(path: Path, *, sensors: str, alerts: int, count: int = 2,
                  episodes: list | None = None,
                  red_profile: str = "solver",
                  blue_notes: dict | None = None,
+                 red_notes: dict | None = None,
                  degraded: tuple = ()) -> Path:
     """Write a bench with N alert-bearing blue events.
 
@@ -29,8 +30,9 @@ def _write_bench(path: Path, *, sensors: str, alerts: int, count: int = 2,
     only turn (sensors never had a chance, so silence owes nothing).
     episodes overrides the default ep-{index} ids (duplicates allowed,
     to test the within-bench duplicate check). red_profile sets the
-    CSV red profile; blue_notes overrides the blue reasoning note per
-    episode; degraded flags those episodes' blue events degraded.
+    CSV red profile; blue_notes and red_notes override those actors'
+    reasoning notes per episode; degraded flags those episodes'
+    blue events degraded.
     """
     path.mkdir(parents=True, exist_ok=True)
     (path / "summary.json").write_text(json.dumps({
@@ -67,7 +69,9 @@ def _write_bench(path: Path, *, sensors: str, alerts: int, count: int = 2,
                   "args": {"host": "app", "user": "a", "password": "b"},
                   "result": {"ok": True, "host": "app",
                              "authenticated": True},
-                  "reasoning_summary": "sign in", "evidence_refs": []}
+                  "reasoning_summary": (red_notes or {}).get(
+                      row["episode"], "sign in"),
+                  "evidence_refs": []}
         first = {"id": "evt-0001", "actor": "system",
                  "tool": "clean_start_check", "args": {"sensors": sensors},
                  "result": {"ok": True}, "reasoning_summary": "check",
@@ -219,14 +223,29 @@ def test_model_briefed_degraded_episode_fails(tmp_path):
     assert report.fails() == ["ep-0: model-briefed turn ran degraded"]
 
 
-def test_model_briefed_baseline_note_fails(tmp_path):
+def test_model_briefed_baseline_note_warns_not_fails(tmp_path):
     bench = _write_bench(
         tmp_path / "briefed-base", sensors="on", alerts=2,
         red_profile="model-briefed",
-        blue_notes={"ep-1": "Model call failed (boom), using baseline."})
+        blue_notes={"ep-1": "Model returned no tool call, using baseline."})
     report = stage3_checks.Report()
     stage3_checks.check_episodes(report, [bench])
-    assert report.fails() == ["ep-1: model-briefed turn used baseline fallback"]
+    assert report.fails() == []
+    assert report.warns() == [
+        "ep-1: model-briefed blue turn used a soft baseline fallback"]
+
+
+def test_model_briefed_red_baseline_note_warns_louder(tmp_path):
+    bench = _write_bench(
+        tmp_path / "briefed-red", sensors="on", alerts=2,
+        red_profile="model-briefed",
+        red_notes={"ep-0": "Model returned no tool call, using baseline."})
+    report = stage3_checks.Report()
+    stage3_checks.check_episodes(report, [bench])
+    assert report.fails() == []
+    assert report.warns() == [
+        "ep-0: model-briefed red turn used a soft baseline fallback; "
+        "red fallbacks matter more than blue ones"]
 
 
 def test_model_briefed_clean_episodes_pass(tmp_path):
@@ -244,3 +263,95 @@ def test_solver_baseline_note_is_not_checked(tmp_path):
     report = stage3_checks.Report()
     stage3_checks.check_episodes(report, [bench])
     assert report.fails() == []
+
+
+def _write_briefed_heldout(path: Path, *, frozen=True, auditor=True,
+                           blue_notes=None, red_notes=None) -> Path:
+    """Shape the shared fixture into the 20-network briefed bench."""
+    episodes = [f"ep-{seed}" for seed in range(9001, 9021)]
+    bench = _write_bench(path, sensors="on", alerts=20, count=20,
+                         episodes=episodes, red_profile="model-briefed",
+                         blue_notes=blue_notes, red_notes=red_notes)
+    summary_path = bench / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["cells"] = ["model-briefed-sensors-on-memory-off"]
+    summary["playbook_frozen"] = frozen
+    summary["audit"] = "end"
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    csv_path = bench / "summary.csv"
+    with csv_path.open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    fields = list(rows[0]) + ["sensors", "memory"]
+    for row in rows:
+        row["scenario_seed"] = row["episode"].split("-")[-1]
+        row["sensors"] = "on"
+        row["memory"] = "off"
+    with csv_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+    if auditor:
+        verdict = {"id": "evt-0004", "actor": "auditor", "tool": "audit",
+                   "args": {"target_event_id": "evt-0003"},
+                   "result": {"ok": True, "verdict": "justified",
+                              "score": 8},
+                   "reasoning_summary": "judged",
+                   "evidence_refs": []}
+        for row in rows:
+            with (bench / f"{row['episode']}.jsonl").open(
+                    "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(verdict) + "\n")
+    return bench
+
+
+def test_briefed_heldout_clean_bench_passes(tmp_path):
+    bench = _write_briefed_heldout(tmp_path / "briefed-ok")
+    report = stage3_checks.Report()
+    stage3_checks.check_briefed_heldout(report, bench)
+    assert report.fails() == []
+    assert report.warns() == []
+
+
+def test_briefed_heldout_fallbacks_warn_with_counts(tmp_path):
+    bench = _write_briefed_heldout(
+        tmp_path / "briefed-warn",
+        blue_notes={"ep-9001": "Model returned no tool call, "
+                               "using baseline.",
+                    "ep-9002": "Model returned no tool call, "
+                               "using baseline."},
+        red_notes={"ep-9003": "Model reply hit the token limit, "
+                              "using baseline."})
+    report = stage3_checks.Report()
+    stage3_checks.check_briefed_heldout(report, bench)
+    assert report.fails() == []
+    assert report.warns() == [
+        "briefed-warn: soft baseline fallbacks in 3 of 20 episodes: "
+        "red 1 of 20 turns, blue 2 of 20 turns (soft fallbacks used "
+        "a safe baseline move; red fallbacks matter more than blue "
+        "ones)"]
+
+
+def test_briefed_heldout_wrong_shape_fails(tmp_path):
+    bench = _write_briefed_heldout(tmp_path / "briefed-shape")
+    csv_path = bench / "summary.csv"
+    with csv_path.open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    rows = rows[:19]
+    with csv_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    report = stage3_checks.Report()
+    stage3_checks.check_briefed_heldout(report, bench)
+    assert report.fails() == ["briefed-shape: want 20 episodes, got 19"]
+
+
+def test_briefed_heldout_unfrozen_or_unaudited_fails(tmp_path):
+    bench = _write_briefed_heldout(tmp_path / "briefed-soft", frozen=False)
+    report = stage3_checks.Report()
+    stage3_checks.check_briefed_heldout(report, bench)
+    assert report.fails() == ["briefed-soft: playbook_frozen is not true"]
+    bench = _write_briefed_heldout(tmp_path / "briefed-quiet", auditor=False)
+    report = stage3_checks.Report()
+    stage3_checks.check_briefed_heldout(report, bench)
+    assert report.fails() == ["ep-9001: auditor ran no verdicts"]

@@ -56,6 +56,97 @@ BRIEFED_LABEL = "briefed-red-vs-Spark-Open"
 # every lookup missing on generated nets (fixed in c9dd960).
 VOID_BENCH_NAMES = ("bench-stage3-train-solver", "bench-stage3-heldout")
 
+SPEND_FILE = ROOT / "runs" / "spend.jsonl"
+ARCHIVE_DIR = ROOT / "runs" / "archive"
+_SPEND_TAIL_S = 300.0
+
+
+def _log_mtime(path: Path) -> float | None:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None
+
+
+def _briefed_baseten_tokens(bench_dir: Path, episodes: list) -> int:
+    """Sum one bench's Baseten tokens, excluding archived reruns.
+
+    Reruns reuse episode ids, and the spend log still holds the
+    archived 401 run under the same ids, so entries at or before
+    each archived log's mtime are cut; the rest, up to this bench's
+    log plus a referee tail, is this bench's run.
+    """
+    if not SPEND_FILE.exists():
+        return 0
+    by_episode: dict = {}
+    for line in SPEND_FILE.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if entry.get("host") != "baseten":
+            continue
+        by_episode.setdefault(entry.get("exercise_id", ""), []).append(entry)
+    try:
+        archived = [path for path in ARCHIVE_DIR.iterdir()
+                    if path.is_dir()]
+    except OSError:
+        archived = []
+    total = 0
+    for episode in episodes:
+        mine = _log_mtime(bench_dir / f"{episode}.jsonl")
+        if mine is None:
+            continue
+        floor = float("-inf")
+        for old in archived:
+            seen = _log_mtime(old / f"{episode}.jsonl")
+            if seen is not None and seen < mine:
+                floor = max(floor, seen)
+        for entry in by_episode.get(episode, []):
+            try:
+                when = float(entry.get("ts", None))
+            except (TypeError, ValueError):
+                continue
+            if when > floor and when <= mine + _SPEND_TAIL_S:
+                total += int(entry.get("input_tokens", 0) or 0)
+                total += int(entry.get("output_tokens", 0) or 0)
+    return total
+
+
+def _fallback_census(bench_dir: Path, episodes: list) -> dict:
+    """Count soft baseline fallbacks per actor over episode logs."""
+    turns = {"red": 0, "blue": 0}
+    fell = {"red": 0, "blue": 0}
+    affected: set = set()
+    for episode in episodes:
+        try:
+            lines = (bench_dir / f"{episode}.jsonl").read_text(
+                encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            actor = event.get("actor")
+            if actor not in turns:
+                continue
+            turns[actor] += 1
+            note = str(event.get("reasoning_summary", "") or "")
+            if "using baseline" in note.lower():
+                fell[actor] += 1
+                affected.add(episode)
+    return {"red_fallbacks": fell["red"], "red_turns": turns["red"],
+            "blue_fallbacks": fell["blue"], "blue_turns": turns["blue"],
+            "episodes": len(affected), "n": len(episodes)}
+
 
 def _read_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
@@ -166,9 +257,10 @@ def summarize_cell(bench_dir: Path, key: str) -> dict:
         "intrusion": {"hits": intr_hits, "n": intr_n,
                       "rate": intr_hits / intr_n if intr_n else None,
                       "wilson": wilson(intr_hits, intr_n)},
-        "secret_read": {"hits": sec_hits, "n": intr_n,
-                        "rate": sec_hits / intr_n if intr_n else None,
-                        "wilson": wilson(sec_hits, intr_n)},
+        "secret_read": {"hits": sec_hits, "n": len(intruded),
+                        "rate": (sec_hits / len(intruded)
+                                 if intruded else None),
+                        "wilson": wilson(sec_hits, len(intruded))},
         "contained_after_intrusion": {
             "hits": len(contained), "n": len(intruded),
             "rate": (len(contained) / len(intruded)
@@ -179,6 +271,7 @@ def summarize_cell(bench_dir: Path, key: str) -> dict:
         "median_detection_delay": _median(rows, "detection_delay"),
         "median_time_to_contain": _median(contained, "time_to_contain"),
         "mean_downtime_pct": _mean(rows, "downtime_pct"),
+        "mean_downtime_contained_pct": _mean(contained, "downtime_pct"),
         "audit_justified_rate": audit_rate,
         "audit_episodes": audit_eps,
         "total_cost_usd": round(sum(float(row.get("cost", 0.0) or 0.0)
@@ -472,16 +565,36 @@ def build_claims(comparisons: list, cells: dict, reference: dict,
             f"outcomes with working sensors.")
     briefed = reference.get(BRIEFED_LABEL)
     if briefed is not None and briefed.get("n"):
+        intr = briefed["intrusion"]
         cont = briefed["contained_after_intrusion"]
         sec = briefed["secret_read"]
         claims.append(
             f"Briefed model red against Open blue (n={briefed['n']}, "
-            f"descriptive only): intrusions "
-            f"{briefed['intrusion']['hits']}/{briefed['n']}, contained "
-            f"{cont['hits']}/{cont['n']}, secret reads "
-            f"{sec['hits']}/{sec['n']}, median relevant detection delay "
-            f"{_num(briefed['median_relevant_delay'])} events, median time "
-            f"to contain {_num(briefed['median_time_to_contain'])} events.")
+            f"descriptive only): {intr['hits']} of {intr['n']} networks "
+            f"had an intrusion, and all {cont['hits']} were contained; "
+            f"red did not get a foothold on the other "
+            f"{intr['n'] - intr['hits']}. Secret reads {sec['hits']}/"
+            f"{sec['n']} ({_pct(sec['rate'])}), median relevant detection "
+            f"delay {_num(briefed['median_relevant_delay'])} events, "
+            f"median time to contain "
+            f"{_num(briefed['median_time_to_contain'])} events, mean "
+            f"downtime {_num(briefed['mean_downtime_contained_pct'])}%, "
+            f"cost ${briefed['total_cost_usd']:.2f}, Baseten tokens "
+            f"{briefed.get('baseten_tokens', 0):,}.")
+        census = briefed.get("fallback_census") or {}
+        fell = (census.get("red_fallbacks", 0)
+                + census.get("blue_fallbacks", 0))
+        if fell:
+            claims.append(
+                f"{census['red_fallbacks']} of {census['red_turns']} red "
+                f"turns and {census['blue_fallbacks']} of "
+                f"{census['blue_turns']} blue turns used a safe baseline "
+                f"move after model replies with no usable tool call, "
+                f"across {census['episodes']} of {census['n']} episodes.")
+        else:
+            claims.append(
+                f"No soft baseline fallback turns in {census.get('n', 0)} "
+                f"episodes.")
     for comp in void.get("comparisons", []):
         if comp.get("arms") == ["B", "C"]:
             result = comp["metrics"]["secret_read"]
@@ -520,8 +633,9 @@ NON_CLAIMS = [
     "The main table uses a solver red with seeded imperfection, because "
     "unbriefed model red achieved no intrusion in 18 train episodes: "
     "results show blue contains a known-path intruder, not that blue "
-    "stops an adaptive attacker. Briefed model red intruded in 6 of 6 "
-    "probe episodes but that probe is descriptive only at n=6.",
+    "stops an adaptive attacker. The briefed-red run is descriptive "
+    "only at n=20: 18 of 20 networks had an intrusion, and all 18 were "
+    "contained; red did not get a foothold on the other 2.",
     "Audit justified rates cover the rerun B and C cells only; no other "
     "cell was audited.",
     "The frozen playbook was learned on train episodes whose sensors "
@@ -543,7 +657,7 @@ def parse_args(argv=None):
     parser.add_argument("--noisyref", default="runs/bench-stage3-noisyref")
     parser.add_argument("--xcheck", default="runs/bench-stage3-xcheck")
     parser.add_argument("--briefed",
-                        default="runs/bench-stage3-briefed-vs-open")
+                        default="runs/bench-stage3-briefed-heldout")
     parser.add_argument("--frozen",
                         default="runs/stage3/frozen-playbook.json")
     parser.add_argument("--out-md", default="docs/STAGE3_RESULTS.md")
@@ -605,6 +719,12 @@ def main(argv=None) -> int:
     if (briefed / "summary.csv").exists():
         cell = summarize_cell(briefed, BRIEFED_CELL)
         if cell["n"]:
+            episodes = [row.get("episode", "") for row in
+                        _csv_rows(briefed)
+                        if row.get("cell") == BRIEFED_CELL]
+            cell["baseten_tokens"] = _briefed_baseten_tokens(
+                briefed, episodes)
+            cell["fallback_census"] = _fallback_census(briefed, episodes)
             reference[BRIEFED_LABEL] = cell
     payload = {
         "stage": 3,

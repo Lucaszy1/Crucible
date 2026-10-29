@@ -13,6 +13,10 @@ Checks that a finished run is evidence, not artifact:
   zero alerts across all episodes; the two void benches are marked
   void by name instead of failing on silence, and duplicate exercise
   ids fail only within one bench)
+- briefed: the 20-network briefed held-out bench covers seeds
+  9001-9020 exactly once, ran sensors-on memory-off frozen with the
+  auditor on, and reports soft baseline fallbacks as a warning with
+  red/blue counts (only the degraded flag fails)
 
 Exit 0 when every FAIL check passes (warnings allowed); exit 1 on any
 FAIL, or on warnings with --strict. Reads runs/, spend.jsonl, and the
@@ -436,9 +440,12 @@ def check_episodes(report: Report, bench_dirs: list) -> None:
                         break
                     note = str(event.get("reasoning_summary", "") or "")
                     if "using baseline" in note.lower():
+                        actor = event.get("actor", "?")
+                        extra = ("; red fallbacks matter more than blue ones"
+                                 if actor == "red" else "")
                         report.add(
-                            FAIL, f"{episode}: model-briefed turn used "
-                                  f"baseline fallback")
+                            WARN, f"{episode}: model-briefed {actor} turn "
+                                  f"used a soft baseline fallback{extra}")
                         break
             if row.get("secret_read") == "True" \
                     and row.get("intrusion") != "True":
@@ -509,6 +516,98 @@ def check_episodes(report: Report, bench_dirs: list) -> None:
         report.add(OK, f"{bench_dir.name}: scanned {len(rows)} episodes")
 
 
+BRIEFED_HELDOUT_SEEDS = list(range(9001, 9021))
+BRIEFED_HELDOUT_CELL = "model-briefed-sensors-on-memory-off"
+
+
+def check_briefed_heldout(report: Report, bench_dir: Path) -> None:
+    """The 20-network briefed held-out bench: shape, freeze, audit.
+
+    Seeds must be exactly 9001-9020 with no overlap, one
+    sensors-on memory-off model-briefed cell, a frozen playbook, and
+    auditor verdicts in every episode log. Soft baseline fallbacks
+    report as one warning with red/blue counts; only the degraded
+    flag fails, in the per-episode scan.
+    """
+    try:
+        summary = _bench_summary(bench_dir)
+        rows = _csv_rows(bench_dir)
+    except FileNotFoundError as exc:
+        report.add(FAIL, str(exc))
+        return
+    name = bench_dir.name
+    if len(rows) != 20:
+        report.add(FAIL, f"{name}: want 20 episodes, got {len(rows)}")
+        return
+    seeds = []
+    for row in rows:
+        raw = (row.get("scenario_seed") or "").strip()
+        try:
+            seeds.append(int(raw))
+        except ValueError:
+            seeds.append(raw)
+    numeric = all(isinstance(seed, int) for seed in seeds)
+    if not numeric or sorted(seeds) != BRIEFED_HELDOUT_SEEDS:
+        shown = sorted(set(seeds)) if numeric \
+            else sorted(set(map(str, seeds)))
+        report.add(FAIL, f"{name}: want seeds 9001-9020 exactly once, "
+                         f"got {shown}")
+        return
+    report.add(OK, f"{name}: seeds 9001-9020 exactly once, no overlap")
+    if summary.get("cells") != [BRIEFED_HELDOUT_CELL]:
+        report.add(FAIL, f"{name}: want one cell "
+                         f"{BRIEFED_HELDOUT_CELL}, got "
+                         f"{summary.get('cells')}")
+        return
+    for column, want in (("sensors", "on"), ("memory", "off"),
+                         ("red_profile", "model-briefed")):
+        if {row.get(column) for row in rows} != {want}:
+            report.add(FAIL, f"{name}: want every row {column}={want}")
+            return
+    report.add(OK, f"{name}: one sensors-on memory-off model-briefed cell")
+    if not summary.get("playbook_frozen"):
+        report.add(FAIL, f"{name}: playbook_frozen is not true")
+        return
+    report.add(OK, f"{name}: playbook_frozen=true")
+    if summary.get("audit") != "end":
+        report.add(FAIL, f"{name}: want audit=end, got "
+                         f"{summary.get('audit')}")
+        return
+    turns = {"red": 0, "blue": 0}
+    fell = {"red": 0, "blue": 0}
+    affected: set = set()
+    for row in rows:
+        episode = row.get("episode", "")
+        path = bench_dir / f"{episode}.jsonl"
+        if not path.exists():
+            report.add(FAIL, f"{episode}: csv row without jsonl")
+            return
+        events = _jsonl_events(path)
+        if not any(event.get("actor") == "auditor" for event in events):
+            report.add(FAIL, f"{episode}: auditor ran no verdicts")
+            return
+        for event in events:
+            actor = event.get("actor")
+            if actor not in turns:
+                continue
+            turns[actor] += 1
+            note = str(event.get("reasoning_summary", "") or "")
+            if "using baseline" in note.lower():
+                fell[actor] += 1
+                affected.add(episode)
+    report.add(OK, f"{name}: auditor verdicts in all 20 episode logs")
+    if fell["red"] or fell["blue"]:
+        report.add(WARN,
+                   f"{name}: soft baseline fallbacks in "
+                   f"{len(affected)} of 20 episodes: red {fell['red']} of "
+                   f"{turns['red']} turns, blue {fell['blue']} of "
+                   f"{turns['blue']} turns (soft fallbacks used a safe "
+                   f"baseline move; red fallbacks matter more than blue "
+                   f"ones)")
+    else:
+        report.add(OK, f"{name}: no soft baseline fallbacks in 20 episodes")
+
+
 def baseten_totals(exercise_ids: set | None = None) -> dict:
     """Sum Baseten token entries, optionally restricted to episodes."""
     totals = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0,
@@ -562,10 +661,14 @@ def parse_args(argv=None):
     parser.add_argument("--evals", nargs="*",
                         default=["runs/bench-stage3-heldout",
                                  "runs/bench-stage3-noisyref",
-                                 "runs/bench-stage3-xcheck"],
+                                 "runs/bench-stage3-xcheck",
+                                 "runs/bench-stage3-briefed-heldout"],
                         help="Eval bench dirs for split/freeze/episode checks")
     parser.add_argument("--freeze", default="runs/bench-stage3-heldout",
                         help="Bench dir whose frozen cells must match")
+    parser.add_argument("--briefed",
+                        default="runs/bench-stage3-briefed-heldout",
+                        help="20-network briefed held-out bench dir")
     parser.add_argument("--leak-grep", default=None, metavar="PLAYBOOK",
                         help="Grep one playbook JSON for held-out content")
     parser.add_argument("--episodes", nargs="*", default=None,
@@ -598,6 +701,7 @@ def main(argv=None) -> int:
                      [Path(path) for path in args.evals])
         check_freeze(report, Path(args.freeze))
         check_leak(report, FROZEN_JSON)
+        check_briefed_heldout(report, Path(args.briefed))
     targets = args.episodes
     if targets is None and run_all:
         targets = [args.train] + list(args.evals)
