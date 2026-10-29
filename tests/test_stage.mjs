@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import {
   applyCamera, auditorChrome, blueLine, calloutForEvent, capTagFontSize, clashCrop, dollyTarget, FINISH_PACES, finishPlan,
   flashHold, FLIGHT_MS, flightLaneRect, frameBudget, frameP95, flightLane, fxForEvent,
-  guardianPulse, hitstopFor, initStage, intrusionLevel, laneFeed, lanePoint, LOW_STREAK,
+  guardianPulse, hitstopFor, hostLabelLayout, initStage, intrusionLevel, laneFeed, lanePoint, LOW_STREAK,
   meltChar, meltDrift, meltGlyphAlpha, meltGlyphPx, meltHaloAlpha, meltSpriteAlpha, meltStride, moveSpanMs, paintGuardian,
   paintIntrusion, projBody, redLine, renderStageStatic, renderStageThumb, sampleMeltMask,
   setStageActive, setStageReduced, stageLayout, stageNotify, stageWash, stepCamera, trailSpan,
@@ -932,5 +932,20 @@ describe("melt timing", () => {
     const b = meltDrift(4, 1, 82, 0, 0);
     assert.equal(a.dx, meltDrift(3, 1, 82, 0, 0).dx);
     assert.ok(Math.abs(a.dx - b.dx) > 1, `${a.dx} vs ${b.dx}`);
+  });
+});
+
+describe("hostLabelLayout", () => {
+  it("keeps the tag inside roomy blocks", () => {
+    assert.deepEqual(hostLabelLayout(88), { place: "inside", fs: 24, dy: 1 });
+    assert.equal(hostLabelLayout(14).place, "inside");
+  });
+
+  it("moves the tag below tiny blocks instead of hiding it", () => {
+    const lay = hostLabelLayout(8);
+    assert.equal(lay.place, "below");
+    assert.ok(lay.fs >= 10);
+    assert.ok(lay.dy > 8);
+    assert.equal(hostLabelLayout(3).place, "below");
   });
 });

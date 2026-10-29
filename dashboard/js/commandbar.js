@@ -43,6 +43,74 @@ export function pickRecorderMimeType(MediaRecorderLike) {
   return "";
 }
 
+// Short role caption for a host chip, never blank. Inventory
+// roles arrive as short names or classic sentences; unknown roles
+// show themselves so no host reads nameless.
+export function chipRole(role) {
+  const raw = String(role || "").trim();
+  if (!raw) return "host";
+  const map = {
+    "web portal": "public site",
+    "public web front end": "public site",
+    api: "public site",
+    app: "reports server",
+    "internal reporting service": "reports server",
+    workstation: "staff desktop",
+    "analyst workstation": "staff desktop",
+  };
+  return map[raw.toLowerCase()] || raw;
+}
+
+export function escapeHtml(text) {
+  return String(text || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+export function hostIds(hosts) {
+  return (hosts || [])
+    .map((h) => (typeof h === "string" ? h : h && h.id))
+    .filter(Boolean);
+}
+
+// Three example orders grounded in live host names, cycling short
+// lists; empty when no hosts are known, never invented names.
+export function exampleOrders(hosts) {
+  const names = hostIds(hosts);
+  if (names.length === 0) return [];
+  const picks = [0, 1, 2].map((i) => names[i % names.length]);
+  return [
+    `read logs on ${picks[0]}`,
+    `scan the ${picks[1]} host`,
+    `isolate the ${picks[2]} host`,
+  ];
+}
+
+// One chip button per host: name plus role caption. Clicks resolve
+// through delegation on the container (data-host).
+export function chipsHtml(hosts) {
+  return (hosts || [])
+    .filter((h) => h && (typeof h === "string" || h.id))
+    .map((h) => {
+      const id = typeof h === "string" ? h : h.id;
+      const role = typeof h === "string" ? "" : h.role;
+      return `<button type="button" class="cmd-chip" data-host="${escapeHtml(id)}">`
+        + `<span class="cmd-chip-name">${escapeHtml(id)}</span>`
+        + `<span class="cmd-chip-role">${escapeHtml(chipRole(role))}</span></button>`;
+    })
+    .join("");
+}
+
+export function tryHtml(hosts) {
+  const orders = exampleOrders(hosts);
+  if (orders.length === 0) return "";
+  return "Try: " + orders
+    .map((o) => `<button type="button" class="cmd-try-ex" data-order="${escapeHtml(o)}">${escapeHtml(o)}</button>`)
+    .join(" · ");
+}
+
 // Decode recorder bytes to mono PCM via an offline context. The bar
 // uses this by default; tests inject a stub through deps.
 export async function defaultDecodeAudioData(raw) {
@@ -178,6 +246,7 @@ export function initCommandBar(els, deps) {
     startedAt: 0,
     listenTimer: null,
     holdNoteUntil: 0,
+    ptt: false,
   };
 
   // Browser globals resolve through deps first so node tests can
@@ -209,7 +278,8 @@ export function initCommandBar(els, deps) {
   }
 
   function renderPreview(transcript, source, parsed) {
-    setText(els.transcript, transcript ? `Heard (${source}): ${transcript}` : "");
+    const heard = parsed && parsed.heard ? ` — ${parsed.heard}` : "";
+    setText(els.transcript, transcript ? `Heard (${source}): ${transcript}${heard}` : "");
     if (els.transcript) els.transcript.hidden = !transcript;
     setText(els.previewLine, previewLine(parsed));
     if (els.preview) els.preview.hidden = false;
@@ -360,11 +430,8 @@ export function initCommandBar(els, deps) {
     }
   }
 
-  async function toggleMic() {
-    if (ctl.recording) {
-      await stopRecorder();
-      return;
-    }
+  async function startMic() {
+    if (ctl.recording) return;
     clearConfirm();
     if (!MediaRecorderLike || !mediaDevices) {
       show("This browser cannot record: type the order instead.");
@@ -407,6 +474,54 @@ export function initCommandBar(els, deps) {
     }
   }
 
+  async function toggleMic() {
+    if (ctl.recording) {
+      await stopRecorder();
+      return;
+    }
+    await startMic();
+  }
+
+  // Host chips plus the Try line, from the current exercise only.
+  // Hidden while detached or when no hosts are known.
+  function renderHosts(hosts) {
+    if (!els.chips || !els.tryline) return;
+    const list = (Array.isArray(hosts) ? hosts : []).filter((h) => h && h.id);
+    if (!ctl.visible || list.length === 0) {
+      els.chips.hidden = true;
+      els.tryline.hidden = true;
+      els.chips.innerHTML = "";
+      els.tryline.innerHTML = "";
+      return;
+    }
+    els.chips.innerHTML = chipsHtml(list);
+    els.tryline.innerHTML = tryHtml(list);
+    els.chips.hidden = false;
+    els.tryline.hidden = els.tryline.innerHTML === "";
+  }
+
+  function delegateData(ev, attr) {
+    const target = ev && ev.target;
+    const btn = target && target.closest ? target.closest(`[${attr}]`) : null;
+    if (!btn || typeof btn.getAttribute !== "function") return null;
+    return btn.getAttribute(attr) || null;
+  }
+
+  function onChipsClick(ev) {
+    const name = delegateData(ev, "data-host");
+    if (!name || !els.input) return;
+    const cur = els.input.value || "";
+    els.input.value = cur && !/\s$/.test(cur) ? `${cur} ${name}` : `${cur}${name}`;
+    els.input.focus();
+  }
+
+  function onTryClick(ev) {
+    const order = delegateData(ev, "data-order");
+    if (!order || !els.input) return;
+    els.input.value = order;
+    els.input.focus();
+  }
+
   async function refreshState() {
     let state = null;
     try {
@@ -419,8 +534,10 @@ export function initCommandBar(els, deps) {
     bar.hidden = !attached;
     if (!attached) {
       clearConfirm();
+      renderHosts([]);
       return;
     }
+    renderHosts(state.hosts);
     setText(els.spend, spendLine(state.spend_usd, state.spend_cap_usd));
     if (els.takeover) {
       const humanMode = state.mode === "human";
@@ -437,9 +554,13 @@ export function initCommandBar(els, deps) {
     }
   }
 
+  // Hold V to talk, release to stop. Ignored while typing, while
+  // the bar is detached, and on key repeat; release always stops,
+  // even inside the mistap window, since letting go means done.
   function onKeydown(ev) {
     if (ev.key === "Escape" && (ctl.pending || ctl.recording)) {
       ev.stopPropagation();
+      ctl.ptt = false;
       if (ctl.recording) {
         void stopRecorder({ force: true });
         show("Recording cancelled.");
@@ -447,10 +568,29 @@ export function initCommandBar(els, deps) {
         clearConfirm();
         show("Order cancelled before sending.");
       }
+      return;
+    }
+    if ((ev.key === "v" || ev.key === "V") && !ev.repeat
+        && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+      const tag = (ev.target && ev.target.tagName) || "";
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (!ctl.visible || ctl.recording) return;
+      ev.preventDefault();
+      ctl.ptt = true;
+      void startMic();
+    }
+  }
+
+  function onKeyup(ev) {
+    if ((ev.key === "v" || ev.key === "V") && ctl.ptt) {
+      ctl.ptt = false;
+      if (ctl.recording) void stopRecorder({ force: true });
     }
   }
 
   if (els.mic) els.mic.addEventListener("click", () => void toggleMic());
+  if (els.chips) els.chips.addEventListener("click", onChipsClick);
+  if (els.tryline) els.tryline.addEventListener("click", onTryClick);
   if (els.send) els.send.addEventListener("click", () => {
     if (els.input) void previewText(els.input.value, "text");
   });
@@ -484,7 +624,10 @@ export function initCommandBar(els, deps) {
     }
     void refreshState();
   });
-  if (doc) doc.addEventListener("keydown", onKeydown);
+  if (doc) {
+    doc.addEventListener("keydown", onKeydown);
+    doc.addEventListener("keyup", onKeyup);
+  }
 
   ctl.refresh = refreshState;
   ctl.start = () => {

@@ -2,11 +2,16 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  chipRole,
+  chipsHtml,
   demoOrder,
   downsampleLinear,
   encodeWavPCM,
+  escapeHtml,
+  exampleOrders,
   previewLine,
   spendLine,
+  tryHtml,
 } from "../dashboard/js/commandbar.js";
 
 const BANNED = ["attack", "battle", "enemy", "kill", "war ", "warfare", "combat", " "];
@@ -61,6 +66,57 @@ describe("demoOrder", () => {
 describe("spendLine", () => {
   it("shows spend against the cap", () => {
     assert.equal(spendLine(0.0123, 1), "Model spend $0.0123 of $1.00");
+  });
+});
+
+describe("host chips", () => {
+  it("shows a short role caption, never blank", () => {
+    assert.equal(chipRole("web portal"), "public site");
+    assert.equal(chipRole("public web front end"), "public site");
+    assert.equal(chipRole("app"), "reports server");
+    assert.equal(chipRole("database"), "database");
+    assert.equal(chipRole("jump host"), "jump host");
+    assert.equal(chipRole(""), "host");
+  });
+
+  it("builds grounded example orders, cycling short lists", () => {
+    assert.deepEqual(exampleOrders([{ id: "flint" }, { id: "gate" }, { id: "harbor" }]), [
+      "read logs on flint",
+      "scan the gate host",
+      "isolate the harbor host",
+    ]);
+    assert.deepEqual(exampleOrders([{ id: "solo" }]), [
+      "read logs on solo",
+      "scan the solo host",
+      "isolate the solo host",
+    ]);
+    assert.deepEqual(exampleOrders([]), []);
+  });
+
+  it("renders one chip per host with an escaped name", () => {
+    const html = chipsHtml([
+      { id: "quill", role: "web portal" },
+      { id: "a<b", role: "app" },
+    ]);
+    assert.ok(html.includes('data-host="quill"'));
+    assert.ok(html.includes("quill"));
+    assert.ok(html.includes("public site"));
+    assert.ok(html.includes("reports server"));
+    assert.ok(!html.includes("a<b"));
+    assert.ok(html.includes("a&lt;b"));
+  });
+
+  it("renders a Try line from live hosts only", () => {
+    const html = tryHtml([{ id: "flint" }, { id: "gate" }]);
+    assert.ok(html.startsWith("Try:"));
+    assert.ok(html.includes("read logs on flint"));
+    assert.ok(html.includes("scan the gate host"));
+    assert.ok(html.includes("isolate the flint host"));
+    assert.equal(tryHtml([]), "");
+  });
+
+  it("escapes markup", () => {
+    assert.equal(escapeHtml('<a href="x">&'), "&lt;a href=&quot;x&quot;&gt;&amp;");
   });
 });
 

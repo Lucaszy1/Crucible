@@ -365,10 +365,15 @@ def command_state() -> dict[str, Any]:
     if cmd_queue is None:
         return {"attached": False, "exercise_id": None, "pending": 0,
                 "last": None, "mode": None, "latched": False,
-                "spend_usd": 0.0, "spend_cap_usd": HUMAN_SESSION_CAP_USD}
+                "spend_usd": 0.0, "spend_cap_usd": HUMAN_SESSION_CAP_USD,
+                "hosts": []}
     last = cmd_queue.last_result()
     latched = last is not None and last.get("status") != "handed-back"
+    inventory, _services = _live_context()
+    hosts = [{"id": name, "role": str((entry or {}).get("role", "") or "")}
+             for name, entry in
+             sorted((inventory.get("hosts", {}) or {}).items())]
     return {"attached": True, "exercise_id": exercise_id,
             "pending": cmd_queue.pending(), "last": last, "mode": mode,
             "latched": latched, "spend_usd": spend,
-            "spend_cap_usd": HUMAN_SESSION_CAP_USD}
+            "spend_cap_usd": HUMAN_SESSION_CAP_USD, "hosts": hosts}

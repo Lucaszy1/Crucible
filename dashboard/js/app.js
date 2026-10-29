@@ -154,6 +154,8 @@ const els = {
   cmdConfirm: document.getElementById("cmdConfirm"),
   cmdSpend: document.getElementById("cmdSpend"),
   cmdNote: document.getElementById("cmdNote"),
+  cmdHosts: document.getElementById("cmdHosts"),
+  cmdTry: document.getElementById("cmdTry"),
 };
 
 const controls = {
@@ -1658,6 +1660,7 @@ async function boot() {
       transcript: els.cmdTranscript, preview: els.cmdPreview,
       previewLine: els.cmdPreviewLine, confirm: els.cmdConfirm,
       spend: els.cmdSpend, note: els.cmdNote,
+      chips: els.cmdHosts, tryline: els.cmdTry,
     },
     {
       hosts: () => (store.layout && store.layout.hosts

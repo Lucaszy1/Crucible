@@ -48,10 +48,20 @@ function makeEls() {
     },
     addEventListener: on("mic"),
   };
+  const input = {
+    value: "",
+    focusCount: 0,
+    addEventListener: on("input"),
+    focus() {
+      input.focusCount += 1;
+    },
+  };
   const els = {
     bar: { hidden: false },
     mic,
-    input: { value: "", addEventListener: on("input"), focus() {} },
+    input,
+    chips: { hidden: true, innerHTML: "", addEventListener: on("chips") },
+    tryline: { hidden: true, innerHTML: "", addEventListener: on("tryline") },
     send: { addEventListener: on("send") },
     demo: { addEventListener: on("demo") },
     takeover: { hidden: true, disabled: false, textContent: "", addEventListener: on("takeover") },
@@ -129,15 +139,18 @@ function makeFakeRecorder({ supported, during = [], onStop = [] } = {}) {
   };
 }
 
-function mount({ recorderOptions, uploads, transcripts } = {}) {
+function mount({ recorderOptions, uploads, transcripts, parseResult } = {}) {
   const { els, handlers, live } = makeEls();
   const order = [];
   const stream = makeStream(order);
   const FakeRecorder = makeFakeRecorder(recorderOptions);
   let nowMs = 10000;
+  let liveState = { attached: true, hosts: [] };
   const calls = { audio: uploads || [], parse: 0, order: 0 };
   const ctl = initCommandBar(els, {
-    document: { addEventListener() {} },
+    document: { addEventListener: (event, fn) => {
+      handlers[`doc:${event}`] = fn;
+    } },
     mediaDevices: { getUserMedia: async () => stream },
     MediaRecorder: FakeRecorder,
     now: () => nowMs,
@@ -148,13 +161,13 @@ function mount({ recorderOptions, uploads, transcripts } = {}) {
     },
     parseOrder: async () => {
       calls.parse += 1;
-      return { status: "ok", tool: "isolate_host", args: { host: "willow" } };
+      return parseResult || { status: "ok", tool: "isolate_host", args: { host: "willow" } };
     },
     sendOrder: async () => {
       calls.order += 1;
       return { status: "queued" };
     },
-    fetchCommandState: async () => ({ attached: true }),
+    fetchCommandState: async () => liveState,
   });
   cleanups.push(() => ctl.stop());
   const clickMic = async () => {
@@ -169,6 +182,12 @@ function mount({ recorderOptions, uploads, transcripts } = {}) {
     },
     now: () => nowMs,
     clickMic,
+    setState: (state) => {
+      liveState = state;
+    },
+    refresh: async () => {
+      await ctl.refresh();
+    },
   };
 }
 
@@ -276,6 +295,128 @@ describe("mic recording", () => {
     bar.setNow(bar.now() + MIN_RECORD_MS + 100);
     await bar.clickMic();
     assert.equal(bar.calls.audio.length, 1);
+    bar.ctl.stop();
+  });
+
+  it("shows the fuzzy match note with the transcript", async () => {
+    const bar = mount({
+      recorderOptions: { onStop: [audioChunk()] },
+      transcripts: ["isolate quil"],
+      parseResult: {
+        status: "ok", tool: "isolate_host", args: { host: "quill" },
+        heard: "Heard 'quil', using quill.",
+      },
+    });
+    await bar.clickMic();
+    bar.setNow(bar.now() + MIN_RECORD_MS + 100);
+    await bar.clickMic();
+    assert.ok(bar.els.transcript.textContent.includes("Heard (voice): isolate quil"));
+    assert.ok(bar.els.transcript.textContent.includes("Heard 'quil', using quill."));
+    bar.ctl.stop();
+  });
+});
+
+function chipClick(bar, host) {
+  bar.handlers["chips:click"]({
+    target: {
+      closest: (sel) => (sel === "[data-host]"
+        ? { getAttribute: () => host }
+        : null),
+    },
+  });
+}
+
+function tryClick(bar, order) {
+  bar.handlers["tryline:click"]({
+    target: {
+      closest: (sel) => (sel === "[data-order]"
+        ? { getAttribute: () => order }
+        : null),
+    },
+  });
+}
+
+describe("host chips and examples", () => {
+  it("renders one chip per current host with roles", async () => {
+    const bar = mount();
+    bar.setState({
+      attached: true,
+      hosts: [
+        { id: "quill", role: "web portal" },
+        { id: "flint", role: "database" },
+      ],
+    });
+    await bar.refresh();
+    assert.equal(bar.els.chips.hidden, false);
+    assert.ok(bar.els.chips.innerHTML.includes("quill"));
+    assert.ok(bar.els.chips.innerHTML.includes("public site"));
+    assert.ok(bar.els.chips.innerHTML.includes("flint"));
+    assert.equal(bar.els.tryline.hidden, false);
+    assert.ok(bar.els.tryline.innerHTML.startsWith("Try:"));
+    assert.ok(bar.els.tryline.innerHTML.includes("read logs on quill"));
+    bar.ctl.stop();
+  });
+
+  it("re-renders per exercise and hides when detached", async () => {
+    const bar = mount();
+    bar.setState({ attached: true, hosts: [{ id: "quill", role: "app" }] });
+    await bar.refresh();
+    assert.ok(bar.els.chips.innerHTML.includes("quill"));
+    bar.setState({ attached: true, hosts: [{ id: "zephyr", role: "app" }] });
+    await bar.refresh();
+    assert.ok(!bar.els.chips.innerHTML.includes("quill"));
+    assert.ok(bar.els.chips.innerHTML.includes("zephyr"));
+    bar.setState({ attached: false, hosts: [] });
+    await bar.refresh();
+    assert.equal(bar.els.chips.hidden, true);
+    assert.equal(bar.els.chips.innerHTML, "");
+    assert.equal(bar.els.tryline.hidden, true);
+    bar.ctl.stop();
+  });
+
+  it("chip click inserts the host name into the box", async () => {
+    const bar = mount();
+    chipClick(bar, "quill");
+    assert.equal(bar.els.input.value, "quill");
+    chipClick(bar, "flint");
+    assert.equal(bar.els.input.value, "quill flint");
+    assert.ok(bar.els.input.focusCount >= 2);
+    bar.ctl.stop();
+  });
+
+  it("example click fills the box", async () => {
+    const bar = mount();
+    bar.els.input.value = "stale text";
+    tryClick(bar, "scan the quill host");
+    assert.equal(bar.els.input.value, "scan the quill host");
+    bar.ctl.stop();
+  });
+});
+
+describe("push to talk", () => {
+  it("hold V records, release stops", async () => {
+    const bar = mount({ recorderOptions: { onStop: [audioChunk()] } });
+    bar.setState({ attached: true, hosts: [] });
+    await bar.refresh();
+    bar.handlers["doc:keydown"]({
+      key: "v", target: { tagName: "DIV" }, preventDefault() {},
+    });
+    await settle();
+    assert.equal(bar.els.mic.textContent, "Stop");
+    bar.handlers["doc:keyup"]({ key: "v" });
+    await settle();
+    assert.equal(bar.calls.audio.length, 1);
+    assert.equal(bar.els.mic.textContent, "Speak");
+    bar.ctl.stop();
+  });
+
+  it("ignores V while typing", async () => {
+    const bar = mount();
+    bar.setState({ attached: true, hosts: [] });
+    await bar.refresh();
+    bar.handlers["doc:keydown"]({ key: "v", target: { tagName: "INPUT" } });
+    await settle();
+    assert.equal(bar.els.mic.textContent, "Speak");
     bar.ctl.stop();
   });
 });

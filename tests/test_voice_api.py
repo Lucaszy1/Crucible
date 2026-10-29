@@ -27,8 +27,9 @@ def _attach(exercise_id="ex-1"):
     return cmd_queue
 
 
-def test_command_queued_and_state(client):
+def test_command_queued_and_state(client, monkeypatch):
     cmd_queue = _attach()
+    _live_inventory(monkeypatch)
     res = client.post("/api/command",
                       json={"text": "isolate the database"})
     assert res.status_code == 200
@@ -39,7 +40,9 @@ def test_command_queued_and_state(client):
     assert state == {"attached": True, "exercise_id": "ex-1",
                      "pending": 1, "last": None, "mode": None,
                      "latched": False, "spend_usd": 0.0,
-                     "spend_cap_usd": voice_api.HUMAN_SESSION_CAP_USD}
+                     "spend_cap_usd": voice_api.HUMAN_SESSION_CAP_USD,
+                     "hosts": [{"id": "willow", "role": "app"},
+                               {"id": "wren", "role": "workstation"}]}
 
 
 def test_command_voice_source(client):
@@ -317,6 +320,19 @@ def test_takeover_noop_in_human_mode(client):
     res = client.post("/api/takeover", json={"take": True})
     assert res.json()["status"] == "noop"
     assert cmd_queue.pending() == 0
+
+
+def test_state_lists_current_hosts_with_roles(client, monkeypatch):
+    _attach()
+    _live_inventory(monkeypatch)
+    body = client.get("/api/command/state").json()
+    assert body["attached"] is True
+    assert body["hosts"] == [
+        {"id": "willow", "role": "app"},
+        {"id": "wren", "role": "workstation"},
+    ]
+    voice_api.detach_queue()
+    assert client.get("/api/command/state").json()["hosts"] == []
 
 
 def test_state_reports_latch_from_last_result(client):

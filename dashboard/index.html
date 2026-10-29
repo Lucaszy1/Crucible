@@ -237,12 +237,14 @@
     <div id="moveStrip" class="move-strip" role="group" aria-label="Move timeline"></div>
     <section id="cmdBar" class="cmd-bar" aria-label="Defender orders" hidden>
       <div class="cmd-row">
-        <button id="cmdMic" class="btn small" type="button" aria-pressed="false" title="Speak an order">Speak</button>
+        <button id="cmdMic" class="btn small" type="button" aria-pressed="false" title="Speak an order (hold V to talk)">Speak</button>
         <input id="cmdInput" class="cmd-input" type="text" maxlength="500" placeholder="Type a defender order, e.g. isolate the willow host" aria-label="Defender order text" autocomplete="off">
         <button id="cmdSend" class="btn small pri" type="button">Preview</button>
         <button id="cmdDemo" class="btn small" type="button" title="Fill a canned valid order">Demo command</button>
         <button id="cmdTakeover" class="btn small" type="button">Take over blue</button>
       </div>
+      <div id="cmdHosts" class="cmd-hosts" role="group" aria-label="Exercise hosts" hidden></div>
+      <p id="cmdTry" class="cmd-try" hidden></p>
       <p id="cmdTranscript" class="cmd-transcript" hidden></p>
       <div id="cmdPreview" class="cmd-preview" hidden>
         <span id="cmdPreviewLine"></span>

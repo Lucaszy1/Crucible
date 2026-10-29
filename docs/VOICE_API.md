@@ -100,7 +100,8 @@ orders keep working when audio or the spend cap fails.
 {"attached": true, "exercise_id": "judge-1", "pending": 1,
  "last": {"id": 1, "text": "isolate the database", "source": "voice",
           "status": "ok", "tool": "isolate_host",
-          "args": {"host": "db"}}}
+          "args": {"host": "db"}},
+ "hosts": [{"id": "db", "role": "internal data store"}]}
 
 // no live human exercise
 {"attached": false, "exercise_id": null, "pending": 0, "last": null}
@@ -114,6 +115,9 @@ question, so the log shows exactly what the judge heard back.
 (whether the defender seat is held), and `spend_usd` against
 `spend_cap_usd` ($1.00 per session for transcription plus
 ambiguous-order parsing; past the cap only offline orders work).
+`hosts` lists the current exercise's hosts with roles (sorted by
+name, `[]` when detached) so the dashboard can show clickable
+chips; names change every exercise, never reuse an old one.
 
 ## Preview an order
 
@@ -138,8 +142,16 @@ Orders map onto the blue tool surface only: isolate, patch, restore,
 read logs, report finding, status, scan, stand down. Host names and
 roles resolve against the live inventory (`the database` finds the
 database role); ambiguous matches ask a clarifying question and never
-guess. A rotate order runs a patch (sign-in rotation ships with the
-patch action) and says so. Anything outside the surface (including
+guess. The deterministic parser tolerates speech slips: filler
+words are optional (`read logs app`), misheard verbs map to their
+tool (`read blogs`, `i solate`, `skin`), role words work in every
+exercise (`the public site`, `the reports server`), and a close
+host name resolves to its unique best match with a `heard` note
+(`Heard 'quil', using quill.`) while near-ties ask `Which host?`.
+Misses list the known hosts plus three grounded example orders;
+the phrasing-model fallback answers the same way when it fails.
+A rotate order runs a patch (sign-in rotation ships with the patch
+action) and says so. Anything outside the surface (including
 destructive verbs and ending the exercise) is refused with a plain
 explanation. Examples:
 
@@ -165,9 +177,13 @@ test).
 
 - Command bar: text field + send button wired to `POST /api/command`;
   show `pending` and the `last` outcome from `GET /api/command/state`
-  (poll about 1 Hz while an exercise runs).
+  (poll about 1 Hz while an exercise runs). Under the bar show one
+  clickable chip per host in `state.hosts` (name + role; click
+  inserts the name) plus a `Try:` line with three grounded example
+  orders (click fills the box).
 - Mic button: capture in-browser audio, encode 16 kHz mono 16-bit
-  WAV under 60 s / 5 MB, POST raw bytes to `/api/audio`.
+  WAV under 60 s / 5 MB, POST raw bytes to `/api/audio`. Hold V
+  outside the text field to record, release to stop.
 - Demo button: call `POST /api/command/demo` with `{}` to step the
   fixed list; show the returned transcript before sending the next.
 - Exercise picker: offer `human` and `ai_with_override` beside the
@@ -183,6 +199,10 @@ test).
   rate) and `audio` (WAV bytes); model id
   `muse-voice-transcribe-1.0`; JSON reply with transcript/turns.
   The realtime message shapes are still assumed (fake server only).
+- Neither the file request JSON nor our notes show a prompt,
+  context-hint, or vocabulary option, so transcription runs
+  unhinted and accuracy comes from parser tolerance (verb
+  variants, role words, fuzzy host match).
 - Realtime speech (`wss://api.meta.ai/v1/asr/realtime`) is
   implemented against a fake server and has never touched the real
   endpoint.

@@ -77,6 +77,82 @@ def test_parse_phrasings(text, tool, args):
     assert result["reasoning"]
 
 
+def _gen_inventory():
+    return {"hosts": {
+        "quill": {"role": "web portal"},
+        "willow": {"role": "app"},
+        "wren": {"role": "workstation"},
+        "flint": {"role": "database"},
+        "harbor": {"role": "file share"},
+        "gate": {"role": "jump host"},
+    }, "crown_jewel_host": "flint"}
+
+
+def _gen_services():
+    return {"quill": "webapp", "willow": "reportapi", "wren": "desktop",
+            "flint": "fakestore", "harbor": "fileshare", "gate": "bastion"}
+
+
+# Transcription-tolerant phrasings: misheard verbs, dropped
+# fillers, and role words against generated-style host names.
+GEN_PARSE_CASES = [
+    ("read blogs on willow", "read_logs", {"host": "willow", "n": 50}),
+    ("read lugs on flint", "read_logs", {"host": "flint", "n": 50}),
+    ("read logs willow", "read_logs", {"host": "willow", "n": 50}),
+    ("read the logs on quill", "read_logs", {"host": "quill", "n": 50}),
+    ("check logs on flint", "read_logs", {"host": "flint", "n": 50}),
+    ("look at the willow logs", "read_logs", {"host": "willow", "n": 50}),
+    ("view logs on wren", "read_logs", {"host": "wren", "n": 50}),
+    ("read the block logs on quill", "read_logs", {"host": "quill", "n": 50}),
+    ("i solate the database", "isolate_host", {"host": "flint"}),
+    ("please isolate flint now", "isolate_host", {"host": "flint"}),
+    ("skin the willow host", "scan_host", {"host": "willow"}),
+    ("isolate the public site", "isolate_host", {"host": "quill"}),
+    ("read logs on the reports server", "read_logs",
+     {"host": "willow", "n": 50}),
+    ("status of the file share", "list_processes", {"host": "harbor"}),
+    ("scan the jump host", "scan_host", {"host": "gate"}),
+    ("restore the desktop please", "restore_host", {"host": "wren"}),
+    ("patch the data store", "patch_service",
+     {"host": "flint", "service": "fakestore"}),
+]
+
+
+@pytest.mark.parametrize("text,tool,args", GEN_PARSE_CASES)
+def test_parse_transcription_tolerant_phrasings(text, tool, args):
+    result = commands.parse(text, _gen_inventory(), _gen_services())
+    assert result["status"] == "ok", result
+    assert result["tool"] == tool
+    assert result["args"] == args
+
+
+def _classic_live_inventory():
+    return {"hosts": {
+        "web": {"role": "public web front end"},
+        "app": {"role": "internal reporting service"},
+        "db": {"role": "internal data store"},
+        "workstation": {"role": "analyst workstation"},
+    }, "crown_jewel_host": "db"}
+
+
+CLASSIC_ROLE_CASES = [
+    ("isolate the database", "isolate_host", {"host": "db"}),
+    ("isolate the web host", "isolate_host", {"host": "web"}),
+    ("read logs on app", "read_logs", {"host": "app", "n": 50}),
+    ("status of the desktop", "list_processes", {"host": "workstation"}),
+    ("patch the public site", "patch_service",
+     {"host": "web", "service": "webapp"}),
+]
+
+
+@pytest.mark.parametrize("text,tool,args", CLASSIC_ROLE_CASES)
+def test_parse_live_sentence_roles(text, tool, args):
+    result = commands.parse(text, _classic_live_inventory(), _services())
+    assert result["status"] == "ok", result
+    assert result["tool"] == tool
+    assert result["args"] == args
+
+
 def test_report_keeps_finding_text():
     result = commands.parse("report repeated sign-in failures on app",
                             _inventory(), _services())
@@ -105,6 +181,68 @@ def test_unknown_host_lists_known():
     result = commands.parse("isolate zephyr", _inventory(), _services())
     assert result["status"] == "clarify"
     assert "web" in result["options"]
+
+
+def test_fuzzy_unique_match_names_host():
+    result = commands.parse("read logs on quil", _gen_inventory(),
+                            _gen_services())
+    assert result["status"] == "ok", result
+    assert result["args"] == {"host": "quill", "n": 50}
+    assert result["heard"] == "Heard 'quil', using quill."
+
+
+def test_fuzzy_phonetic_match():
+    result = commands.parse("scan kwil", _gen_inventory(), _gen_services())
+    assert result["status"] == "ok", result
+    assert result["args"] == {"host": "quill"}
+
+
+def test_fuzzy_ambiguous_hosts_ask():
+    inventory = {"hosts": {
+        "quill": {"role": "web portal"},
+        "quilt": {"role": "app"},
+    }, "crown_jewel_host": "quill"}
+    result = commands.parse("isolate quil", inventory, {})
+    assert result["status"] == "clarify"
+    assert result["options"] == ["quill", "quilt"]
+    assert "Which host?" in result["question"]
+
+
+def test_fuzzy_never_leaves_current_hosts():
+    result = commands.parse("read logs on zephyr", _gen_inventory(),
+                            _gen_services())
+    assert result["status"] == "clarify"
+    assert result["options"] == ["flint", "gate", "harbor", "quill",
+                                 "willow", "wren"]
+    assert "zephyr" not in result["question"] or "I heard" in result["question"]
+
+
+def test_clarify_lists_hosts_and_real_examples():
+    result = commands.parse("isolate zephyr", _gen_inventory(),
+                            _gen_services())
+    assert result["status"] == "clarify"
+    assert "Known hosts:" in result["question"]
+    assert "quill" in result["question"]
+    assert "Try:" in result["question"]
+    assert "read logs on" in result["question"]
+
+
+def test_refused_names_hosts_and_real_examples():
+    result = commands.parse("frobnicate the database", _gen_inventory(),
+                            _gen_services())
+    assert result["status"] == "refused"
+    assert "willow" in result["reason"]
+    assert "Try:" in result["reason"]
+    assert "zephyr" not in result["reason"]
+
+
+def test_example_orders_use_real_hosts_only():
+    assert commands.example_orders(_gen_inventory()) == [
+        "read logs on flint",
+        "scan the gate host",
+        "isolate the harbor host",
+    ]
+    assert commands.example_orders({"hosts": {}}) == []
 
 
 def test_missing_host_lists_known():
@@ -236,6 +374,22 @@ def test_model_fallback_bad_json_refuses(monkeypatch, tmp_path):
                                        _services(),
                                        client=_fake_client("not json"))
     assert result["status"] == "refused"
+
+
+def test_model_fallback_failure_names_hosts(monkeypatch, tmp_path):
+    from crucible import llm
+
+    monkeypatch.setattr(llm, "CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(llm, "SPEND_FILE", tmp_path / "spend.jsonl")
+    monkeypatch.setenv("LLM_DAILY_LIMIT_USD", "5")
+    result = commands.parse_with_model("do something odd", _gen_inventory(),
+                                       _gen_services(),
+                                       client=_fake_client("not json"))
+    assert result["status"] == "refused"
+    assert "example orders" not in result["reason"]
+    assert "Known hosts:" in result["reason"]
+    assert "quill" in result["reason"]
+    assert "Try:" in result["reason"]
 
 
 def test_model_fallback_bad_host_clarifies(monkeypatch, tmp_path):

@@ -2595,22 +2595,32 @@ function paintVault(ctx, sprites, x, y, r, t, state, exposed) {
   ctx.restore();
 }
 
+// Name-tag placement for one host block, pure so node tests it.
+// Every host keeps its tag at all times: blocks too small to hold
+// letters draw the name under the node instead of hiding it.
+export function hostLabelLayout(r) {
+  if (r < 14) return { place: "below", fs: 11, dy: Math.round(r + 14) };
+  return {
+    place: "inside",
+    fs: Math.round(Math.min(24, Math.max(9, r * 0.5))),
+    dy: 1,
+  };
+}
+
 function paintHostLabel(refs, ctx, id, x, y, r, jewel) {
-  // Tiny stages keep state-colored blocks and skip letters that
-  // would collide; the lanes still name every host in text.
-  if (r < 14) return;
   const label = (refs.labels && refs.labels[id]) || String(id).toUpperCase().slice(0, 7);
   const role = (refs.roles && refs.roles[id]) || "";
-  const fs = Math.round(Math.min(24, Math.max(9, r * 0.5)));
+  const lay = hostLabelLayout(r);
+  const fs = lay.fs;
   ctx.save();
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.font = `900 ${fs}px ${DISP}`;
   ctx.lineWidth = Math.max(2, fs * 0.16);
   ctx.strokeStyle = "rgba(5,7,12,0.9)";
-  ctx.strokeText(label, x, y + 1);
+  ctx.strokeText(label, x, y + lay.dy);
   ctx.fillStyle = BONE;
-  ctx.fillText(label, x, y + 1);
+  ctx.fillText(label, x, y + lay.dy);
   if (r >= 22) {
     const sub = jewel ? "PROTECTED" : roleSub(role, false).toUpperCase();
     ctx.font = `700 ${Math.round(Math.min(12, Math.max(8, fs * 0.42)))}px ${MONO}`;
