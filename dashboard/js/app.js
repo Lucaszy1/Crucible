@@ -1,6 +1,8 @@
 // Operations Center bootstrap: lobby, arena show flow, tabs, themes.
 import { fetchAttackMap, fetchCampaign, fetchCampaigns, fetchConfig, fetchDebrief, fetchFeatured, fetchPreview, fetchRun, fetchRuns, fetchStage3, fetchStatus, openLive, startExercise } from "./api.js";
-import { renderLearning } from "./learn.js";
+import { renderGlossary, renderLearning } from "./learn.js";
+import { applyTooltips } from "./ux.js";
+import { initTour, tourReplayId } from "./tour.js";
 import {
   acceptLiveTraffic, autoplayQueue, bootStale, bootTimedOut, displayOutcome, endCardStats, eventHost,
   errorRetryTarget, finishSide, followOpensLive, motionReduced, motionSetting, normalizeActor, outcomeLine,
@@ -16,10 +18,10 @@ import { renderTechniques } from "./techniques.js";
 import { reduceAudits, renderAuditor } from "./audit.js";
 import { renderScoreboard, renderScoreDetails } from "./scoreboard.js";
 import { focusEvidenceRef, renderEvidence } from "./evidence.js";
-import { initControls, serverStatus, setServer, showConfirm } from "./controls.js";
+import { initControls, isStuckRange, runDisabledReason, serverStatus, setServer, showConfirm } from "./controls.js";
 import {
   FRONTIER_MAX, FRONTIER_MIN, HELDOUT_MAX, HELDOUT_MIN, arenaThumb, drawLiveScenario, formatDuration, hideDeal, partitionLobby,
-  renderDeal, renderLobby, storyLine, titleOutcomeKey, voidNoteText,
+  rememberStartHereDismissed, renderDeal, renderLobby, startHereVisible, storyLine, titleOutcomeKey, voidNoteText,
 } from "./lobby.js";
 import { playOpening } from "./opening.js";
 import { initThoughtHeads, renderThoughts, setThoughtsCollapsed } from "./thoughts.js";
@@ -159,6 +161,29 @@ const els = {
   cmdNote: document.getElementById("cmdNote"),
   cmdHosts: document.getElementById("cmdHosts"),
   cmdTry: document.getElementById("cmdTry"),
+  runReason: document.getElementById("runReason"),
+  liveReason: document.getElementById("liveReason"),
+  stuckHint: document.getElementById("stuckHint"),
+  stuckCmd: document.getElementById("stuckCmd"),
+  stuckCopy: document.getElementById("stuckCopy"),
+  stuckHintTop: document.getElementById("stuckHintTop"),
+  stuckCmdTop: document.getElementById("stuckCmdTop"),
+  stuckCopyTop: document.getElementById("stuckCopyTop"),
+  startHere: document.getElementById("startHere"),
+  startHereClose: document.getElementById("startHereClose"),
+  tourBtn: document.getElementById("tourBtn"),
+  tourOverlay: document.getElementById("tourOverlay"),
+  tourCaption: document.getElementById("tourCaption"),
+  tourMain: document.getElementById("tourMain"),
+  tourEnd: document.getElementById("tourEnd"),
+  tourEndLine: document.getElementById("tourEndLine"),
+  tourPauseBtn: document.getElementById("tourPauseBtn"),
+  tourNextBtn: document.getElementById("tourNextBtn"),
+  tourSkipBtn: document.getElementById("tourSkipBtn"),
+  tourLiveBtn: document.getElementById("tourLiveBtn"),
+  tourMoreBtn: document.getElementById("tourMoreBtn"),
+  tourCloseBtn: document.getElementById("tourCloseBtn"),
+  glossaryList: document.getElementById("glossaryList"),
 };
 
 const controls = {
@@ -247,6 +272,7 @@ let mapRefs = null;
 let arenaRefs = null;
 let stageRefs = null;
 let commandBar = null;
+let tourCtl = null;
 
 // The cinematic stage and the flat arena share one canvas and one
 // call shape; the toggle picks which one paints and animates.
@@ -337,6 +363,66 @@ function setMode(mode, label) {
   if (label) store.label = label;
   els.title.textContent = store.label;
   if (els.speedStrip) els.speedStrip.hidden = speedStripHidden(mode);
+  updateRunReasons(store.spend);
+}
+
+// Disabled-button reasons plus the stuck-range hint. Static mode
+// never calls this: its buttons keep the local-run note.
+function updateRunReasons(spend) {
+  const booting = store.mode === "booting";
+  const reason = runDisabledReason(spend, { booting });
+  const stuck = isStuckRange(spend);
+  if (els.runReason) {
+    els.runReason.hidden = !reason;
+    els.runReason.textContent = reason;
+  }
+  if (els.liveReason) {
+    els.liveReason.hidden = !reason;
+    els.liveReason.textContent = reason;
+  }
+  if (controls.run && !controls.run.disabled) controls.run.title = "";
+  else if (controls.run && reason) controls.run.title = reason;
+  if (els.liveBtn && !els.liveBtn.disabled) els.liveBtn.title = "";
+  else if (els.liveBtn && reason) els.liveBtn.title = reason;
+  if (els.stuckHint) els.stuckHint.hidden = !stuck;
+  if (els.stuckHintTop) els.stuckHintTop.hidden = !stuck;
+}
+
+async function copyStuckCommand(codeEl, btn) {
+  const text = codeEl ? codeEl.textContent : "";
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (err) {
+    const area = document.createElement("textarea");
+    area.value = text;
+    document.body.append(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+  if (btn) {
+    const prior = btn.textContent;
+    btn.textContent = "Copied";
+    setTimeout(() => { btn.textContent = prior; }, 1500);
+  }
+}
+
+function initStartHere() {
+  if (!els.startHere) return;
+  let storage = null;
+  try {
+    storage = window.localStorage;
+  } catch {
+    storage = null;
+  }
+  els.startHere.hidden = !startHereVisible(storage);
+  if (els.startHereClose) {
+    els.startHereClose.addEventListener("click", () => {
+      els.startHere.hidden = true;
+      rememberStartHereDismissed(storage);
+    });
+  }
 }
 
 function latestLaneEvent(slice) {
@@ -428,6 +514,8 @@ function render(animate) {
     outcome: store.finalScore?.outcome,
     display: store.finalScore && display ? display.label : null,
     mode: store.mode,
+    bootStartedAt: store.bootStartedAt,
+    nowMs: Date.now(),
   });
   renderAuditor(
     { list: els.auditList, chips: els.auditChips, cost: els.auditCost, count: null, summary: els.auditSummary },
@@ -677,11 +765,16 @@ function clearBootTimer() {
     clearTimeout(store.bootTimer);
     store.bootTimer = null;
   }
+  if (store.bootTicker) {
+    clearInterval(store.bootTicker);
+    store.bootTicker = null;
+  }
 }
 
 // Slow boots must say so: three minutes with no event means the
 // range never came up. The retry reattaches to the same exercise,
-// whose buffered events replay if it did start after all.
+// whose buffered events replay if it did start after all. While
+// booting, a one-second ticker repaints the elapsed line.
 const BOOT_LIMIT_MS = 180000;
 
 function armBootTimer(token) {
@@ -697,6 +790,11 @@ function armBootTimer(token) {
       ? { label: "Reattach", onClick: () => attachLive(id) }
       : { label: "Back to lobby", onClick: () => switchTab("lobby") });
   }, BOOT_LIMIT_MS);
+  store.bootTicker = setInterval(() => {
+    if (bootStale(token, store.bootGen)) return;
+    if (store.mode !== "booting") return;
+    render(false);
+  }, 1000);
 }
 
 function destroyOpening() {
@@ -804,11 +902,23 @@ async function beginRun(agents, scenarioToken) {
   cancelScene();
   notice("");
   controls.run.disabled = true;
+  if (els.liveBtn) els.liveBtn.disabled = true;
+  const bootReason = runDisabledReason(null, { booting: true });
+  if (els.runReason) {
+    els.runReason.hidden = false;
+    els.runReason.textContent = bootReason;
+  }
+  if (els.liveReason) {
+    els.liveReason.hidden = false;
+    els.liveReason.textContent = bootReason;
+  }
+  let started = false;
   try {
     const data = await startExercise(agents, undefined, scenarioToken);
     // The server was slow and the user picked something else meanwhile:
     // a stale boot must never yank the new selection into live.
     if (bootStale(token, store.bootGen)) return;
+    started = true;
     store.liveExerciseId = data.exercise_id;
     store.followedId = data.exercise_id;
     setMode("booting", `Booting range for ${data.exercise_id}`);
@@ -852,7 +962,14 @@ async function beginRun(agents, scenarioToken) {
       });
     }
   } finally {
-    controls.run.disabled = false;
+    // A failed or stale start re-enables; a live boot stays
+    // disabled until the run ends. The status poll corrects both.
+    if (!started) {
+      controls.run.disabled = false;
+      if (els.liveBtn) els.liveBtn.disabled = false;
+    }
+    updateRunReasons(store.spend);
+    void pollStatus();
   }
 }
 
@@ -1383,8 +1500,12 @@ async function pollStatus() {
     store.spend = spend;
     const status = serverStatus(spend);
     setServer(controls, status.state, status.label);
-    controls.run.disabled = status.runDisabled;
-    els.liveBtn.disabled = status.runDisabled;
+    // A local boot keeps both buttons disabled until the run ends,
+    // even if a poll lands before the server flags it running.
+    const booting = store.mode === "booting";
+    controls.run.disabled = status.runDisabled || booting;
+    els.liveBtn.disabled = status.runDisabled || booting;
+    updateRunReasons(spend);
     if (!spend.running && spend.last_warning && store.mode === "idle") {
       notice(spend.last_warning, false);
     }
@@ -1394,6 +1515,7 @@ async function pollStatus() {
     renderScoreDetails(scoreEls(), store.events, store.cursor, store.weights, store.spend, store.finalScore);
   } catch (err) {
     setServer(controls, "down", "Server unreachable");
+    updateRunReasons(null);
   }
 }
 
@@ -1414,9 +1536,14 @@ function switchTab(name) {
     els[viewId].hidden = !on;
   }
   if (active === "lobby" && store.playing) pauseReplay();
-  if (active === "learn" && !store.learnLoaded) {
-    store.learnLoaded = true;
-    loadLearning();
+  if (active === "learn") {
+    // The glossary needs no data, so it paints at once on both the
+    // live page and the static bundle, even if Stage 3 fails.
+    if (els.glossaryList) renderGlossary(document, els.glossaryList);
+    if (!store.learnLoaded) {
+      store.learnLoaded = true;
+      loadLearning();
+    }
   }
   setSceneActive(active === "arena");
 }
@@ -1428,6 +1555,7 @@ async function loadLearning() {
       {
         note: els.stage3Void, on: els.stage3On, off: els.stage3Off, empty: els.stage3Empty,
         source: els.playSource, rules: els.playRules, playEmpty: els.playEmpty,
+        glossary: els.glossaryList,
       },
       data,
     );
@@ -1436,6 +1564,50 @@ async function loadLearning() {
     els.stage3Empty.textContent = "Stage 3 numbers are unavailable.";
     notice(`Could not load Stage 3 numbers: ${err.message}`, true);
   }
+}
+
+function initTourUi() {
+  if (!els.tourBtn || !els.tourOverlay) return;
+  const isStatic = Boolean(window.CRUCIBLE_STATIC);
+  tourCtl = initTour({
+    doc: document,
+    caption: els.tourCaption,
+    box: els.tourMain,
+    endWrap: els.tourEnd,
+    endLine: els.tourEndLine,
+    liveBtn: els.tourLiveBtn,
+    moreBtn: els.tourMoreBtn,
+    pauseBtn: els.tourPauseBtn,
+    skipBtn: els.tourSkipBtn,
+    nextBtn: els.tourNextBtn,
+    overlay: els.tourOverlay,
+    isStatic,
+    onOpen: (id) => openExercise(id, { bench: benchFor(id) }),
+    onPause: () => pauseReplay(),
+    onResume: () => playReplay(),
+    endVisible: () => els.endCard && !els.endCard.hidden,
+    isEnded: () => Boolean(store.finalScore),
+  });
+  els.tourBtn.addEventListener("click", () => {
+    const ids = effectiveFeaturedIds();
+    const pick = tourReplayId(ids) || tourReplayId(visibleCards().map((card) => card.id));
+    if (!pick) {
+      notice("No exercises to tour yet.", false);
+      return;
+    }
+    switchTab("arena");
+    tourCtl.start(pick);
+  });
+  if (els.tourCloseBtn) els.tourCloseBtn.addEventListener("click", () => tourCtl.skip());
+  if (els.tourLiveBtn) els.tourLiveBtn.addEventListener("click", () => {
+    tourCtl.skip();
+    switchTab("lobby");
+    onRunRequest(controls.agents.value);
+  });
+  if (els.tourMoreBtn) els.tourMoreBtn.addEventListener("click", () => {
+    tourCtl.skip();
+    watchReplay();
+  });
 }
 
 function setTheme(theme) {
@@ -1742,6 +1914,11 @@ async function boot() {
     onLobby: () => switchTab("lobby"),
     onSave: () => saveResultCard(),
   });
+  applyTooltips(document);
+  initStartHere();
+  initTourUi();
+  if (els.stuckCopy) els.stuckCopy.addEventListener("click", () => copyStuckCommand(els.stuckCmd, els.stuckCopy));
+  if (els.stuckCopyTop) els.stuckCopyTop.addEventListener("click", () => copyStuckCommand(els.stuckCmdTop, els.stuckCopyTop));
   els.tabLobby.addEventListener("click", () => switchTab("lobby"));
   els.tabArena.addEventListener("click", () => switchTab("arena"));
   els.tabStory.addEventListener("click", () => switchTab("story"));

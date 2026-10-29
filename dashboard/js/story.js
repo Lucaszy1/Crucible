@@ -2,6 +2,7 @@
 // no DOM access, no model calls, so node can test this module. Copy
 // rules: Operations Center vocabulary, cyber defense framing,
 // credentials never shown.
+import { BOOT_EXPECTED_SEC, formatBootLine } from "./state.js";
 
 export function actorName(ev) {
   if (!ev) return "Someone";
@@ -143,13 +144,22 @@ const OUTCOME_SENTENCE = {
 
 // Header status sentence: latest red/blue activity, or the final outcome.
 // Callers pass the honest display label when the exercise ends; the
-// server-outcome sentences stay as the fallback.
-export function statusSentence({ latest, ended, outcome, mode, display }) {
+// server-outcome sentences stay as the fallback. While booting with
+// timing, the line counts up to the expected 40 seconds.
+export function statusSentence({ latest, ended, outcome, mode, display, bootStartedAt, nowMs }) {
   if (ended) {
     if (display) return `Exercise over: ${display}.`;
     return OUTCOME_SENTENCE[outcome] || "Exercise over.";
   }
-  if (mode === "booting") return "Starting the range…";
+  if (mode === "booting") {
+    const start = Number(bootStartedAt);
+    const now = Number(nowMs);
+    if (Number.isFinite(start) && start > 0 && Number.isFinite(now)) {
+      const elapsed = Math.max(0, Math.floor((now - start) / 1000));
+      return formatBootLine(elapsed, BOOT_EXPECTED_SEC);
+    }
+    return "Starting the range…";
+  }
   if (!latest) {
     if (mode === "live" || mode === "replay") return "Waiting for the first move…";
     return "No exercise loaded.";

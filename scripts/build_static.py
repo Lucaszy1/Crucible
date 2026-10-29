@@ -454,7 +454,7 @@ function embedded() {
 }
 
 function localOnly() {
-  return new Error("Live exercises need a local server — run locally to try this.");
+  return new Error("Live exercises need a local server - run locally to try this.");
 }
 
 export function fetchRuns() {
@@ -556,7 +556,7 @@ APP_STATIC_BOOT = '''
 const STATIC_TRY_LOCAL = "run locally to try this";
 function staticModeBoot() {
   setServer(controls, "static", "Static replay");
-  const note = "Live exercises need a local server — " + STATIC_TRY_LOCAL + ".";
+  const note = "Live exercises need a local server - " + STATIC_TRY_LOCAL + ".";
   if (controls.run) { controls.run.disabled = true; controls.run.title = note; }
   if (controls.agents) { controls.agents.disabled = true; controls.agents.title = note; }
   if (els.liveBtn) { els.liveBtn.disabled = true; els.liveBtn.title = note; }
@@ -613,7 +613,7 @@ APP_PATCHES = [
 
 COMMANDBAR_STATIC_BAR = '''\
   function staticCommandBar() {
-    const note = "Defender orders need a live exercise — run locally to try this.";
+    const note = "Defender orders need a live exercise - run locally to try this.";
     ctl.visible = true;
     bar.hidden = false;
     if (els.mic) { els.mic.disabled = true; els.mic.title = note; }
@@ -796,12 +796,12 @@ HTML_PATCHES = [
      '<script src="app.bundle.js"></script>'),
     ('<button id="runBtn" class="btn primary">Start exercise</button>',
      '<button id="runBtn" class="btn primary" disabled '
-     'title="Live exercises need a local server — '
+     'title="Live exercises need a local server - '
      'run locally to try this.">Start exercise</button>'),
     ('<button id="liveBtn" class="btn primary hero-cta">'
      'Run a live exercise</button>',
      '<button id="liveBtn" class="btn primary hero-cta" disabled '
-     'title="Live exercises need a local server — '
+     'title="Live exercises need a local server - '
      'run locally to try this.">Run a live exercise</button>'),
     ('<span id="eventCount" class="event-count">0 events</span>',
      '<span id="eventCount" class="event-count">0 events</span>\n'

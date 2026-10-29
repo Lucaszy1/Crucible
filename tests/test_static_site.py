@@ -195,3 +195,72 @@ def test_static_site_disables_live_controls(tmp_path):
     bundle = (out / "app.bundle.js").read_text(encoding="utf-8")
     assert "run locally to try this" in bundle
     assert "window.CRUCIBLE_STATIC" in bundle
+
+
+def test_static_site_has_ux_polish_copy(tmp_path):
+    out, _builder = build_to(tmp_path)
+    html = (out / "index.html").read_text(encoding="utf-8")
+    bundle = (out / "app.bundle.js").read_text(encoding="utf-8")
+    # Disabled reasons and the stuck hint with its exact command.
+    assert "A range is already running" in bundle
+    assert "Starting the range, about 40 seconds" in bundle
+    assert "If this looks stuck, restart the server" in html
+    assert "docker ps -aq --filter name=crucible- | xargs docker rm -f" in html
+    assert 'id="runReason"' in html
+    assert 'id="liveReason"' in html
+    # Boot progress line.
+    assert "Booting the range:" in bundle
+    assert "of about " in bundle
+    assert "BOOT_EXPECTED_SEC" in bundle
+    # Takeover and mic copy, never a bare code.
+    assert "Takeover works while an exercise is live" in bundle
+    assert "Microphone is blocked" in bundle
+    assert "set Microphone to Allow" in bundle
+    # Start-here strip and its three lines.
+    assert 'id="startHere"' in html
+    assert "Red tries to read a protected file" in html
+    assert "Blue watches the hosts" in html
+    assert "Click Watch a replay first" in html
+    # Score, speed, and auditor tooltips.
+    assert "Contained means blue stopped the intrusion" in html
+    assert "Replay speed. Brackets change it" in html
+    assert "rates each blue move from 0 to 10" in html
+    # Glossary shell and its seven terms in the bundle.
+    assert 'id="glossaryList"' in html
+    for term in ("intrusion", "containment", "auditor", "sensors",
+                 "held-out", "assisted (human takeover)", "frontier tier"):
+        assert term in bundle, f"glossary term missing: {term}"
+    # Tour button, overlay, and its four captions.
+    assert 'id="tourBtn"' in html
+    assert "Watch the tour" in html
+    assert 'id="tourOverlay"' in html
+    for caption in ("Red thought: what red tries next",
+                    "Blue thought: how blue answers",
+                    "Auditor verdict: was the blue move fair",
+                    "End card: how the exercise ended"):
+        assert caption in bundle, f"tour caption missing: {caption}"
+    assert "Try a live exercise next" in bundle
+    assert "Watch another replay next" in bundle
+
+
+def test_static_site_ux_copy_has_no_em_dash(tmp_path):
+    out, _builder = build_to(tmp_path)
+    html = (out / "index.html").read_text(encoding="utf-8")
+    bundle = (out / "app.bundle.js").read_text(encoding="utf-8")
+    # New UX copy uses hyphens, never em dashes. The static notes
+    # changed with it; old code may still hold em dashes elsewhere,
+    # so only the UX strings are checked here.
+    for text in (
+        "A range is already running",
+        "Starting the range, about 40 seconds",
+        "If this looks stuck",
+        "Booting the range:",
+        "Takeover works while an exercise is live",
+        "Microphone is blocked",
+        "Red tries to read a protected file",
+        "Watch the tour",
+        "run locally to try this",
+    ):
+        assert text in html or text in bundle, f"missing UX copy: {text}"
+    assert "— run locally to try this" not in html
+    assert "— run locally to try this" not in bundle

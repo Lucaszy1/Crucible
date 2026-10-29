@@ -770,6 +770,16 @@ export function phaseLabel(phase) {
   return null;
 }
 
+// The range usually needs about 40 seconds to boot. The status
+// line counts up to that mark while booting. Pure.
+export const BOOT_EXPECTED_SEC = 40;
+
+export function formatBootLine(elapsedSec, expectedSec) {
+  const elapsed = Math.max(0, Math.floor(Number(elapsedSec) || 0));
+  const expected = expectedSec === undefined ? BOOT_EXPECTED_SEC : Math.max(1, Math.floor(Number(expectedSec) || BOOT_EXPECTED_SEC));
+  return `Booting the range: ${elapsed} s of about ${expected} s`;
+}
+
 // The range gets three minutes to produce its first event before the
 // boot is declared stuck. Pure; the caller owns the timer.
 export function bootTimedOut(bootStartedAt, nowMs, limitMs) {

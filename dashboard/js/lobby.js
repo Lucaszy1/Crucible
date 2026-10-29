@@ -25,6 +25,39 @@ export const FRONTIER_MIN = 9101;
 export const FRONTIER_MAX = 9110;
 export const MAX_FEATURED = 6;
 
+// Start-here strip: three short lines for a first visit. Storage
+// access always sits in try/catch: private browsing shows the
+// strip every time instead of breaking. Pure helpers for tests.
+export const START_HERE_KEY = "crucible-start-here";
+export const START_HERE_LINES = [
+  "Red tries to read a protected file.",
+  "Blue watches the hosts and contains the intrusion.",
+  "The auditor checks if blue was fair. Click Watch a replay first.",
+];
+
+export function startHereVisible(storage) {
+  try {
+    const get = storage && typeof storage.getItem === "function"
+      ? storage.getItem.bind(storage)
+      : storage;
+    if (typeof get !== "function") return true;
+    return get(START_HERE_KEY) !== "dismissed";
+  } catch {
+    return true;
+  }
+}
+
+export function rememberStartHereDismissed(storage) {
+  try {
+    const set = storage && typeof storage.setItem === "function"
+      ? storage.setItem.bind(storage)
+      : null;
+    if (set) set(START_HERE_KEY, "dismissed");
+  } catch {
+    // Private browsing: the strip simply shows again next time.
+  }
+}
+
 // One random unseen network: a held-out seed plus a difficulty
 // weighted toward medium and hard. Frontier is opt-in only: it
 // never appears on a random draw, only through the Advanced

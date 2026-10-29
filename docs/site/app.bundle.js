@@ -773,6 +773,16 @@ function phaseLabel(phase) {
   return null;
 }
 
+// The range usually needs about 40 seconds to boot. The status
+// line counts up to that mark while booting. Pure.
+const BOOT_EXPECTED_SEC = 40;
+
+function formatBootLine(elapsedSec, expectedSec) {
+  const elapsed = Math.max(0, Math.floor(Number(elapsedSec) || 0));
+  const expected = expectedSec === undefined ? BOOT_EXPECTED_SEC : Math.max(1, Math.floor(Number(expectedSec) || BOOT_EXPECTED_SEC));
+  return `Booting the range: ${elapsed} s of about ${expected} s`;
+}
+
 // The range gets three minutes to produce its first event before the
 // boot is declared stuck. Pure; the caller owns the timer.
 function bootTimedOut(bootStartedAt, nowMs, limitMs) {
@@ -817,7 +827,7 @@ function hostBlocks(eventList, hosts) {
   return blocks;
 }
 
-return { isBlueTeam, normalizeActor, reduceHostStates, eventHost, secretRead, scoreEvents, shortResult, formatArgs, pressureValue, redNotches, displayOutcome, finishSide, outcomeLine, controlBar, controlBarTip, rankFeatured, runFlags, autoplayQueue, endCardStats, stepSpeed, speedStripHidden, motionSetting, motionReduced, acceptLiveTraffic, bootStale, followOpensLive, phaseLabel, bootTimedOut, streamDead, errorRetryTarget, hostBlocks, HOSTS, CONTAINMENT_TOOLS, DEFAULT_WEIGHTS, RECON_TOOLS, DISPLAY_OUTCOMES, DISPLAY_CONTAINMENT, BAR_SETTLE_MIN, SPEEDS };
+return { isBlueTeam, normalizeActor, reduceHostStates, eventHost, secretRead, scoreEvents, shortResult, formatArgs, pressureValue, redNotches, displayOutcome, finishSide, outcomeLine, controlBar, controlBarTip, rankFeatured, runFlags, autoplayQueue, endCardStats, stepSpeed, speedStripHidden, motionSetting, motionReduced, acceptLiveTraffic, bootStale, followOpensLive, phaseLabel, formatBootLine, bootTimedOut, streamDead, errorRetryTarget, hostBlocks, HOSTS, CONTAINMENT_TOOLS, DEFAULT_WEIGHTS, RECON_TOOLS, DISPLAY_OUTCOMES, DISPLAY_CONTAINMENT, BAR_SETTLE_MIN, SPEEDS, BOOT_EXPECTED_SEC };
 })();
 const __mod_api__ = (() => {
 "use strict";
@@ -830,7 +840,7 @@ function embedded() {
 }
 
 function localOnly() {
-  return new Error("Live exercises need a local server — run locally to try this.");
+  return new Error("Live exercises need a local server - run locally to try this.");
 }
 
 function fetchRuns() {
@@ -1072,8 +1082,38 @@ function renderSection(doc, root, section, title, tag, label) {
   }
 }
 
+// Glossary for first-time visitors: seven plain entries, no
+// server needed. Rendered on the Learning tab on both the live
+// page and the static replay site.
+const GLOSSARY = [
+  { term: "intrusion", def: "Red signs in to a host without permission." },
+  { term: "containment", def: "Blue isolates or patches a host to stop the intrusion." },
+  { term: "auditor", def: "An independent check that rates each blue move from 0 to 10." },
+  { term: "sensors", def: "Log and status feeds that show blue what is happening. With sensors off, blue sees less." },
+  { term: "held-out", def: "A fresh network seed saved for testing, from 9001 to 9020. Frontier uses 9101 to 9110." },
+  { term: "assisted (human takeover)", def: "A run where a person takes the defender seat for some moves. Marked as assisted." },
+  { term: "frontier tier", def: "The hardest difficulty level, with new networks from seeds 9101 to 9110." },
+];
+
+function renderGlossary(doc, root, entries) {
+  const list = entries || GLOSSARY;
+  const scope = doc || (typeof document !== "undefined" ? document : null);
+  if (!scope || !root) return;
+  root.innerHTML = "";
+  for (const entry of list) {
+    const term = scope.createElement("dt");
+    term.className = "glossary-term";
+    term.textContent = entry.term;
+    const def = scope.createElement("dd");
+    def.className = "glossary-def";
+    def.textContent = entry.def;
+    root.append(term, def);
+  }
+}
+
 function renderLearning(els, data) {
   const doc = els.doc || document;
+  if (els.glossary) renderGlossary(doc, els.glossary, GLOSSARY);
   els.empty.hidden = Boolean(data);
   els.note.hidden = !data || !data.voidNote;
   if (data && data.voidNote) els.note.textContent = data.voidNote;
@@ -1110,7 +1150,325 @@ function renderLearning(els, data) {
   }
 }
 
-return { mcnemarExact, formatP, formatPct, ruleActions, stage3Line, renderLearning };
+return { mcnemarExact, formatP, formatPct, ruleActions, stage3Line, renderGlossary, renderLearning, GLOSSARY };
+})();
+const __mod_ux__ = (() => {
+"use strict";
+// Plain-language tooltips for first-time visitors. Pure strings
+// plus one DOM applier, so node tests the copy and the live and
+// static pages share it. Copy rules: plain words, no em dashes,
+// exercise and containment wording only.
+const SCORE_TIPS = {
+  outcome: "How the exercise ended. Contained means blue stopped the intrusion and the file stayed safe.",
+  blueScore: "Blue score from 0 to 100. Starts at 100 and falls when hosts stay offline.",
+  downtime: "Share of host time offline for containment. Lower is better.",
+};
+
+const SPEED_TIP = "Replay speed. Brackets change it: [ slows down, ] speeds up.";
+const SPEED_BUTTON_TIPS = {
+  "0.5": "Half speed. Press [ for slower.",
+  1: "Normal speed.",
+  2: "Double speed. Press ] for faster.",
+  4: "Quadruple speed.",
+};
+
+const AUDITOR_TIP = "Auditor verdict. The auditor rates each blue move from 0 to 10 and checks the log lines.";
+
+// verdictExplained mirrors verdictChip in audit.js: one plain line
+// per verdict word, shared by tests and the chip title.
+function verdictExplained(verdict, score) {
+  const word = String(verdict || "verdict");
+  const num = score === null || score === undefined ? "" : ` ${score}/10`;
+  return `Auditor verdict: ${word}${num}. The auditor checks if the blue move was fair.`;
+}
+
+// Apply static tooltips to score labels, the speed strip, and the
+// auditor box. Safe to call twice; missing nodes are skipped.
+function applyTooltips(doc) {
+  const root = doc || (typeof document !== "undefined" ? document : null);
+  if (!root || typeof root.querySelectorAll !== "function") return;
+  const setTips = (selector, tip) => {
+    for (const node of root.querySelectorAll(selector)) {
+      if (node && typeof node.setAttribute === "function") node.setAttribute("title", tip);
+    }
+  };
+  setTips("#sbOutcome, #arenaOutcome", SCORE_TIPS.outcome);
+  setTips("#sbBlue, #arenaBlue", SCORE_TIPS.blueScore);
+  setTips("#sbDowntime, #arenaDowntime", SCORE_TIPS.downtime);
+  const strip = typeof root.getElementById === "function" ? root.getElementById("speedStrip") : null;
+  if (strip && typeof strip.setAttribute === "function") strip.setAttribute("title", SPEED_TIP);
+  if (strip && typeof strip.querySelectorAll === "function") {
+    for (const btn of strip.querySelectorAll("button[data-speed]")) {
+      const tip = SPEED_BUTTON_TIPS[String(btn.dataset && btn.dataset.speed)];
+      if (tip && typeof btn.setAttribute === "function") btn.setAttribute("title", tip);
+    }
+  }
+  const aud = typeof root.getElementById === "function" ? root.getElementById("arenaAud") : null;
+  if (aud && typeof aud.setAttribute === "function") aud.setAttribute("title", AUDITOR_TIP);
+}
+
+return { verdictExplained, applyTooltips, SCORE_TIPS, SPEED_TIP, SPEED_BUTTON_TIPS, AUDITOR_TIP };
+})();
+const __mod_tour__ = (() => {
+"use strict";
+// Guided tour: one featured real replay with timed captions that
+// point at the red thought card, the blue thought card, the
+// auditor verdict, and the end card. Pausable, skippable, no
+// network beyond opening the replay itself. Works on the live
+// page and the static replay site.
+const TOUR_STEPS = [
+  { id: "red", target: "#thoughtRed", caption: "Red thought: what red tries next." },
+  { id: "blue", target: "#thoughtBlue", caption: "Blue thought: how blue answers." },
+  { id: "auditor", target: "#arenaAud", caption: "Auditor verdict: was the blue move fair?" },
+  { id: "end", target: "#endCard", caption: "End card: how the exercise ended." },
+];
+
+// Delay before each caption appears, in ms. Short enough to hold
+// attention, long enough to read the card behind it.
+const TOUR_DELAYS = [2500, 6000, 6000, 9000];
+
+const TOUR_DONE_LIVE = "Tour done. Try a live exercise next.";
+const TOUR_DONE_STATIC = "Tour done. Watch another replay next.";
+
+function tourCaption(index) {
+  const step = TOUR_STEPS[index];
+  return step ? step.caption : "";
+}
+
+function tourTarget(index) {
+  const step = TOUR_STEPS[index];
+  return step ? step.target : "";
+}
+
+function nextTourStep(current) {
+  const at = Number(current);
+  if (!Number.isInteger(at) || at < 0) return 0;
+  return at + 1 < TOUR_STEPS.length ? at + 1 : -1;
+}
+
+function tourEndLine(isStatic) {
+  return isStatic ? TOUR_DONE_STATIC : TOUR_DONE_LIVE;
+}
+
+// Pick the tour replay: the first featured id, which is always a
+// real run on both the live page and the static bundle.
+function tourReplayId(featuredIds) {
+  const ids = Array.isArray(featuredIds) ? featuredIds.filter(Boolean) : [];
+  return ids.length > 0 ? ids[0] : null;
+}
+
+// Minimal tour controller over injected DOM and playback hooks.
+// deps: { doc, caption, box, endLine, liveBtn, moreBtn, pauseBtn,
+// skipBtn, nextBtn, overlay, highlightClass, isStatic, onOpen(id),
+// onPause(), onResume(), isEnded(), endVisible() }.
+// Timers use deps.setTimeout/clearTimeout when given, so tests can
+// drive the tour without waiting.
+function initTour(deps) {
+  const api = deps || {};
+  const doc = api.doc || (typeof document !== "undefined" ? document : null);
+  const later = typeof api.setTimeout === "function" ? api.setTimeout : setTimeout;
+  const cancel = typeof api.clearTimeout === "function" ? api.clearTimeout : clearTimeout;
+  const ctl = {
+    running: false,
+    paused: false,
+    step: -1,
+    timer: null,
+    highlighted: null,
+  };
+
+  function find(target) {
+    if (!doc || typeof doc.querySelector !== "function") return null;
+    try {
+      return doc.querySelector(target);
+    } catch {
+      return null;
+    }
+  }
+
+  function clearHighlight() {
+    if (ctl.highlighted && ctl.highlighted.classList) {
+      ctl.highlighted.classList.remove(api.highlightClass || "tour-highlight");
+    }
+    ctl.highlighted = null;
+  }
+
+  function showStep(index) {
+    clearHighlight();
+    ctl.step = index;
+    const step = TOUR_STEPS[index];
+    if (!step) {
+      finish();
+      return;
+    }
+    if (api.caption) api.caption.textContent = `${index + 1} of ${TOUR_STEPS.length}. ${step.caption}`;
+    if (api.overlay) api.overlay.hidden = false;
+    if (api.box) api.box.hidden = false;
+    if (api.endWrap) api.endWrap.hidden = true;
+    const node = find(step.target);
+    // The end card may still be hidden mid-replay: point at the
+    // arena canvas instead so the caption still lands somewhere.
+    const fallback = step.id === "end" ? find("#arenaWrap") || find("#arenaCanvas") : null;
+    const mark = node && !(step.id === "end" && node.hidden) ? node : fallback;
+    if (mark && mark.classList) {
+      mark.classList.add(api.highlightClass || "tour-highlight");
+      ctl.highlighted = mark;
+    }
+    if (api.pauseBtn) api.pauseBtn.textContent = "Pause";
+    ctl.paused = false;
+  }
+
+  function finish() {
+    clearHighlight();
+    ctl.running = false;
+    ctl.paused = false;
+    ctl.step = TOUR_STEPS.length;
+    if (api.box) api.box.hidden = true;
+    if (api.endWrap) api.endWrap.hidden = false;
+    if (api.overlay) api.overlay.hidden = false;
+    if (api.endLine) api.endLine.textContent = tourEndLine(Boolean(api.isStatic));
+    if (api.liveBtn) api.liveBtn.hidden = Boolean(api.isStatic);
+    if (api.moreBtn) api.moreBtn.hidden = !api.isStatic;
+  }
+
+  function stop() {
+    if (ctl.timer) {
+      cancel(ctl.timer);
+      ctl.timer = null;
+    }
+    clearHighlight();
+    ctl.running = false;
+    ctl.paused = false;
+    ctl.step = -1;
+    if (api.overlay) api.overlay.hidden = true;
+  }
+
+  function schedule(index, delay) {
+    if (ctl.timer) cancel(ctl.timer);
+    ctl.timer = later(() => {
+      ctl.timer = null;
+      if (!ctl.running || ctl.paused) return;
+      // The end step waits for the end card when the replay is
+      // still running: recheck once per second instead of pointing
+      // at an empty slot.
+      if (index === TOUR_STEPS.length - 1 && typeof api.endVisible === "function") {
+        let visible = false;
+        try {
+          visible = Boolean(api.endVisible());
+        } catch {
+          visible = true;
+        }
+        if (!visible && typeof api.isEnded !== "function") {
+          showStep(index);
+          return;
+        }
+        if (!visible) {
+          schedule(index, 1000);
+          return;
+        }
+      }
+      showStep(index);
+      const next = nextTourStep(index);
+      if (next >= 0) schedule(next, TOUR_DELAYS[next] || 5000);
+      else {
+        ctl.timer = later(() => {
+          ctl.timer = null;
+          if (ctl.running && !ctl.paused) finish();
+        }, 5000);
+      }
+    }, delay);
+  }
+
+  ctl.start = (replayId) => {
+    stop();
+    ctl.running = true;
+    if (replayId && typeof api.onOpen === "function") {
+      try {
+        api.onOpen(replayId);
+      } catch {
+        // Opening never blocks the captions.
+      }
+    }
+    schedule(0, TOUR_DELAYS[0]);
+  };
+
+  ctl.pause = () => {
+    if (!ctl.running || ctl.paused) return;
+    ctl.paused = true;
+    if (ctl.timer) {
+      cancel(ctl.timer);
+      ctl.timer = null;
+    }
+    if (typeof api.onPause === "function") {
+      try {
+        api.onPause();
+      } catch {
+        // Playback pause is best effort.
+      }
+    }
+    if (api.pauseBtn) api.pauseBtn.textContent = "Resume";
+  };
+
+  ctl.resume = () => {
+    if (!ctl.running || !ctl.paused) return;
+    ctl.paused = false;
+    if (typeof api.onResume === "function") {
+      try {
+        api.onResume();
+      } catch {
+        // Playback resume is best effort.
+      }
+    }
+    if (api.pauseBtn) api.pauseBtn.textContent = "Pause";
+    const next = ctl.step < 0 ? 0 : ctl.step;
+    schedule(next, 1200);
+  };
+
+  ctl.toggle = () => {
+    if (ctl.paused) ctl.resume();
+    else ctl.pause();
+  };
+
+  ctl.skip = () => {
+    stop();
+  };
+
+  ctl.next = () => {
+    if (!ctl.running) return;
+    if (ctl.timer) {
+      cancel(ctl.timer);
+      ctl.timer = null;
+    }
+    const next = ctl.step < 0 ? 0 : nextTourStep(ctl.step);
+    if (next < 0) finish();
+    else {
+      showStep(next);
+      const after = nextTourStep(next);
+      if (after >= 0) schedule(after, TOUR_DELAYS[after] || 5000);
+      else {
+        ctl.timer = later(() => {
+          ctl.timer = null;
+          if (ctl.running && !ctl.paused) finish();
+        }, 5000);
+      }
+    }
+  };
+
+  ctl.finish = finish;
+  ctl.stop = stop;
+
+  if (api.pauseBtn && typeof api.pauseBtn.addEventListener === "function") {
+    api.pauseBtn.addEventListener("click", () => ctl.toggle());
+  }
+  if (api.skipBtn && typeof api.skipBtn.addEventListener === "function") {
+    api.skipBtn.addEventListener("click", () => ctl.skip());
+  }
+  if (api.nextBtn && typeof api.nextBtn.addEventListener === "function") {
+    api.nextBtn.addEventListener("click", () => ctl.next());
+  }
+  return ctl;
+}
+
+return { tourCaption, tourTarget, nextTourStep, tourEndLine, tourReplayId, initTour, TOUR_STEPS, TOUR_DELAYS, TOUR_DONE_LIVE, TOUR_DONE_STATIC };
 })();
 const __mod_story__ = (() => {
 "use strict";
@@ -1118,6 +1476,7 @@ const __mod_story__ = (() => {
 // no DOM access, no model calls, so node can test this module. Copy
 // rules: Operations Center vocabulary, cyber defense framing,
 // credentials never shown.
+const { BOOT_EXPECTED_SEC, formatBootLine } = __mod_state__;
 
 function actorName(ev) {
   if (!ev) return "Someone";
@@ -1259,13 +1618,22 @@ const OUTCOME_SENTENCE = {
 
 // Header status sentence: latest red/blue activity, or the final outcome.
 // Callers pass the honest display label when the exercise ends; the
-// server-outcome sentences stay as the fallback.
-function statusSentence({ latest, ended, outcome, mode, display }) {
+// server-outcome sentences stay as the fallback. While booting with
+// timing, the line counts up to the expected 40 seconds.
+function statusSentence({ latest, ended, outcome, mode, display, bootStartedAt, nowMs }) {
   if (ended) {
     if (display) return `Exercise over: ${display}.`;
     return OUTCOME_SENTENCE[outcome] || "Exercise over.";
   }
-  if (mode === "booting") return "Starting the range…";
+  if (mode === "booting") {
+    const start = Number(bootStartedAt);
+    const now = Number(nowMs);
+    if (Number.isFinite(start) && start > 0 && Number.isFinite(now)) {
+      const elapsed = Math.max(0, Math.floor((now - start) / 1000));
+      return formatBootLine(elapsed, BOOT_EXPECTED_SEC);
+    }
+    return "Starting the range…";
+  }
   if (!latest) {
     if (mode === "live" || mode === "replay") return "Waiting for the first move…";
     return "No exercise loaded.";
@@ -2537,7 +2905,8 @@ function verdictChip(verdict, score) {
   chip.className = "verdict";
   chip.dataset.tone = verdictTone(verdict);
   chip.textContent = score === null || score === undefined ? verdict : `${verdict} ${score}/10`;
-  chip.title = `Auditor verdict: ${verdict}`;
+  const num = score === null || score === undefined ? "" : ` ${score}/10`;
+  chip.title = `Auditor verdict: ${verdict}${num}. The auditor checks if the blue move was fair.`;
   return chip;
 }
 
@@ -2841,6 +3210,25 @@ function serverStatus(spend) {
   return { state: "ok", label: "Server ready", runDisabled: false };
 }
 
+// Why the Start buttons are disabled, in plain words. Booting
+// always wins over busy: the range needs about 40 seconds.
+const RANGE_BUSY_REASON = "A range is already running. Stop it or wait for it to finish.";
+const RANGE_BOOTING_REASON = "Starting the range, about 40 seconds.";
+const STUCK_HINT = "If this looks stuck, restart the server and remove leftover range containers";
+const STUCK_CLEANUP_COMMAND = "docker ps -aq --filter name=crucible- | xargs docker rm -f";
+
+function runDisabledReason(spend, opts) {
+  if (opts && opts.booting) return RANGE_BOOTING_REASON;
+  if (spend && spend.running) return RANGE_BUSY_REASON;
+  return "";
+}
+
+// A busy range with no active exercise id is stuck: leftover
+// containers from a dead run. Pure, so the hint stays testable.
+function isStuckRange(spend) {
+  return Boolean(spend && spend.running && !spend.exercise_id);
+}
+
 function showConfirm(els, spend, capped, onConfirm, note) {
   els.cost.textContent = `$${Number(spend?.estimated_exercise_cost || 0).toFixed(2)} (estimate)`;
   els.spent.textContent = `$${Number(spend?.spent_today || 0).toFixed(2)}`;
@@ -2889,7 +3277,7 @@ function initControls(els, deps) {
   }
 }
 
-return { setServer, serverStatus, showConfirm, initControls };
+return { setServer, serverStatus, runDisabledReason, isStuckRange, showConfirm, initControls, RANGE_BUSY_REASON, RANGE_BOOTING_REASON, STUCK_HINT, STUCK_CLEANUP_COMMAND };
 })();
 const __mod_choreography__ = (() => {
 "use strict";
@@ -8261,6 +8649,39 @@ const FRONTIER_MIN = 9101;
 const FRONTIER_MAX = 9110;
 const MAX_FEATURED = 6;
 
+// Start-here strip: three short lines for a first visit. Storage
+// access always sits in try/catch: private browsing shows the
+// strip every time instead of breaking. Pure helpers for tests.
+const START_HERE_KEY = "crucible-start-here";
+const START_HERE_LINES = [
+  "Red tries to read a protected file.",
+  "Blue watches the hosts and contains the intrusion.",
+  "The auditor checks if blue was fair. Click Watch a replay first.",
+];
+
+function startHereVisible(storage) {
+  try {
+    const get = storage && typeof storage.getItem === "function"
+      ? storage.getItem.bind(storage)
+      : storage;
+    if (typeof get !== "function") return true;
+    return get(START_HERE_KEY) !== "dismissed";
+  } catch {
+    return true;
+  }
+}
+
+function rememberStartHereDismissed(storage) {
+  try {
+    const set = storage && typeof storage.setItem === "function"
+      ? storage.setItem.bind(storage)
+      : null;
+    if (set) set(START_HERE_KEY, "dismissed");
+  } catch {
+    // Private browsing: the strip simply shows again next time.
+  }
+}
+
 // One random unseen network: a held-out seed plus a difficulty
 // weighted toward medium and hard. Frontier is opt-in only: it
 // never appears on a random draw, only through the Advanced
@@ -8709,7 +9130,7 @@ function hideDeal(slot) {
   slot.hidden = true;
 }
 
-return { titleOutcomeKey, drawLiveScenario, hostNoun, storyLine, formatDuration, partitionLobby, thumbnail, arenaThumb, provText, voidNoteText, renderLobby, renderDeal, hideDeal, HELDOUT_MIN, HELDOUT_MAX, FRONTIER_MIN, FRONTIER_MAX, MAX_FEATURED };
+return { titleOutcomeKey, startHereVisible, rememberStartHereDismissed, drawLiveScenario, hostNoun, storyLine, formatDuration, partitionLobby, thumbnail, arenaThumb, provText, voidNoteText, renderLobby, renderDeal, hideDeal, HELDOUT_MIN, HELDOUT_MAX, FRONTIER_MIN, FRONTIER_MAX, MAX_FEATURED, START_HERE_KEY, START_HERE_LINES };
 })();
 const __mod_opening__ = (() => {
 "use strict";
@@ -9612,7 +10033,22 @@ const RECORDER_MIME_CANDIDATES = [
 ];
 const NO_AUDIO_MESSAGE =
   "No audio captured. Hold for a couple of seconds and check your Chrome microphone setting.";
-const TOO_QUICK_MESSAGE = "Still starting — speak first, then press Stop.";
+const TOO_QUICK_MESSAGE = "Still starting, speak first, then press Stop.";
+const TAKEOVER_NOT_LIVE =
+  "Takeover works while an exercise is live. Start one, then click Take over blue.";
+const MIC_BLOCKED_MESSAGE =
+  "Microphone is blocked. In Chrome, click the tune icon left of the address bar, set Microphone to Allow, reload the page, then try again. You can also type the order instead.";
+
+// Friendly takeover failure, never a bare code. A 409 or a no
+// live exercise note both mean the same plain thing.
+function takeoverMessage(err) {
+  const status = err && err.status;
+  const text = String((err && err.message) || err || "");
+  if (status === 409 || /no live exercise/i.test(text)) return TAKEOVER_NOT_LIVE;
+  const detail = text.replace(/\b40[0-9]\b/g, "").replace(/\s+/g, " ").trim();
+  if (!detail) return TAKEOVER_NOT_LIVE;
+  return `Takeover did not work: ${detail} Start a live exercise, then try again.`;
+}
 
 // First candidate the browser accepts, or "" for its default.
 // Pure, so the unsupported-mime fallback stays testable in node.
@@ -9674,6 +10110,14 @@ function exampleOrders(hosts) {
   ];
 }
 
+// Plain tooltip for a host chip: what it is and what a click
+// does. Pure, so the copy stays testable in node.
+function chipTitle(id, role) {
+  const name = String(id || "host");
+  const caption = chipRole(role);
+  return `Host ${name} (${caption}). Click to add it to your order.`;
+}
+
 // One chip button per host: name plus role caption. Clicks resolve
 // through delegation on the container (data-host).
 function chipsHtml(hosts) {
@@ -9682,7 +10126,7 @@ function chipsHtml(hosts) {
     .map((h) => {
       const id = typeof h === "string" ? h : h.id;
       const role = typeof h === "string" ? "" : h.role;
-      return `<button type="button" class="cmd-chip" data-host="${escapeHtml(id)}">`
+      return `<button type="button" class="cmd-chip" data-host="${escapeHtml(id)}" title="${escapeHtml(chipTitle(id, role))}">`
         + `<span class="cmd-chip-name">${escapeHtml(id)}</span>`
         + `<span class="cmd-chip-role">${escapeHtml(chipRole(role))}</span></button>`;
     })
@@ -10109,7 +10553,8 @@ function initCommandBar(els, deps) {
       ctl.starting = false;
       ctl.stopRequested = false;
       if (els.mic) setText(els.mic, "Speak");
-      show(`Microphone blocked (${(err && err.message) || err}): type the order instead.`);
+      void err;
+      show(MIC_BLOCKED_MESSAGE);
       if (els.input) els.input.focus();
     }
   }
@@ -10163,7 +10608,7 @@ function initCommandBar(els, deps) {
   }
 
   function staticCommandBar() {
-    const note = "Defender orders need a live exercise — run locally to try this.";
+    const note = "Defender orders need a live exercise - run locally to try this.";
     ctl.visible = true;
     bar.hidden = false;
     if (els.mic) { els.mic.disabled = true; els.mic.title = note; }
@@ -10284,13 +10729,17 @@ function initCommandBar(els, deps) {
     try {
       state = await api.fetchCommandState();
     } catch (err) {
-      show(`Takeover failed: ${(err && err.message) || err}`);
+      show(takeoverMessage(err));
+      return;
+    }
+    if (!state || !state.attached) {
+      show(TAKEOVER_NOT_LIVE);
       return;
     }
     try {
       await api.sendTakeover(!(state && state.latched));
     } catch (err) {
-      show(`Takeover failed: ${(err && err.message) || err}`);
+      show(takeoverMessage(err));
       return;
     }
     void refreshState();
@@ -10316,7 +10765,7 @@ function initCommandBar(els, deps) {
   return ctl;
 }
 
-return { pickRecorderMimeType, chipRole, escapeHtml, hostIds, exampleOrders, chipsHtml, tryHtml, defaultDecodeAudioData, previewLine, demoOrder, spendLine, downsampleLinear, encodeWavPCM, initCommandBar, CONFIRM_MS, STATE_POLL_MS, MIC_RATE, RECORD_TIMESLICE_MS, MIN_RECORD_MS, LISTEN_TICK_MS, STOP_TIMEOUT_MS, RECORDER_MIME_CANDIDATES, NO_AUDIO_MESSAGE, TOO_QUICK_MESSAGE };
+return { takeoverMessage, pickRecorderMimeType, chipRole, escapeHtml, hostIds, exampleOrders, chipTitle, chipsHtml, tryHtml, defaultDecodeAudioData, previewLine, demoOrder, spendLine, downsampleLinear, encodeWavPCM, initCommandBar, CONFIRM_MS, STATE_POLL_MS, MIC_RATE, RECORD_TIMESLICE_MS, MIN_RECORD_MS, LISTEN_TICK_MS, STOP_TIMEOUT_MS, RECORDER_MIME_CANDIDATES, NO_AUDIO_MESSAGE, TOO_QUICK_MESSAGE, TAKEOVER_NOT_LIVE, MIC_BLOCKED_MESSAGE };
 })();
 const __mod_arena__ = (() => {
 "use strict";
@@ -12458,7 +12907,7 @@ return { setArenaLayout, initArena, setArenaActive, toggleArenaSound, arenaNotif
 const STATIC_TRY_LOCAL = "run locally to try this";
 function staticModeBoot() {
   setServer(controls, "static", "Static replay");
-  const note = "Live exercises need a local server — " + STATIC_TRY_LOCAL + ".";
+  const note = "Live exercises need a local server - " + STATIC_TRY_LOCAL + ".";
   if (controls.run) { controls.run.disabled = true; controls.run.title = note; }
   if (controls.agents) { controls.agents.disabled = true; controls.agents.title = note; }
   if (els.liveBtn) { els.liveBtn.disabled = true; els.liveBtn.title = note; }
@@ -12491,7 +12940,9 @@ function updateProvBadge(prov) {
 }
 // Operations Center bootstrap: lobby, arena show flow, tabs, themes.
 const { fetchAttackMap, fetchCampaign, fetchCampaigns, fetchConfig, fetchDebrief, fetchFeatured, fetchPreview, fetchRun, fetchRuns, fetchStage3, fetchStatus, openLive, startExercise } = __mod_api__;
-const { renderLearning } = __mod_learn__;
+const { renderGlossary, renderLearning } = __mod_learn__;
+const { applyTooltips } = __mod_ux__;
+const { initTour, tourReplayId } = __mod_tour__;
 const { acceptLiveTraffic, autoplayQueue, bootStale, bootTimedOut, displayOutcome, endCardStats, eventHost, errorRetryTarget, finishSide, followOpensLive, motionReduced, motionSetting, normalizeActor, outcomeLine, phaseLabel, rankFeatured, reduceHostStates, runFlags, scoreEvents, SPEEDS, speedStripHidden, stepSpeed, streamDead } = __mod_state__;
 const { describeEvent, keyMoments, statusSentence } = __mod_story__;
 const { jumpTarget, renderDebrief } = __mod_debrief__;
@@ -12502,8 +12953,8 @@ const { renderTechniques } = __mod_techniques__;
 const { reduceAudits, renderAuditor } = __mod_audit__;
 const { renderScoreboard, renderScoreDetails } = __mod_scoreboard__;
 const { focusEvidenceRef, renderEvidence } = __mod_evidence__;
-const { initControls, serverStatus, setServer, showConfirm } = __mod_controls__;
-const { FRONTIER_MAX, FRONTIER_MIN, HELDOUT_MAX, HELDOUT_MIN, arenaThumb, drawLiveScenario, formatDuration, hideDeal, partitionLobby, renderDeal, renderLobby, storyLine, titleOutcomeKey, voidNoteText } = __mod_lobby__;
+const { initControls, isStuckRange, runDisabledReason, serverStatus, setServer, showConfirm } = __mod_controls__;
+const { FRONTIER_MAX, FRONTIER_MIN, HELDOUT_MAX, HELDOUT_MIN, arenaThumb, drawLiveScenario, formatDuration, hideDeal, partitionLobby, rememberStartHereDismissed, renderDeal, renderLobby, startHereVisible, storyLine, titleOutcomeKey, voidNoteText } = __mod_lobby__;
 const { playOpening } = __mod_opening__;
 const { initThoughtHeads, renderThoughts, setThoughtsCollapsed } = __mod_thoughts__;
 const { endCardVisible, hideEndCard, initEndCard, setEndNext, showEndCard } = __mod_endcard__;
@@ -12633,6 +13084,29 @@ const els = {
   cmdNote: document.getElementById("cmdNote"),
   cmdHosts: document.getElementById("cmdHosts"),
   cmdTry: document.getElementById("cmdTry"),
+  runReason: document.getElementById("runReason"),
+  liveReason: document.getElementById("liveReason"),
+  stuckHint: document.getElementById("stuckHint"),
+  stuckCmd: document.getElementById("stuckCmd"),
+  stuckCopy: document.getElementById("stuckCopy"),
+  stuckHintTop: document.getElementById("stuckHintTop"),
+  stuckCmdTop: document.getElementById("stuckCmdTop"),
+  stuckCopyTop: document.getElementById("stuckCopyTop"),
+  startHere: document.getElementById("startHere"),
+  startHereClose: document.getElementById("startHereClose"),
+  tourBtn: document.getElementById("tourBtn"),
+  tourOverlay: document.getElementById("tourOverlay"),
+  tourCaption: document.getElementById("tourCaption"),
+  tourMain: document.getElementById("tourMain"),
+  tourEnd: document.getElementById("tourEnd"),
+  tourEndLine: document.getElementById("tourEndLine"),
+  tourPauseBtn: document.getElementById("tourPauseBtn"),
+  tourNextBtn: document.getElementById("tourNextBtn"),
+  tourSkipBtn: document.getElementById("tourSkipBtn"),
+  tourLiveBtn: document.getElementById("tourLiveBtn"),
+  tourMoreBtn: document.getElementById("tourMoreBtn"),
+  tourCloseBtn: document.getElementById("tourCloseBtn"),
+  glossaryList: document.getElementById("glossaryList"),
 };
 
 const controls = {
@@ -12721,6 +13195,7 @@ let mapRefs = null;
 let arenaRefs = null;
 let stageRefs = null;
 let commandBar = null;
+let tourCtl = null;
 
 // The cinematic stage and the flat arena share one canvas and one
 // call shape; the toggle picks which one paints and animates.
@@ -12811,6 +13286,66 @@ function setMode(mode, label) {
   if (label) store.label = label;
   els.title.textContent = store.label;
   if (els.speedStrip) els.speedStrip.hidden = speedStripHidden(mode);
+  updateRunReasons(store.spend);
+}
+
+// Disabled-button reasons plus the stuck-range hint. Static mode
+// never calls this: its buttons keep the local-run note.
+function updateRunReasons(spend) {
+  const booting = store.mode === "booting";
+  const reason = runDisabledReason(spend, { booting });
+  const stuck = isStuckRange(spend);
+  if (els.runReason) {
+    els.runReason.hidden = !reason;
+    els.runReason.textContent = reason;
+  }
+  if (els.liveReason) {
+    els.liveReason.hidden = !reason;
+    els.liveReason.textContent = reason;
+  }
+  if (controls.run && !controls.run.disabled) controls.run.title = "";
+  else if (controls.run && reason) controls.run.title = reason;
+  if (els.liveBtn && !els.liveBtn.disabled) els.liveBtn.title = "";
+  else if (els.liveBtn && reason) els.liveBtn.title = reason;
+  if (els.stuckHint) els.stuckHint.hidden = !stuck;
+  if (els.stuckHintTop) els.stuckHintTop.hidden = !stuck;
+}
+
+async function copyStuckCommand(codeEl, btn) {
+  const text = codeEl ? codeEl.textContent : "";
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (err) {
+    const area = document.createElement("textarea");
+    area.value = text;
+    document.body.append(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+  if (btn) {
+    const prior = btn.textContent;
+    btn.textContent = "Copied";
+    setTimeout(() => { btn.textContent = prior; }, 1500);
+  }
+}
+
+function initStartHere() {
+  if (!els.startHere) return;
+  let storage = null;
+  try {
+    storage = window.localStorage;
+  } catch {
+    storage = null;
+  }
+  els.startHere.hidden = !startHereVisible(storage);
+  if (els.startHereClose) {
+    els.startHereClose.addEventListener("click", () => {
+      els.startHere.hidden = true;
+      rememberStartHereDismissed(storage);
+    });
+  }
 }
 
 function latestLaneEvent(slice) {
@@ -12902,6 +13437,8 @@ function render(animate) {
     outcome: store.finalScore?.outcome,
     display: store.finalScore && display ? display.label : null,
     mode: store.mode,
+    bootStartedAt: store.bootStartedAt,
+    nowMs: Date.now(),
   });
   renderAuditor(
     { list: els.auditList, chips: els.auditChips, cost: els.auditCost, count: null, summary: els.auditSummary },
@@ -13151,11 +13688,16 @@ function clearBootTimer() {
     clearTimeout(store.bootTimer);
     store.bootTimer = null;
   }
+  if (store.bootTicker) {
+    clearInterval(store.bootTicker);
+    store.bootTicker = null;
+  }
 }
 
 // Slow boots must say so: three minutes with no event means the
 // range never came up. The retry reattaches to the same exercise,
-// whose buffered events replay if it did start after all.
+// whose buffered events replay if it did start after all. While
+// booting, a one-second ticker repaints the elapsed line.
 const BOOT_LIMIT_MS = 180000;
 
 function armBootTimer(token) {
@@ -13171,6 +13713,11 @@ function armBootTimer(token) {
       ? { label: "Reattach", onClick: () => attachLive(id) }
       : { label: "Back to lobby", onClick: () => switchTab("lobby") });
   }, BOOT_LIMIT_MS);
+  store.bootTicker = setInterval(() => {
+    if (bootStale(token, store.bootGen)) return;
+    if (store.mode !== "booting") return;
+    render(false);
+  }, 1000);
 }
 
 function destroyOpening() {
@@ -13279,11 +13826,23 @@ async function beginRun(agents, scenarioToken) {
   cancelScene();
   notice("");
   controls.run.disabled = true;
+  if (els.liveBtn) els.liveBtn.disabled = true;
+  const bootReason = runDisabledReason(null, { booting: true });
+  if (els.runReason) {
+    els.runReason.hidden = false;
+    els.runReason.textContent = bootReason;
+  }
+  if (els.liveReason) {
+    els.liveReason.hidden = false;
+    els.liveReason.textContent = bootReason;
+  }
+  let started = false;
   try {
     const data = await startExercise(agents, undefined, scenarioToken);
     // The server was slow and the user picked something else meanwhile:
     // a stale boot must never yank the new selection into live.
     if (bootStale(token, store.bootGen)) return;
+    started = true;
     store.liveExerciseId = data.exercise_id;
     store.followedId = data.exercise_id;
     setMode("booting", `Booting range for ${data.exercise_id}`);
@@ -13327,7 +13886,14 @@ async function beginRun(agents, scenarioToken) {
       });
     }
   } finally {
-    controls.run.disabled = false;
+    // A failed or stale start re-enables; a live boot stays
+    // disabled until the run ends. The status poll corrects both.
+    if (!started) {
+      controls.run.disabled = false;
+      if (els.liveBtn) els.liveBtn.disabled = false;
+    }
+    updateRunReasons(store.spend);
+    void pollStatus();
   }
 }
 
@@ -13858,8 +14424,12 @@ async function pollStatus() {
     store.spend = spend;
     const status = serverStatus(spend);
     setServer(controls, status.state, status.label);
-    controls.run.disabled = status.runDisabled;
-    els.liveBtn.disabled = status.runDisabled;
+    // A local boot keeps both buttons disabled until the run ends,
+    // even if a poll lands before the server flags it running.
+    const booting = store.mode === "booting";
+    controls.run.disabled = status.runDisabled || booting;
+    els.liveBtn.disabled = status.runDisabled || booting;
+    updateRunReasons(spend);
     if (!spend.running && spend.last_warning && store.mode === "idle") {
       notice(spend.last_warning, false);
     }
@@ -13869,6 +14439,7 @@ async function pollStatus() {
     renderScoreDetails(scoreEls(), store.events, store.cursor, store.weights, store.spend, store.finalScore);
   } catch (err) {
     setServer(controls, "down", "Server unreachable");
+    updateRunReasons(null);
   }
 }
 
@@ -13889,9 +14460,14 @@ function switchTab(name) {
     els[viewId].hidden = !on;
   }
   if (active === "lobby" && store.playing) pauseReplay();
-  if (active === "learn" && !store.learnLoaded) {
-    store.learnLoaded = true;
-    loadLearning();
+  if (active === "learn") {
+    // The glossary needs no data, so it paints at once on both the
+    // live page and the static bundle, even if Stage 3 fails.
+    if (els.glossaryList) renderGlossary(document, els.glossaryList);
+    if (!store.learnLoaded) {
+      store.learnLoaded = true;
+      loadLearning();
+    }
   }
   setSceneActive(active === "arena");
 }
@@ -13903,6 +14479,7 @@ async function loadLearning() {
       {
         note: els.stage3Void, on: els.stage3On, off: els.stage3Off, empty: els.stage3Empty,
         source: els.playSource, rules: els.playRules, playEmpty: els.playEmpty,
+        glossary: els.glossaryList,
       },
       data,
     );
@@ -13911,6 +14488,50 @@ async function loadLearning() {
     els.stage3Empty.textContent = "Stage 3 numbers are unavailable.";
     notice(`Could not load Stage 3 numbers: ${err.message}`, true);
   }
+}
+
+function initTourUi() {
+  if (!els.tourBtn || !els.tourOverlay) return;
+  const isStatic = Boolean(window.CRUCIBLE_STATIC);
+  tourCtl = initTour({
+    doc: document,
+    caption: els.tourCaption,
+    box: els.tourMain,
+    endWrap: els.tourEnd,
+    endLine: els.tourEndLine,
+    liveBtn: els.tourLiveBtn,
+    moreBtn: els.tourMoreBtn,
+    pauseBtn: els.tourPauseBtn,
+    skipBtn: els.tourSkipBtn,
+    nextBtn: els.tourNextBtn,
+    overlay: els.tourOverlay,
+    isStatic,
+    onOpen: (id) => openExercise(id, { bench: benchFor(id) }),
+    onPause: () => pauseReplay(),
+    onResume: () => playReplay(),
+    endVisible: () => els.endCard && !els.endCard.hidden,
+    isEnded: () => Boolean(store.finalScore),
+  });
+  els.tourBtn.addEventListener("click", () => {
+    const ids = effectiveFeaturedIds();
+    const pick = tourReplayId(ids) || tourReplayId(visibleCards().map((card) => card.id));
+    if (!pick) {
+      notice("No exercises to tour yet.", false);
+      return;
+    }
+    switchTab("arena");
+    tourCtl.start(pick);
+  });
+  if (els.tourCloseBtn) els.tourCloseBtn.addEventListener("click", () => tourCtl.skip());
+  if (els.tourLiveBtn) els.tourLiveBtn.addEventListener("click", () => {
+    tourCtl.skip();
+    switchTab("lobby");
+    onRunRequest(controls.agents.value);
+  });
+  if (els.tourMoreBtn) els.tourMoreBtn.addEventListener("click", () => {
+    tourCtl.skip();
+    watchReplay();
+  });
 }
 
 function setTheme(theme) {
@@ -14217,6 +14838,11 @@ async function boot() {
     onLobby: () => switchTab("lobby"),
     onSave: () => saveResultCard(),
   });
+  applyTooltips(document);
+  initStartHere();
+  initTourUi();
+  if (els.stuckCopy) els.stuckCopy.addEventListener("click", () => copyStuckCommand(els.stuckCmd, els.stuckCopy));
+  if (els.stuckCopyTop) els.stuckCopyTop.addEventListener("click", () => copyStuckCommand(els.stuckCmdTop, els.stuckCopyTop));
   els.tabLobby.addEventListener("click", () => switchTab("lobby"));
   els.tabArena.addEventListener("click", () => switchTab("arena"));
   els.tabStory.addEventListener("click", () => switchTab("story"));

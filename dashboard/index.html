@@ -68,10 +68,17 @@
             <span id="serverLight" class="light" data-state="unknown" aria-hidden="true"></span>
             <span id="serverLabel">Connecting…</span>
           </div>
+          <div id="stuckHintTop" class="stuck-hint" hidden>
+            <p class="stuck-text">If this looks stuck, restart the server and remove leftover range containers</p>
+            <div class="stuck-cmd"><code id="stuckCmdTop">docker ps -aq --filter name=crucible- | xargs docker rm -f</code><button id="stuckCopyTop" class="btn small" type="button">Copy</button></div>
+          </div>
         </div>
       </div>
     </div>
-    <button id="runBtn" class="btn primary">Start exercise</button>
+    <div class="run-wrap">
+      <button id="runBtn" class="btn primary">Start exercise</button>
+      <span id="runReason" class="btn-reason" hidden></span>
+    </div>
   </div>
 </header>
 
@@ -87,6 +94,15 @@
 
 <div id="lobbyView">
 <main class="lobby-wrap">
+  <section id="startHere" class="start-here" aria-label="First visit guide">
+    <div class="start-here-text">
+      <h2>Start here</h2>
+      <p>Red tries to read a protected file.</p>
+      <p>Blue watches the hosts and contains the intrusion.</p>
+      <p>The auditor checks if blue was fair. Click Watch a replay first.</p>
+    </div>
+    <button id="startHereClose" class="btn small ghost" type="button">Dismiss</button>
+  </section>
   <section class="hero" aria-label="Start here">
     <div class="hero-copy">
       <p class="hero-eyebrow">Crucible</p>
@@ -95,6 +111,12 @@
       <div class="hero-actions">
         <button id="liveBtn" class="btn primary hero-cta">Run a live exercise</button>
         <button id="replayBtn" class="btn hero-secondary" title="Open a random featured replay">Watch a replay</button>
+        <button id="tourBtn" class="btn" title="Play a guided tour of one replay">Watch the tour</button>
+      </div>
+      <p id="liveReason" class="btn-reason" hidden></p>
+      <div id="stuckHint" class="stuck-hint" hidden>
+        <p class="stuck-text">If this looks stuck, restart the server and remove leftover range containers</p>
+        <div class="stuck-cmd"><code id="stuckCmd">docker ps -aq --filter name=crucible- | xargs docker rm -f</code><button id="stuckCopy" class="btn small" type="button">Copy</button></div>
       </div>
     </div>
     <div class="hero-art" aria-hidden="true">
@@ -145,11 +167,11 @@
       <p id="thoughtRedText" class="thought-text"></p>
       <div id="thoughtRedChips" class="thought-chips"></div>
     </aside>
-    <div id="speedStrip" class="speed-strip" role="group" aria-label="Playback speed" hidden>
-      <button data-speed="0.5" aria-pressed="false" title="Half speed ([)">0.5x</button>
-      <button data-speed="1" aria-pressed="true" class="active" title="Normal speed">1x</button>
-      <button data-speed="2" aria-pressed="false" title="Double speed (])">2x</button>
-      <button data-speed="4" aria-pressed="false" title="Quadruple speed">4x</button>
+    <div id="speedStrip" class="speed-strip" role="group" aria-label="Playback speed" title="Replay speed. Brackets change it: [ slows down, ] speeds up." hidden>
+      <button data-speed="0.5" aria-pressed="false" title="Half speed. Press [ for slower.">0.5x</button>
+      <button data-speed="1" aria-pressed="true" class="active" title="Normal speed.">1x</button>
+      <button data-speed="2" aria-pressed="false" title="Double speed. Press ] for faster.">2x</button>
+      <button data-speed="4" aria-pressed="false" title="Quadruple speed.">4x</button>
     </div>
     </div>
     <div class="arena-canvas-wrap" id="arenaWrap">
@@ -214,7 +236,7 @@
         <p id="thoughtBlueText" class="thought-text"></p>
         <div id="thoughtBlueChips" class="thought-chips"></div>
       </aside>
-      <div id="arenaAud" role="status">
+      <div id="arenaAud" role="status" title="Auditor verdict. The auditor rates each blue move from 0 to 10 and checks the log lines.">
         <div class="k"><span>Auditor</span><span>Verdict</span></div>
         <div class="n"><span id="arenaAudNum">-/10</span><span class="w" id="arenaAudWord">--</span></div>
         <div class="c" id="arenaAudCite"></div>
@@ -224,9 +246,9 @@
    </div>
     <div class="arena-bottom">
       <div class="score-strip arena-scores" aria-label="Score summary">
-        <dl class="score-big"><dt>Outcome</dt><dd id="arenaOutcome">--</dd></dl>
-        <dl class="score-big"><dt>Blue score</dt><dd id="arenaBlue">--</dd></dl>
-        <dl class="score-big"><dt>Downtime</dt><dd id="arenaDowntime">--</dd></dl>
+        <dl class="score-big"><dt title="How the exercise ended. Contained means blue stopped the intrusion and the file stayed safe.">Outcome</dt><dd id="arenaOutcome">--</dd></dl>
+        <dl class="score-big"><dt title="Blue score from 0 to 100. Starts at 100 and falls when hosts stay offline.">Blue score</dt><dd id="arenaBlue">--</dd></dl>
+        <dl class="score-big"><dt title="Share of host time offline for containment. Lower is better.">Downtime</dt><dd id="arenaDowntime">--</dd></dl>
       </div>
       <div class="arena-transport">
         <button id="arenaPlay" class="btn small" title="Play (Space)" disabled>Play</button>
@@ -292,9 +314,9 @@
 
   <div class="story-side">
     <div class="score-strip" aria-label="Score summary">
-      <dl class="score-big"><dt>Outcome</dt><dd id="sbOutcome">--</dd></dl>
-      <dl class="score-big"><dt>Blue score</dt><dd id="sbBlue">--</dd></dl>
-      <dl class="score-big"><dt>Downtime</dt><dd id="sbDowntime">--</dd></dl>
+      <dl class="score-big"><dt title="How the exercise ended. Contained means blue stopped the intrusion and the file stayed safe.">Outcome</dt><dd id="sbOutcome">--</dd></dl>
+      <dl class="score-big"><dt title="Blue score from 0 to 100. Starts at 100 and falls when hosts stay offline.">Blue score</dt><dd id="sbBlue">--</dd></dl>
+      <dl class="score-big"><dt title="Share of host time offline for containment. Lower is better.">Downtime</dt><dd id="sbDowntime">--</dd></dl>
     </div>
     <section class="panel" aria-label="Outcome">
       <h2>Outcome</h2>
@@ -384,6 +406,31 @@
     <p id="playEmpty" class="empty">No playbook on file.</p>
     <ol id="playRules" class="play-rules"></ol>
   </section>
+  <section class="panel" aria-label="Glossary">
+    <h2>Glossary</h2>
+    <dl id="glossaryList" class="glossary"></dl>
+  </section>
+</div>
+
+<div id="tourOverlay" class="tour-overlay" hidden>
+  <div class="tour-box" role="dialog" aria-label="Guided tour">
+    <div id="tourMain">
+      <p id="tourCaption" class="tour-caption"></p>
+      <div class="tour-btns">
+        <button id="tourPauseBtn" class="btn small" type="button">Pause</button>
+        <button id="tourNextBtn" class="btn small" type="button">Next</button>
+        <button id="tourSkipBtn" class="btn small ghost" type="button">Skip tour</button>
+      </div>
+    </div>
+    <div id="tourEnd" hidden>
+      <p id="tourEndLine" class="tour-caption"></p>
+      <div class="tour-btns">
+        <button id="tourLiveBtn" class="btn small primary" type="button">Try a live exercise</button>
+        <button id="tourMoreBtn" class="btn small" type="button">Watch another replay</button>
+        <button id="tourCloseBtn" class="btn small ghost" type="button">Close</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div id="confirmOverlay" class="overlay" hidden>

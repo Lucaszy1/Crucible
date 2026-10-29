@@ -15,6 +15,25 @@ export function serverStatus(spend) {
   return { state: "ok", label: "Server ready", runDisabled: false };
 }
 
+// Why the Start buttons are disabled, in plain words. Booting
+// always wins over busy: the range needs about 40 seconds.
+export const RANGE_BUSY_REASON = "A range is already running. Stop it or wait for it to finish.";
+export const RANGE_BOOTING_REASON = "Starting the range, about 40 seconds.";
+export const STUCK_HINT = "If this looks stuck, restart the server and remove leftover range containers";
+export const STUCK_CLEANUP_COMMAND = "docker ps -aq --filter name=crucible- | xargs docker rm -f";
+
+export function runDisabledReason(spend, opts) {
+  if (opts && opts.booting) return RANGE_BOOTING_REASON;
+  if (spend && spend.running) return RANGE_BUSY_REASON;
+  return "";
+}
+
+// A busy range with no active exercise id is stuck: leftover
+// containers from a dead run. Pure, so the hint stays testable.
+export function isStuckRange(spend) {
+  return Boolean(spend && spend.running && !spend.exercise_id);
+}
+
 export function showConfirm(els, spend, capped, onConfirm, note) {
   els.cost.textContent = `$${Number(spend?.estimated_exercise_cost || 0).toFixed(2)} (estimate)`;
   els.spent.textContent = `$${Number(spend?.spent_today || 0).toFixed(2)}`;
