@@ -1,6 +1,7 @@
 {
   "benches": {
     "briefed": "runs/bench-stage3-briefed-heldout",
+    "briefed_spark": "runs/bench-stage3-briefed-heldout-blue-spark",
     "heldout": "runs/bench-stage3-heldout",
     "noisyref": "runs/bench-stage3-noisyref",
     "sensors": "runs/bench-stage3-heldout-sensors",
@@ -173,6 +174,8 @@
     "Briefed model red against Open blue (n=20, descriptive only): 18 of 20 networks had an intrusion, and all 18 were contained; red did not get a foothold on the other 2. Secret reads 0/18 (0.0%), median relevant detection delay 7 events, median time to contain 22 events, mean downtime 6.96%, cost $13.16, Baseten tokens 1,547,043.",
     "1 of 600 red turns and 11 of 600 blue turns used a safe baseline move after model replies with no usable tool call, across 9 of 20 episodes.",
     "Void record only: the void run's B vs C secret-read gap was discordant pairs 6-0 over 20 pairs (p=0.0312); it is not evidence.",
+    "Briefed-red blue comparison on 20 shared networks (descriptive only): Open intrusions 18/20, Spark 20/20; containment Open 18/18, Spark 20/20; secret reads Open 0/18, Spark 0/20.",
+    "Briefed-red delays and cost: median relevant delay Open 7 vs Spark 1, median time to contain Open 22 vs Spark 24, cost Open $13.16 vs Spark $17.93.",
     "14 auditor verdicts in the corrected held-out rerun were replayed from the voided original run on byte-identical prompts; no blue, red, or referee response was cached and outcomes are unaffected."
   ],
   "comparisons": [
@@ -289,7 +292,7 @@
     }
   ],
   "frozen_sha256": "76c925e82ddeb30bd592ffe3511bba067aca8dc32db1130185ed8c2422a2c0d8",
-  "generated": "2026-10-29T00:54:22.421249+00:00",
+  "generated": "2026-10-29T07:10:18.245094+00:00",
   "non_claims": [
     "No result here shows the playbook generalizes beyond these held-out seeds and difficulties; 20 scenarios are one pilot, not coverage.",
     "A comparison within noise is no conclusion, not proof of no effect: with 20 pairs only large asymmetries can reach p < 0.05.",
@@ -297,9 +300,200 @@
     "B-vs-C pairs are exactly matched: the same scenario and rep index in one bench replays identical red moves across arms by design, so arm differences isolate blue, not red sampling. A-vs-B pairs across benches by scenario instead, which is approximate because red re-rolled between benches.",
     "The main table uses a solver red with seeded imperfection, because unbriefed model red achieved no intrusion in 18 train episodes: results show blue contains a known-path intruder, not that blue stops an adaptive attacker. The briefed-red run is descriptive only at n=20: 18 of 20 networks had an intrusion, and all 18 were contained; red did not get a foothold on the other 2.",
     "Audit justified rates cover the rerun B and C cells only; no other cell was audited.",
-    "The frozen playbook was learned on train episodes whose sensors were void too, so its rules were learned without sensor input; the rerun tests a deaf-learned playbook under working sensors."
+    "The frozen playbook was learned on train episodes whose sensors were void too, so its rules were learned without sensor input; the rerun tests a deaf-learned playbook under working sensors.",
+    "The Open-vs-Spark blue comparison pairs across benches by scenario; briefed red re-rolled between benches, so pairing is approximate and descriptive only at n=20 per arm."
   ],
+  "parity": {
+    "cell": "model-briefed-sensors-on-memory-off",
+    "open": {
+      "audit_episodes": 20,
+      "audit_justified_rate": 0.6366666666666667,
+      "baseten_tokens": 1547043,
+      "cell": "model-briefed-sensors-on-memory-off",
+      "contained_after_intrusion": {
+        "hits": 18,
+        "n": 18,
+        "rate": 1.0,
+        "wilson": [
+          0.824115449417625,
+          1.0
+        ]
+      },
+      "fallback_census": {
+        "blue_fallbacks": 11,
+        "blue_turns": 600,
+        "episodes": 9,
+        "n": 20,
+        "red_fallbacks": 1,
+        "red_turns": 600
+      },
+      "intrusion": {
+        "hits": 18,
+        "n": 20,
+        "rate": 0.9,
+        "wilson": [
+          0.6989617935882066,
+          0.9721341060158468
+        ]
+      },
+      "mean_downtime_contained_pct": 6.955,
+      "mean_downtime_pct": 6.2985,
+      "median_detection_delay": 12.0,
+      "median_relevant_delay": 7.0,
+      "median_time_to_contain": 22.0,
+      "n": 20,
+      "secret_read": {
+        "hits": 0,
+        "n": 18,
+        "rate": 0.0,
+        "wilson": [
+          0.0,
+          0.1758845505823749
+        ]
+      },
+      "total_cost_usd": 13.1591
+    },
+    "open_bench": "runs/bench-stage3-briefed-heldout",
+    "same_networks": {
+      "open_n": 20,
+      "open_only": [],
+      "shared": [
+        "9001",
+        "9002",
+        "9003",
+        "9004",
+        "9005",
+        "9006",
+        "9007",
+        "9008",
+        "9009",
+        "9010",
+        "9011",
+        "9012",
+        "9013",
+        "9014",
+        "9015",
+        "9016",
+        "9017",
+        "9018",
+        "9019",
+        "9020"
+      ],
+      "shared_n": 20,
+      "spark_n": 20,
+      "spark_only": []
+    },
+    "sentences": [
+      "Same networks: 20 of 20 seeds overlap (9001-9020 (20 seeds)).",
+      "Intrusions: Open 18/20, Spark 20/20 (Open fewer).",
+      "Containment given intrusion: Open 18/18, Spark 20/20 (tied).",
+      "Secret reads: Open 0/18, Spark 0/20 (tied).",
+      "Median relevant detection delay: Open 7, Spark 1 events (Spark faster).",
+      "Median time to contain: Open 22, Spark 24 events (Open faster).",
+      "Mean downtime: Open 6.30%, Spark 6.85% (Open lower; contained means Open 6.96%, Spark 6.85%).",
+      "Cost (Meta): Open $13.16, Spark $17.93 (Open lower).",
+      "Baseline fallbacks: red Open 1 of 600, Spark 1 of 600; blue Open 11 of 600, Spark 1 of 600.",
+      "Descriptive only at n=20 Open and n=20 Spark; briefed red re-rolled between benches, so pairing is approximate. This section compares the two runs; it does not conclude parity."
+    ],
+    "spark": {
+      "audit_episodes": 20,
+      "audit_justified_rate": 0.6183333333333333,
+      "baseten_tokens": 1547043,
+      "cell": "model-briefed-sensors-on-memory-off",
+      "contained_after_intrusion": {
+        "hits": 20,
+        "n": 20,
+        "rate": 1.0,
+        "wilson": [
+          0.8388698745050669,
+          1.0
+        ]
+      },
+      "fallback_census": {
+        "blue_fallbacks": 1,
+        "blue_turns": 600,
+        "episodes": 2,
+        "n": 20,
+        "red_fallbacks": 1,
+        "red_turns": 600
+      },
+      "intrusion": {
+        "hits": 20,
+        "n": 20,
+        "rate": 1.0,
+        "wilson": [
+          0.8388698745050669,
+          1.0
+        ]
+      },
+      "mean_downtime_contained_pct": 6.849500000000001,
+      "mean_downtime_pct": 6.849500000000001,
+      "median_detection_delay": 5.0,
+      "median_relevant_delay": 1.0,
+      "median_time_to_contain": 24.0,
+      "n": 20,
+      "secret_read": {
+        "hits": 0,
+        "n": 20,
+        "rate": 0.0,
+        "wilson": [
+          0.0,
+          0.16113012549493322
+        ]
+      },
+      "total_cost_usd": 17.9295
+    },
+    "spark_bench": "runs/bench-stage3-briefed-heldout-blue-spark"
+  },
   "reference": {
+    "briefed-red-vs-Spark": {
+      "audit_episodes": 20,
+      "audit_justified_rate": 0.6183333333333333,
+      "baseten_tokens": 1547043,
+      "cell": "model-briefed-sensors-on-memory-off",
+      "contained_after_intrusion": {
+        "hits": 20,
+        "n": 20,
+        "rate": 1.0,
+        "wilson": [
+          0.8388698745050669,
+          1.0
+        ]
+      },
+      "fallback_census": {
+        "blue_fallbacks": 1,
+        "blue_turns": 600,
+        "episodes": 2,
+        "n": 20,
+        "red_fallbacks": 1,
+        "red_turns": 600
+      },
+      "intrusion": {
+        "hits": 20,
+        "n": 20,
+        "rate": 1.0,
+        "wilson": [
+          0.8388698745050669,
+          1.0
+        ]
+      },
+      "mean_downtime_contained_pct": 6.849500000000001,
+      "mean_downtime_pct": 6.849500000000001,
+      "median_detection_delay": 5.0,
+      "median_relevant_delay": 1.0,
+      "median_time_to_contain": 24.0,
+      "n": 20,
+      "secret_read": {
+        "hits": 0,
+        "n": 20,
+        "rate": 0.0,
+        "wilson": [
+          0.0,
+          0.16113012549493322
+        ]
+      },
+      "total_cost_usd": 17.9295
+    },
     "briefed-red-vs-Spark-Open": {
       "audit_episodes": 20,
       "audit_justified_rate": 0.6366666666666667,

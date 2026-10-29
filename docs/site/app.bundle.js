@@ -8257,11 +8257,15 @@ function titleOutcomeKey(title) {
 
 const HELDOUT_MIN = 9001;
 const HELDOUT_MAX = 9020;
+const FRONTIER_MIN = 9101;
+const FRONTIER_MAX = 9110;
 const MAX_FEATURED = 6;
 
 // One random unseen network: a held-out seed plus a difficulty
-// weighted toward medium and hard. randomFn defaults to Math.random
-// and is injectable for tests.
+// weighted toward medium and hard. Frontier is opt-in only: it
+// never appears on a random draw, only through the Advanced
+// difficulty or an explicit 9101-9110 seed. randomFn defaults to
+// Math.random and is injectable for tests.
 function drawLiveScenario(randomFn) {
   const rand = typeof randomFn === "function" ? randomFn : Math.random;
   const seed = HELDOUT_MIN + Math.floor(rand() * (HELDOUT_MAX - HELDOUT_MIN + 1));
@@ -8705,7 +8709,7 @@ function hideDeal(slot) {
   slot.hidden = true;
 }
 
-return { titleOutcomeKey, drawLiveScenario, hostNoun, storyLine, formatDuration, partitionLobby, thumbnail, arenaThumb, provText, voidNoteText, renderLobby, renderDeal, hideDeal, HELDOUT_MIN, HELDOUT_MAX, MAX_FEATURED };
+return { titleOutcomeKey, drawLiveScenario, hostNoun, storyLine, formatDuration, partitionLobby, thumbnail, arenaThumb, provText, voidNoteText, renderLobby, renderDeal, hideDeal, HELDOUT_MIN, HELDOUT_MAX, FRONTIER_MIN, FRONTIER_MAX, MAX_FEATURED };
 })();
 const __mod_opening__ = (() => {
 "use strict";
@@ -12499,7 +12503,7 @@ const { reduceAudits, renderAuditor } = __mod_audit__;
 const { renderScoreboard, renderScoreDetails } = __mod_scoreboard__;
 const { focusEvidenceRef, renderEvidence } = __mod_evidence__;
 const { initControls, serverStatus, setServer, showConfirm } = __mod_controls__;
-const { HELDOUT_MAX, HELDOUT_MIN, arenaThumb, drawLiveScenario, formatDuration, hideDeal, partitionLobby, renderDeal, renderLobby, storyLine, titleOutcomeKey, voidNoteText } = __mod_lobby__;
+const { FRONTIER_MAX, FRONTIER_MIN, HELDOUT_MAX, HELDOUT_MIN, arenaThumb, drawLiveScenario, formatDuration, hideDeal, partitionLobby, renderDeal, renderLobby, storyLine, titleOutcomeKey, voidNoteText } = __mod_lobby__;
 const { playOpening } = __mod_opening__;
 const { initThoughtHeads, renderThoughts, setThoughtsCollapsed } = __mod_thoughts__;
 const { endCardVisible, hideEndCard, initEndCard, setEndNext, showEndCard } = __mod_endcard__;
@@ -13520,8 +13524,10 @@ function dealDraw() {
   let seed = drawn.seed;
   if (raw !== "") {
     seed = Number(raw);
-    if (!Number.isInteger(seed) || seed < HELDOUT_MIN || seed > HELDOUT_MAX) {
-      return { error: `Seed must hold ${HELDOUT_MIN} to ${HELDOUT_MAX}.` };
+    const inHeldout = seed >= HELDOUT_MIN && seed <= HELDOUT_MAX;
+    const inFrontier = seed >= FRONTIER_MIN && seed <= FRONTIER_MAX;
+    if (!Number.isInteger(seed) || (!inHeldout && !inFrontier)) {
+      return { error: `Seed must hold ${HELDOUT_MIN} to ${HELDOUT_MAX} or ${FRONTIER_MIN} to ${FRONTIER_MAX}.` };
     }
   }
   const picked = els.dealDifficulty ? els.dealDifficulty.value : "random";
