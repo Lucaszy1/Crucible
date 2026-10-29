@@ -50,7 +50,7 @@ With sensors off, memory differed: secret reads 18 of 20 without memory vs 7 of 
 
 What we do not claim: no result shows the playbook generalizes beyond these seeds; 20 networks are one pilot. Within noise is no conclusion, not proof of no effect. Held episodes can reflect red failing on its own. Solver red follows a known path, so this shows containment of a known-path intruder on unseen networks, not of an adaptive intruder. Audit rates cover only rerun B and C. The playbook was learned on train episodes whose sensors were void too, so without sensor input.
 
-A Spark-blue repeat (`runs/bench-stage3-briefed-heldout-blue-spark`) has 1 episode and no summary yet. It is not in `docs/STAGE3_RESULTS.md`, so we list it as pending only.
+The Spark-blue repeat (`runs/bench-stage3-briefed-heldout-blue-spark`) finished on the same 20 held-out networks: intrusions 18/20 Open and 20/20 Spark; both blues contained every intrusion (Open 18/18, Spark 20/20) with no secret reads (Open 0/18, Spark 0/20). Median relevant detection delay 7 events Open vs 1 Spark, median time to contain 22 vs 24, mean downtime 6.30% vs 6.85%, Meta cost $13.16 vs $17.93. Descriptive only at n=20 per arm; briefed red re-rolled between benches, so pairing is approximate and this does not conclude parity.
 
 ## 6. Mistakes we caught and what we changed
 
