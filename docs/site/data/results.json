@@ -1,6 +1,6 @@
 {
   "benches": {
-    "briefed": "runs/bench-stage3-briefed-vs-open",
+    "briefed": "runs/bench-stage3-briefed-heldout",
     "heldout": "runs/bench-stage3-heldout",
     "noisyref": "runs/bench-stage3-noisyref",
     "sensors": "runs/bench-stage3-heldout-sensors",
@@ -29,6 +29,7 @@
           1.0
         ]
       },
+      "mean_downtime_contained_pct": 3.765,
       "mean_downtime_pct": 0.753,
       "median_detection_delay": 9.0,
       "median_relevant_delay": 7.0,
@@ -67,6 +68,7 @@
           1.0
         ]
       },
+      "mean_downtime_contained_pct": 5.542142857142857,
       "mean_downtime_pct": 3.8795,
       "median_detection_delay": 11.0,
       "median_relevant_delay": 12.0,
@@ -105,6 +107,7 @@
           1.0
         ]
       },
+      "mean_downtime_contained_pct": 8.5015,
       "mean_downtime_pct": 8.5015,
       "median_detection_delay": 15.0,
       "median_relevant_delay": 3.0,
@@ -143,6 +146,7 @@
           1.0
         ]
       },
+      "mean_downtime_contained_pct": 8.189499999999999,
       "mean_downtime_pct": 8.189499999999999,
       "median_detection_delay": 11.0,
       "median_relevant_delay": 3.0,
@@ -166,7 +170,8 @@
     "B vs C on intrusion rate: discordant pairs 0-0 over 20 pairs, is within noise (p=1.0000).",
     "B vs C on secret-read rate: discordant pairs 0-0 over 20 pairs, is within noise (p=1.0000).",
     "With working sensors every intrusion was contained in both memory arms (20/20 without memory, 20/20 with memory; secret reads 0/20 and 0/20): a ceiling effect, so memory is not distinguishable on outcomes with working sensors.",
-    "Briefed model red against Open blue (n=6, descriptive only): intrusions 6/6, contained 6/6, secret reads 0/6, median relevant detection delay 11 events, median time to contain 15 events.",
+    "Briefed model red against Open blue (n=20, descriptive only): 18 of 20 networks had an intrusion, and all 18 were contained; red did not get a foothold on the other 2. Secret reads 0/18 (0.0%), median relevant detection delay 7 events, median time to contain 22 events, mean downtime 6.96%, cost $13.16, Baseten tokens 1,547,043.",
+    "1 of 600 red turns and 11 of 600 blue turns used a safe baseline move after model replies with no usable tool call, across 9 of 20 episodes.",
     "Void record only: the void run's B vs C secret-read gap was discordant pairs 6-0 over 20 pairs (p=0.0312); it is not evidence.",
     "14 auditor verdicts in the corrected held-out rerun were replayed from the voided original run on byte-identical prompts; no blue, red, or referee response was cached and outcomes are unaffected."
   ],
@@ -284,54 +289,64 @@
     }
   ],
   "frozen_sha256": "76c925e82ddeb30bd592ffe3511bba067aca8dc32db1130185ed8c2422a2c0d8",
-  "generated": "2026-10-28T16:58:33.133504+00:00",
+  "generated": "2026-10-29T00:54:22.421249+00:00",
   "non_claims": [
     "No result here shows the playbook generalizes beyond these held-out seeds and difficulties; 20 scenarios are one pilot, not coverage.",
     "A comparison within noise is no conclusion, not proof of no effect: with 20 pairs only large asymmetries can reach p < 0.05.",
     "Held episodes can still reflect red failing on its own rather than blue defending; read wins beside intrusion and containment rates.",
     "B-vs-C pairs are exactly matched: the same scenario and rep index in one bench replays identical red moves across arms by design, so arm differences isolate blue, not red sampling. A-vs-B pairs across benches by scenario instead, which is approximate because red re-rolled between benches.",
-    "The main table uses a solver red with seeded imperfection, because unbriefed model red achieved no intrusion in 18 train episodes: results show blue contains a known-path intruder, not that blue stops an adaptive attacker. Briefed model red intruded in 6 of 6 probe episodes but that probe is descriptive only at n=6.",
+    "The main table uses a solver red with seeded imperfection, because unbriefed model red achieved no intrusion in 18 train episodes: results show blue contains a known-path intruder, not that blue stops an adaptive attacker. The briefed-red run is descriptive only at n=20: 18 of 20 networks had an intrusion, and all 18 were contained; red did not get a foothold on the other 2.",
     "Audit justified rates cover the rerun B and C cells only; no other cell was audited.",
     "The frozen playbook was learned on train episodes whose sensors were void too, so its rules were learned without sensor input; the rerun tests a deaf-learned playbook under working sensors."
   ],
   "reference": {
     "briefed-red-vs-Spark-Open": {
-      "audit_episodes": 0,
-      "audit_justified_rate": null,
+      "audit_episodes": 20,
+      "audit_justified_rate": 0.6366666666666667,
+      "baseten_tokens": 1547043,
       "cell": "model-briefed-sensors-on-memory-off",
       "contained_after_intrusion": {
-        "hits": 6,
-        "n": 6,
+        "hits": 18,
+        "n": 18,
         "rate": 1.0,
         "wilson": [
-          0.6096569663469356,
+          0.824115449417625,
           1.0
         ]
+      },
+      "fallback_census": {
+        "blue_fallbacks": 11,
+        "blue_turns": 600,
+        "episodes": 9,
+        "n": 20,
+        "red_fallbacks": 1,
+        "red_turns": 600
       },
       "intrusion": {
-        "hits": 6,
-        "n": 6,
-        "rate": 1.0,
+        "hits": 18,
+        "n": 20,
+        "rate": 0.9,
         "wilson": [
-          0.6096569663469356,
-          1.0
+          0.6989617935882066,
+          0.9721341060158468
         ]
       },
-      "mean_downtime_pct": 9.033333333333333,
-      "median_detection_delay": 17.0,
-      "median_relevant_delay": 11.0,
-      "median_time_to_contain": 15.0,
-      "n": 6,
+      "mean_downtime_contained_pct": 6.955,
+      "mean_downtime_pct": 6.2985,
+      "median_detection_delay": 12.0,
+      "median_relevant_delay": 7.0,
+      "median_time_to_contain": 22.0,
+      "n": 20,
       "secret_read": {
         "hits": 0,
-        "n": 6,
+        "n": 18,
         "rate": 0.0,
         "wilson": [
           0.0,
-          0.3903430336530645
+          0.1758845505823749
         ]
       },
-      "total_cost_usd": 1.1534
+      "total_cost_usd": 13.1591
     },
     "noisy-sensors-on-memory-off": {
       "audit_episodes": 0,
@@ -355,6 +370,7 @@
           1.0
         ]
       },
+      "mean_downtime_contained_pct": 7.955,
       "mean_downtime_pct": 7.955,
       "median_detection_delay": 14.5,
       "median_relevant_delay": 5.0,
@@ -393,6 +409,7 @@
           1.0
         ]
       },
+      "mean_downtime_contained_pct": 7.6370000000000005,
       "mean_downtime_pct": 7.6370000000000005,
       "median_detection_delay": 10.0,
       "median_relevant_delay": 5.0,
@@ -431,6 +448,7 @@
           1.0
         ]
       },
+      "mean_downtime_contained_pct": 11.378333333333332,
       "mean_downtime_pct": 11.378333333333332,
       "median_detection_delay": 3.0,
       "median_relevant_delay": 1.0,
@@ -477,6 +495,7 @@
             1.0
           ]
         },
+        "mean_downtime_contained_pct": 2.755,
         "mean_downtime_pct": 0.5509999999999999,
         "median_detection_delay": 20.0,
         "median_relevant_delay": 19.0,
@@ -515,6 +534,7 @@
             1.0
           ]
         },
+        "mean_downtime_contained_pct": 5.496666666666666,
         "mean_downtime_pct": 2.4735,
         "median_detection_delay": 12.5,
         "median_relevant_delay": 11.5,

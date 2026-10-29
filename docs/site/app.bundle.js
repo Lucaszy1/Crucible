@@ -5789,22 +5789,32 @@ function paintVault(ctx, sprites, x, y, r, t, state, exposed) {
   ctx.restore();
 }
 
+// Name-tag placement for one host block, pure so node tests it.
+// Every host keeps its tag at all times: blocks too small to hold
+// letters draw the name under the node instead of hiding it.
+function hostLabelLayout(r) {
+  if (r < 14) return { place: "below", fs: 11, dy: Math.round(r + 14) };
+  return {
+    place: "inside",
+    fs: Math.round(Math.min(24, Math.max(9, r * 0.5))),
+    dy: 1,
+  };
+}
+
 function paintHostLabel(refs, ctx, id, x, y, r, jewel) {
-  // Tiny stages keep state-colored blocks and skip letters that
-  // would collide; the lanes still name every host in text.
-  if (r < 14) return;
   const label = (refs.labels && refs.labels[id]) || String(id).toUpperCase().slice(0, 7);
   const role = (refs.roles && refs.roles[id]) || "";
-  const fs = Math.round(Math.min(24, Math.max(9, r * 0.5)));
+  const lay = hostLabelLayout(r);
+  const fs = lay.fs;
   ctx.save();
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.font = `900 ${fs}px ${DISP}`;
   ctx.lineWidth = Math.max(2, fs * 0.16);
   ctx.strokeStyle = "rgba(5,7,12,0.9)";
-  ctx.strokeText(label, x, y + 1);
+  ctx.strokeText(label, x, y + lay.dy);
   ctx.fillStyle = BONE;
-  ctx.fillText(label, x, y + 1);
+  ctx.fillText(label, x, y + lay.dy);
   if (r >= 22) {
     const sub = jewel ? "PROTECTED" : roleSub(role, false).toUpperCase();
     ctx.font = `700 ${Math.round(Math.min(12, Math.max(8, fs * 0.42)))}px ${MONO}`;
@@ -7310,7 +7320,7 @@ function paintOverlays(refs, ctx) {
   }
 }
 
-return { stageLayout, applyCamera, dollyTarget, winnerBeatTarget, stepCamera, redLine, blueLine, laneFeed, intrusionLevel, guardianPulse, stageWash, loadStageArt, auditorChrome, measureChrome, initStage, fitStage, setStageLayout, setStageArt, sampleMeltMask, renderStageStatic, renderStageThumb, stageNotify, showStageAuditor, hideStageAuditor, flashStageHost, glitchStage, firstAccessStage, cancelStage, setStageActive, setStageReduced, frameP95, fxForEvent, capTagFontSize, calloutForEvent, flightLane, lanePoint, flightLaneRect, clashCrop, moveSpanMs, finishPlan, hitstopFor, frameBudget, meltSpriteAlpha, meltChar, meltStride, meltGlyphPx, meltGlyphAlpha, meltHaloAlpha, meltDrift, stageFinish, probeStageContent, paintIntrusion, paintGuardian, projBody, trailSpan, flashHold, STAGE_WORLD, FLIGHT_MS, IMPACT_MS, AFTERMATH_MS, VOLLEY_STAGGER_MS, FINISH_PACES, LOW_STREAK, MELT_DELAY_MS, MELT_SPAN_MS, MELT_FADE_MS, MELT_SLOTS, MELT_SLOTS_LOW, PROJ_SCALE, LANCE_LEN, LANCE_WID, ORB_R };
+return { stageLayout, applyCamera, dollyTarget, winnerBeatTarget, stepCamera, redLine, blueLine, laneFeed, intrusionLevel, guardianPulse, stageWash, loadStageArt, auditorChrome, measureChrome, initStage, fitStage, setStageLayout, setStageArt, sampleMeltMask, renderStageStatic, renderStageThumb, stageNotify, showStageAuditor, hideStageAuditor, flashStageHost, glitchStage, firstAccessStage, cancelStage, setStageActive, setStageReduced, frameP95, fxForEvent, capTagFontSize, calloutForEvent, flightLane, lanePoint, flightLaneRect, clashCrop, moveSpanMs, finishPlan, hitstopFor, frameBudget, meltSpriteAlpha, meltChar, meltStride, meltGlyphPx, meltGlyphAlpha, meltHaloAlpha, meltDrift, stageFinish, probeStageContent, hostLabelLayout, paintIntrusion, paintGuardian, projBody, trailSpan, flashHold, STAGE_WORLD, FLIGHT_MS, IMPACT_MS, AFTERMATH_MS, VOLLEY_STAGGER_MS, FINISH_PACES, LOW_STREAK, MELT_DELAY_MS, MELT_SPAN_MS, MELT_FADE_MS, MELT_SLOTS, MELT_SLOTS_LOW, PROJ_SCALE, LANCE_LEN, LANCE_WID, ORB_R };
 })();
 const __mod_thumbnail__ = (() => {
 "use strict";
@@ -9098,6 +9108,119 @@ const CONFIRM_MS = 1500;
 const STATE_POLL_MS = 3000;
 const MIC_RATE = 16000;
 
+// MediaRecorder tuning: a short timeslice keeps chunks arriving while
+// the judge speaks, and a stop inside the guard window is a mistap.
+const RECORD_TIMESLICE_MS = 250;
+const MIN_RECORD_MS = 400;
+const LISTEN_TICK_MS = 500;
+const STOP_TIMEOUT_MS = 2000;
+const RECORDER_MIME_CANDIDATES = [
+  "audio/webm;codecs=opus",
+  "audio/webm",
+  "audio/mp4",
+  "audio/ogg;codecs=opus",
+];
+const NO_AUDIO_MESSAGE =
+  "No audio captured. Hold for a couple of seconds and check your Chrome microphone setting.";
+const TOO_QUICK_MESSAGE = "Still starting — speak first, then press Stop.";
+
+// First candidate the browser accepts, or "" for its default.
+// Pure, so the unsupported-mime fallback stays testable in node.
+function pickRecorderMimeType(MediaRecorderLike) {
+  const check = MediaRecorderLike && MediaRecorderLike.isTypeSupported;
+  if (typeof check !== "function") return "";
+  for (const candidate of RECORDER_MIME_CANDIDATES) {
+    try {
+      if (check.call(MediaRecorderLike, candidate)) return candidate;
+    } catch {
+      // One rejected probe never blocks the rest.
+    }
+  }
+  return "";
+}
+
+// Short role caption for a host chip, never blank. Inventory
+// roles arrive as short names or classic sentences; unknown roles
+// show themselves so no host reads nameless.
+function chipRole(role) {
+  const raw = String(role || "").trim();
+  if (!raw) return "host";
+  const map = {
+    "web portal": "public site",
+    "public web front end": "public site",
+    api: "public site",
+    app: "reports server",
+    "internal reporting service": "reports server",
+    workstation: "staff desktop",
+    "analyst workstation": "staff desktop",
+  };
+  return map[raw.toLowerCase()] || raw;
+}
+
+function escapeHtml(text) {
+  return String(text || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function hostIds(hosts) {
+  return (hosts || [])
+    .map((h) => (typeof h === "string" ? h : h && h.id))
+    .filter(Boolean);
+}
+
+// Three example orders grounded in live host names, cycling short
+// lists; empty when no hosts are known, never invented names.
+function exampleOrders(hosts) {
+  const names = hostIds(hosts);
+  if (names.length === 0) return [];
+  const picks = [0, 1, 2].map((i) => names[i % names.length]);
+  return [
+    `read logs on ${picks[0]}`,
+    `scan the ${picks[1]} host`,
+    `isolate the ${picks[2]} host`,
+  ];
+}
+
+// One chip button per host: name plus role caption. Clicks resolve
+// through delegation on the container (data-host).
+function chipsHtml(hosts) {
+  return (hosts || [])
+    .filter((h) => h && (typeof h === "string" || h.id))
+    .map((h) => {
+      const id = typeof h === "string" ? h : h.id;
+      const role = typeof h === "string" ? "" : h.role;
+      return `<button type="button" class="cmd-chip" data-host="${escapeHtml(id)}">`
+        + `<span class="cmd-chip-name">${escapeHtml(id)}</span>`
+        + `<span class="cmd-chip-role">${escapeHtml(chipRole(role))}</span></button>`;
+    })
+    .join("");
+}
+
+function tryHtml(hosts) {
+  const orders = exampleOrders(hosts);
+  if (orders.length === 0) return "";
+  return "Try: " + orders
+    .map((o) => `<button type="button" class="cmd-try-ex" data-order="${escapeHtml(o)}">${escapeHtml(o)}</button>`)
+    .join(" · ");
+}
+
+// Decode recorder bytes to mono PCM via an offline context. The bar
+// uses this by default; tests inject a stub through deps.
+async function defaultDecodeAudioData(raw) {
+  const scope = typeof window !== "undefined" ? window : {};
+  const OfflineCtx = scope.OfflineAudioContext || scope.webkitOfflineAudioContext;
+  if (!OfflineCtx) throw new Error("this browser cannot decode audio");
+  const probe = new OfflineCtx(1, 1, 44100);
+  const decoded = await probe.decodeAudioData(raw.slice(0));
+  return {
+    samples: Array.from(decoded.getChannelData(0)),
+    sampleRate: decoded.sampleRate,
+  };
+}
+
 const TOOL_VERBS = {
   isolate_host: "Isolate",
   patch_service: "Patch",
@@ -9216,7 +9339,28 @@ function initCommandBar(els, deps) {
     timer: null,
     poller: null,
     pending: null,
+    startedAt: 0,
+    listenTimer: null,
+    holdNoteUntil: 0,
+    ptt: false,
+    // Speak clicks and hold-V share one recorder: starting covers
+    // the getUserMedia window, stopping covers stop through chunk
+    // assembly, and stopRequested cancels a start already in flight.
+    starting: false,
+    stopping: false,
+    stopRequested: false,
   };
+
+  // Browser globals resolve through deps first so node tests can
+  // inject a fake recorder, clock, and document. Production passes
+  // only hosts/jewel and keeps the real globals.
+  const MediaRecorderLike = api.MediaRecorder
+    || (typeof MediaRecorder !== "undefined" ? MediaRecorder : undefined);
+  const mediaDevices = api.mediaDevices
+    || (typeof navigator !== "undefined" ? navigator.mediaDevices : undefined);
+  const doc = api.document
+    || (typeof document !== "undefined" ? document : null);
+  const now = () => (typeof api.now === "function" ? api.now() : Date.now());
 
   function show(message) {
     if (els.note) {
@@ -9236,7 +9380,8 @@ function initCommandBar(els, deps) {
   }
 
   function renderPreview(transcript, source, parsed) {
-    setText(els.transcript, transcript ? `Heard (${source}): ${transcript}` : "");
+    const heard = parsed && parsed.heard ? ` — ${parsed.heard}` : "";
+    setText(els.transcript, transcript ? `Heard (${source}): ${transcript}${heard}` : "");
     if (els.transcript) els.transcript.hidden = !transcript;
     setText(els.previewLine, previewLine(parsed));
     if (els.preview) els.preview.hidden = false;
@@ -9289,26 +9434,31 @@ function initCommandBar(els, deps) {
     ctl.timer = setTimeout(() => void executePending(), CONFIRM_MS);
   }
 
-  async function stopRecorder() {
-    const rec = ctl.media && ctl.media.recorder;
-    ctl.recording = false;
-    if (els.mic) {
-      els.mic.classList.remove("live");
-      els.mic.setAttribute("aria-pressed", "false");
-      setText(els.mic, "Speak");
+  function listenLine() {
+    const elapsed = Math.max(0, (now() - ctl.startedAt) / 1000);
+    return `Listening… ${elapsed.toFixed(0)}s — press Stop to transcribe, Esc to cancel.`;
+  }
+
+  function stopListenTimer() {
+    if (ctl.listenTimer) {
+      clearInterval(ctl.listenTimer);
+      ctl.listenTimer = null;
     }
-    if (!rec) return;
-    const chunks = ctl.chunks;
-    ctl.chunks = [];
-    const stopped = new Promise((resolve) => {
-      rec.onstop = () => resolve();
-    });
-    try {
-      rec.stop();
-    } catch {
-      return;
+  }
+
+  function startListenTimer() {
+    stopListenTimer();
+    show(listenLine());
+    ctl.listenTimer = setInterval(() => {
+      if (now() < ctl.holdNoteUntil) return;
+      show(listenLine());
+    }, LISTEN_TICK_MS);
+    if (ctl.listenTimer && typeof ctl.listenTimer.unref === "function") {
+      ctl.listenTimer.unref();
     }
-    await stopped;
+  }
+
+  function stopStreamTracks() {
     if (ctl.media && ctl.media.stream) {
       for (const track of ctl.media.stream.getTracks()) {
         try {
@@ -9318,27 +9468,158 @@ function initCommandBar(els, deps) {
         }
       }
     }
+  }
+
+  async function stopRecorder(opts) {
+    const force = Boolean(opts && opts.force);
+    if (ctl.recording && !force && ctl.startedAt > 0
+        && now() - ctl.startedAt < MIN_RECORD_MS) {
+      ctl.holdNoteUntil = now() + CONFIRM_MS;
+      show(TOO_QUICK_MESSAGE);
+      return;
+    }
+    // One stop at a time: a second stop would steal onstop and hang
+    // the first, and a restart mid-stop would reset chunks the old
+    // recorder still owns. The flag clears once chunks are consumed.
+    if (ctl.stopping) return;
+    ctl.stopping = true;
+    const rec = ctl.media && ctl.media.recorder;
+    ctl.recording = false;
+    ctl.startedAt = 0;
+    stopListenTimer();
+    if (els.mic) {
+      els.mic.classList.remove("live");
+      els.mic.setAttribute("aria-pressed", "false");
+      setText(els.mic, "Speak");
+    }
+    if (!rec) {
+      ctl.stopping = false;
+      return;
+    }
+    if (typeof rec.requestData === "function" && rec.state !== "inactive") {
+      try {
+        rec.requestData();
+      } catch {
+        // The stop flush still delivers the tail chunk.
+      }
+    }
+    let done = null;
+    const stopped = new Promise((resolve) => {
+      done = resolve;
+      rec.onstop = () => resolve();
+    });
+    try {
+      rec.stop();
+    } catch {
+      if (done) done();
+    }
+    // A broken recorder must never wedge the bar: stop proceeds
+    // with whatever chunks arrived.
+    let stopTimer = null;
+    const stopTimeout = new Promise((resolve) => {
+      stopTimer = setTimeout(resolve, STOP_TIMEOUT_MS);
+    });
+    await Promise.race([stopped, stopTimeout]);
+    if (stopTimer) clearTimeout(stopTimer);
+    stopStreamTracks();
     ctl.media = null;
-    if (chunks.length === 0) {
-      show("No audio captured: type the order instead.");
+    // Chunks read here, after onstop: the final dataavailable lands
+    // during stop, so an earlier snapshot always looks empty.
+    const blob = new Blob(ctl.chunks, { type: rec.mimeType || "audio/webm" });
+    ctl.chunks = [];
+    ctl.stopping = false;
+    if (!blob.size) {
+      show(NO_AUDIO_MESSAGE);
       return;
     }
     show("Transcribing…");
+    let wav;
     try {
-      const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
       const raw = await blob.arrayBuffer();
-      const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-      if (!OfflineCtx) throw new Error("this browser cannot decode audio");
-      const probe = new OfflineCtx(1, 1, 44100);
-      const decoded = await probe.decodeAudioData(raw.slice(0));
-      const channel = decoded.getChannelData(0);
-      const small = downsampleLinear(Array.from(channel), decoded.sampleRate, MIC_RATE);
-      const wav = encodeWavPCM(small, MIC_RATE);
-      const reply = await api.sendAudio(wav);
-      ctl.pending = null;
-      await previewText(reply.transcript || "", "voice");
+      const decode = api.decodeAudioData || defaultDecodeAudioData;
+      const { samples, sampleRate } = await decode(raw.slice(0));
+      const small = downsampleLinear(samples, sampleRate, MIC_RATE);
+      wav = encodeWavPCM(small, MIC_RATE);
     } catch (err) {
-      show(`Voice failed (${(err && err.message) || err}): type the order instead.`);
+      show(`Voice failed at decode (${(err && err.message) || err}): type the order instead.`);
+      if (els.input) els.input.focus();
+      return;
+    }
+    let reply;
+    try {
+      reply = await api.sendAudio(wav);
+    } catch (err) {
+      // A status means the bytes reached the server and transcription
+      // refused or failed there; without one the upload never landed.
+      const stage = err && err.status ? "transcribe" : "upload";
+      show(`Voice failed at ${stage} (${(err && err.message) || err}): type the order instead.`);
+      if (els.input) els.input.focus();
+      return;
+    }
+    ctl.pending = null;
+    await previewText(reply.transcript || "", "voice");
+  }
+
+  async function startMic() {
+    if (ctl.recording || ctl.stopping) return;
+    // A second trigger during the getUserMedia window adopts the
+    // pending start instead of opening a second recorder whose
+    // chunks would mix into (and corrupt) this recording.
+    if (ctl.starting) {
+      ctl.stopRequested = false;
+      return;
+    }
+    clearConfirm();
+    if (!MediaRecorderLike || !mediaDevices) {
+      show("This browser cannot record: type the order instead.");
+      if (els.input) els.input.focus();
+      return;
+    }
+    ctl.starting = true;
+    ctl.stopRequested = false;
+    if (els.mic) setText(els.mic, "Starting…");
+    try {
+      const stream = await mediaDevices.getUserMedia({ audio: true });
+      const mimeType = pickRecorderMimeType(MediaRecorderLike);
+      let recorder;
+      try {
+        recorder = mimeType
+          ? new MediaRecorderLike(stream, { mimeType })
+          : new MediaRecorderLike(stream);
+      } catch {
+        recorder = new MediaRecorderLike(stream);
+      }
+      ctl.chunks = [];
+      recorder.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size > 0) ctl.chunks.push(ev.data);
+      };
+      try {
+        recorder.start(RECORD_TIMESLICE_MS);
+      } catch {
+        recorder.start();
+      }
+      ctl.media = { recorder, stream };
+      ctl.recording = true;
+      ctl.starting = false;
+      ctl.startedAt = now();
+      ctl.holdNoteUntil = 0;
+      if (els.mic) {
+        els.mic.classList.add("live");
+        els.mic.setAttribute("aria-pressed", "true");
+        setText(els.mic, "Stop");
+      }
+      startListenTimer();
+      // A V tap or Esc landed mid-start: stop at once instead of
+      // orphaning a recording the user already released.
+      if (ctl.stopRequested) {
+        ctl.stopRequested = false;
+        await stopRecorder({ force: true });
+      }
+    } catch (err) {
+      ctl.starting = false;
+      ctl.stopRequested = false;
+      if (els.mic) setText(els.mic, "Speak");
+      show(`Microphone blocked (${(err && err.message) || err}): type the order instead.`);
       if (els.input) els.input.focus();
     }
   }
@@ -9348,32 +9629,47 @@ function initCommandBar(els, deps) {
       await stopRecorder();
       return;
     }
-    clearConfirm();
-    if (typeof MediaRecorder === "undefined" || !navigator.mediaDevices) {
-      show("This browser cannot record: type the order instead.");
-      if (els.input) els.input.focus();
+    await startMic();
+  }
+
+  // Host chips plus the Try line, from the current exercise only.
+  // Hidden while detached or when no hosts are known.
+  function renderHosts(hosts) {
+    if (!els.chips || !els.tryline) return;
+    const list = (Array.isArray(hosts) ? hosts : []).filter((h) => h && h.id);
+    if (!ctl.visible || list.length === 0) {
+      els.chips.hidden = true;
+      els.tryline.hidden = true;
+      els.chips.innerHTML = "";
+      els.tryline.innerHTML = "";
       return;
     }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      ctl.chunks = [];
-      recorder.ondataavailable = (ev) => {
-        if (ev.data && ev.data.size > 0) ctl.chunks.push(ev.data);
-      };
-      recorder.start();
-      ctl.media = { recorder, stream };
-      ctl.recording = true;
-      if (els.mic) {
-        els.mic.classList.add("live");
-        els.mic.setAttribute("aria-pressed", "true");
-        setText(els.mic, "Stop");
-      }
-      show("Listening… press Stop to transcribe, Esc to cancel.");
-    } catch (err) {
-      show(`Microphone blocked (${(err && err.message) || err}): type the order instead.`);
-      if (els.input) els.input.focus();
-    }
+    els.chips.innerHTML = chipsHtml(list);
+    els.tryline.innerHTML = tryHtml(list);
+    els.chips.hidden = false;
+    els.tryline.hidden = els.tryline.innerHTML === "";
+  }
+
+  function delegateData(ev, attr) {
+    const target = ev && ev.target;
+    const btn = target && target.closest ? target.closest(`[${attr}]`) : null;
+    if (!btn || typeof btn.getAttribute !== "function") return null;
+    return btn.getAttribute(attr) || null;
+  }
+
+  function onChipsClick(ev) {
+    const name = delegateData(ev, "data-host");
+    if (!name || !els.input) return;
+    const cur = els.input.value || "";
+    els.input.value = cur && !/\s$/.test(cur) ? `${cur} ${name}` : `${cur}${name}`;
+    els.input.focus();
+  }
+
+  function onTryClick(ev) {
+    const order = delegateData(ev, "data-order");
+    if (!order || !els.input) return;
+    els.input.value = order;
+    els.input.focus();
   }
 
   function staticCommandBar() {
@@ -9408,8 +9704,10 @@ function initCommandBar(els, deps) {
     bar.hidden = !attached;
     if (!attached) {
       clearConfirm();
+      renderHosts([]);
       return;
     }
+    renderHosts(state.hosts);
     setText(els.spend, spendLine(state.spend_usd, state.spend_cap_usd));
     if (els.takeover) {
       const humanMode = state.mode === "human";
@@ -9426,20 +9724,54 @@ function initCommandBar(els, deps) {
     }
   }
 
+  // Hold V to talk, release to stop. Ignored while typing, while
+  // the bar is detached, and on key repeat; release always stops,
+  // even inside the mistap window, since letting go means done.
+  // Both triggers share startMic/stopRecorder and its guards, so
+  // hold-V and Speak/Stop run the identical record path.
   function onKeydown(ev) {
-    if (ev.key === "Escape" && (ctl.pending || ctl.recording)) {
+    if (ev.key === "Escape" && (ctl.pending || ctl.recording || ctl.starting)) {
       ev.stopPropagation();
+      ctl.ptt = false;
       if (ctl.recording) {
-        void stopRecorder();
+        void stopRecorder({ force: true });
+        show("Recording cancelled.");
+      } else if (ctl.starting) {
+        ctl.stopRequested = true;
         show("Recording cancelled.");
       } else {
         clearConfirm();
         show("Order cancelled before sending.");
       }
+      return;
+    }
+    if ((ev.key === "v" || ev.key === "V") && !ev.repeat
+        && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+      const tag = (ev.target && ev.target.tagName) || "";
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (!ctl.visible || ctl.recording || ctl.stopping) return;
+      ev.preventDefault();
+      ctl.ptt = true;
+      void startMic();
+    }
+  }
+
+  function onKeyup(ev) {
+    if ((ev.key === "v" || ev.key === "V") && ctl.ptt) {
+      ctl.ptt = false;
+      // A release during the getUserMedia window cannot stop yet:
+      // the pending start auto-stops on completion instead.
+      if (ctl.starting) {
+        ctl.stopRequested = true;
+        return;
+      }
+      if (ctl.recording) void stopRecorder({ force: true });
     }
   }
 
   if (els.mic) els.mic.addEventListener("click", () => void toggleMic());
+  if (els.chips) els.chips.addEventListener("click", onChipsClick);
+  if (els.tryline) els.tryline.addEventListener("click", onTryClick);
   if (els.send) els.send.addEventListener("click", () => {
     if (els.input) void previewText(els.input.value, "text");
   });
@@ -9473,7 +9805,10 @@ function initCommandBar(els, deps) {
     }
     void refreshState();
   });
-  document.addEventListener("keydown", onKeydown);
+  if (doc) {
+    doc.addEventListener("keydown", onKeydown);
+    doc.addEventListener("keyup", onKeyup);
+  }
 
   ctl.refresh = refreshState;
   ctl.start = () => {
@@ -9485,12 +9820,13 @@ function initCommandBar(els, deps) {
       clearInterval(ctl.poller);
       ctl.poller = null;
     }
+    stopListenTimer();
     clearConfirm();
   };
   return ctl;
 }
 
-return { previewLine, demoOrder, spendLine, downsampleLinear, encodeWavPCM, initCommandBar, CONFIRM_MS, STATE_POLL_MS, MIC_RATE };
+return { pickRecorderMimeType, chipRole, escapeHtml, hostIds, exampleOrders, chipsHtml, tryHtml, defaultDecodeAudioData, previewLine, demoOrder, spendLine, downsampleLinear, encodeWavPCM, initCommandBar, CONFIRM_MS, STATE_POLL_MS, MIC_RATE, RECORD_TIMESLICE_MS, MIN_RECORD_MS, LISTEN_TICK_MS, STOP_TIMEOUT_MS, RECORDER_MIME_CANDIDATES, NO_AUDIO_MESSAGE, TOO_QUICK_MESSAGE };
 })();
 const __mod_arena__ = (() => {
 "use strict";
@@ -11802,6 +12138,8 @@ const els = {
   cmdConfirm: document.getElementById("cmdConfirm"),
   cmdSpend: document.getElementById("cmdSpend"),
   cmdNote: document.getElementById("cmdNote"),
+  cmdHosts: document.getElementById("cmdHosts"),
+  cmdTry: document.getElementById("cmdTry"),
 };
 
 const controls = {
@@ -13307,6 +13645,7 @@ async function boot() {
       transcript: els.cmdTranscript, preview: els.cmdPreview,
       previewLine: els.cmdPreviewLine, confirm: els.cmdConfirm,
       spend: els.cmdSpend, note: els.cmdNote,
+      chips: els.cmdHosts, tryline: els.cmdTry,
     },
     {
       hosts: () => (store.layout && store.layout.hosts
