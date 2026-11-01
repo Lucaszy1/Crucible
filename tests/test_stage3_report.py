@@ -1,4 +1,4 @@
-"""Hermetic tests for the Stage 3 parity table (Open vs Spark blue).
+"""Hermetic tests for Stage 3 report sections.
 
 No Docker and no model calls. Fixture benches are built under tmp_path;
 only scripts/stage3_report.py runs, against local summary and jsonl files.
@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import stage3_report
 
 CELL = "model-briefed-sensors-on-memory-off"
+CELL_OFF = "model-briefed-sensors-off-memory-off"
 CSV_FIELDS = ["episode", "cell", "intrusion", "contained_after_intrusion",
               "secret_read", "relevant_detection_delay", "detection_delay",
               "time_to_contain", "downtime_pct", "cost", "scenario_id",
@@ -55,6 +56,22 @@ def _row(seed: int, *, intrusion=True, contained=True, secret=False,
             "scenario_seed": str(seed), "scenario_difficulty": "easy"}
 
 
+def _off_row(seed: int, *, intrusion=True, contained=True, secret=False,
+             relevant=5, delay=10, contain=20, downtime=5.0,
+             cost=0.75) -> dict:
+    name = f"gen-{seed}-easy-{CELL_OFF}-1"
+    return {"episode": name, "cell": CELL_OFF,
+            "intrusion": "True" if intrusion else "False",
+            "contained_after_intrusion": "True" if contained else "False",
+            "secret_read": "True" if secret else "False",
+            "relevant_detection_delay": str(relevant),
+            "detection_delay": str(delay),
+            "time_to_contain": str(contain) if contained else "",
+            "downtime_pct": str(downtime), "cost": str(cost),
+            "scenario_id": f"scn-{seed}-easy-a0",
+            "scenario_seed": str(seed), "scenario_difficulty": "easy"}
+
+
 def _scaffold(tmp_path: Path) -> dict:
     heldout = tmp_path / "heldout"
     sensors = tmp_path / "sensors"
@@ -66,7 +83,8 @@ def _scaffold(tmp_path: Path) -> dict:
 
 
 def _run_report(tmp_path: Path, scaffold: dict, *, briefed: Path,
-                spark: Path, frontier: Path | None = None) -> tuple:
+                spark: Path, frontier: Path | None = None,
+                sensors_off: Path | None = None) -> tuple:
     out_md = tmp_path / "out.md"
     out_json = tmp_path / "out.json"
     spend = tmp_path / "spend.jsonl"
@@ -80,6 +98,9 @@ def _run_report(tmp_path: Path, scaffold: dict, *, briefed: Path,
         "--xcheck", str(tmp_path / "missing-xcheck"),
         "--briefed", str(briefed),
         "--briefed-spark", str(spark),
+        "--briefed-sensors-off", str(sensors_off)
+        if sensors_off is not None
+        else str(tmp_path / "missing-sensors-off"),
         "--frontier", str(frontier) if frontier is not None
         else str(tmp_path / "missing-frontier"),
         "--frozen", str(scaffold["frozen"]),
@@ -412,3 +433,120 @@ def test_frontier_excludes_classic_episode(tmp_path):
     assert "0 of 2 red turns (0.0%)" in md
     assert "1 of 2 blue turns (50.0%)" in md
     assert "across 1 of 2 episodes" in md
+
+
+# --- sensors ablation with a model red ---
+
+
+def test_sensors_ablation_skipped_when_missing(tmp_path):
+    scaffold = _scaffold(tmp_path)
+    briefed = tmp_path / "briefed-open"
+    rows = [_row(9001), _row(9002)]
+    _write_csv(briefed, rows)
+    for row in rows:
+        _write_episode(briefed, row["episode"])
+    md, payload = _run_report(tmp_path, scaffold, briefed=briefed,
+                              spark=tmp_path / "missing-spark")
+    assert "Sensors ablation" not in md
+    assert payload.get("sensors_ablation") is None
+    assert "briefed_sensors_off" not in payload.get("benches", {})
+
+
+def test_sensors_ablation_table_reports_both_arms(tmp_path):
+    scaffold = _scaffold(tmp_path)
+    briefed = tmp_path / "briefed-open"
+    on_rows = [_row(9001, relevant=7, delay=12, contain=22,
+                    downtime=6.0, cost=0.65),
+               _row(9002, relevant=8, delay=13, contain=24,
+                    downtime=7.0, cost=0.66)]
+    _write_csv(briefed, on_rows)
+    _write_episode(briefed, on_rows[0]["episode"],
+                   blue_note="Model returned no tool call, using baseline.")
+    _write_episode(briefed, on_rows[1]["episode"])
+    off_bench = tmp_path / "briefed-sensors-off"
+    off_rows = [_off_row(9001, contained=True, secret=True, relevant=5,
+                         delay=10, contain=20, downtime=5.0, cost=0.75),
+                _off_row(9002, contained=False, secret=False, relevant=6,
+                         delay=11, downtime=5.5, cost=0.76)]
+    _write_csv(off_bench, off_rows)
+    for row in off_rows:
+        _write_episode(off_bench, row["episode"],
+                       red_note="Model reply hit the token limit, "
+                                "using baseline.")
+    md, payload = _run_report(tmp_path, scaffold, briefed=briefed,
+                              spark=tmp_path / "missing-spark",
+                              sensors_off=off_bench)
+    assert "## Sensors ablation with a model red" in md
+    assert "2 of 2" in md  # same networks
+    assert "Sensors-on" in md and "Sensors-off" in md
+    # Intrusions, containment, secret reads for both arms.
+    assert "2/2" in md  # intrusions both arms
+    assert "1/2" in md  # off containment and secret reads
+    assert "0/2" in md  # on secret reads
+    # Delays, contain, downtime, cost.
+    assert "7.5" in md  # on med relevant (7+8)/2
+    assert "5.5" in md  # off med relevant (5+6)/2
+    assert "1.31" in md  # on total cost 0.65+0.66
+    assert "1.51" in md  # off total cost 0.75+0.76
+    # Fallback counts for red and blue.
+    assert "1 of 2" in md
+    assert "Baseline fallbacks: red Sensors-on" in md
+    # Neutral: names the better arm per metric.
+    lowered = md.lower()
+    assert "sensors-on fewer" in lowered  # secret reads: on 0 vs off 1
+    assert "sensors-off faster" in lowered  # relevant delay: off wins
+    assert "sensors-on higher" in lowered  # containment: on 2/2 vs 1/2
+    # Plain failure statements with episode ids.
+    assert off_rows[1]["episode"] in md  # uncontained intrusion named
+    assert off_rows[0]["episode"] in md  # secret-read episode named
+    assert "failed to contain 1 of 2 intrusions" in md
+    assert "protected files were read in 1 of 2 intrusions" in md
+    assert "Sensors-on blue contained all 2 intrusions." in md
+    assert "Sensors-on: no protected file was read in 2 intrusions." in md
+    # No causal claim about sensors, no claim about memory.
+    ablation = payload.get("sensors_ablation")
+    assert ablation is not None
+    sentences = " ".join(ablation["sentences"])
+    scrubbed = sentences
+    for row in on_rows + off_rows:
+        scrubbed = scrubbed.replace(row["episode"], "")
+    assert "memory" not in scrubbed.lower()
+    assert "does not conclude that sensors caused the difference" in sentences
+    for claim in ("because sensors", "due to sensors", "sensors improve",
+                  "sensors help"):
+        assert claim not in sentences.lower()
+    section = md.split("## Sensors ablation with a model red", 1)[1]
+    section = section.split("## Claims", 1)[0]
+    scrubbed_section = section
+    for row in on_rows + off_rows:
+        scrubbed_section = scrubbed_section.replace(row["episode"], "")
+    assert "memory" not in scrubbed_section.lower()
+    assert ablation["same_networks"]["shared_n"] == 2
+    assert ablation["on"]["intrusion"]["hits"] == 2
+    assert ablation["off"]["secret_read"]["hits"] == 1
+    assert ablation["uncontained_episodes"]["off"] == [
+        off_rows[1]["episode"]]
+    assert ablation["secret_read_episodes"]["off"] == [
+        off_rows[0]["episode"]]
+    assert payload["benches"]["briefed_sensors_off"] == str(off_bench)
+    assert (stage3_report.SENSORS_ABLATION_NON_CLAIM
+            in payload["non_claims"])
+
+
+def test_sensors_ablation_reports_whichever_better(tmp_path):
+    scaffold = _scaffold(tmp_path)
+    # Flip the secret-read winner: off now clean, on leaks once.
+    briefed = tmp_path / "briefed-open"
+    on_rows = [_row(9001, secret=True), _row(9002, secret=False)]
+    _write_csv(briefed, on_rows)
+    for row in on_rows:
+        _write_episode(briefed, row["episode"])
+    off_bench = tmp_path / "briefed-sensors-off"
+    off_rows = [_off_row(9001), _off_row(9002)]
+    _write_csv(off_bench, off_rows)
+    for row in off_rows:
+        _write_episode(off_bench, row["episode"])
+    md, _ = _run_report(tmp_path, scaffold, briefed=briefed,
+                        spark=tmp_path / "missing-spark",
+                        sensors_off=off_bench)
+    assert "sensors-off fewer" in md.lower()

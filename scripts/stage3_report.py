@@ -52,6 +52,7 @@ CELL_B = "solver-sensors-on-memory-off"
 CELL_C = "solver-sensors-on-memory-on"
 CELL_BONUS = "solver-sensors-off-memory-on"
 BRIEFED_CELL = "model-briefed-sensors-on-memory-off"
+BRIEFED_SENSORS_OFF_CELL = "model-briefed-sensors-off-memory-off"
 BRIEFED_LABEL = "briefed-red-vs-Spark-Open"
 BRIEFED_SPARK_LABEL = "briefed-red-vs-Spark"
 
@@ -718,6 +719,28 @@ def render_markdown(payload: dict) -> str:
                   "## Frontier tier (briefed red, Open blue)",
                   ""]
         lines += [f"- {sentence}" for sentence in frontier["sentences"]]
+    ablation = payload.get("sensors_ablation")
+    if ablation is not None:
+        shared_n = ablation["same_networks"]["shared_n"]
+        lines += ["",
+                  "## Sensors ablation with a model red",
+                  "",
+                  "| arm | n | same nets | intrusions | contained | "
+                  "secret reads | med delay | med relevant | med contain | "
+                  "downtime | downtime cont | cost | red fb | blue fb |",
+                  "|------|---|-----------|------------|-----------|"
+                  "--------------|-----------|--------------|-------------|"
+                  "----------|---------------|------|--------|---------|"]
+        lines.append(_parity_row("Sensors-on", ablation["on"], shared_n))
+        lines.append(_parity_row("Sensors-off", ablation["off"], shared_n))
+        lines += ["",
+                  "Same nets reads shared seeds over arm episodes; med "
+                  "delay is the median first-report delay, med relevant "
+                  "the median relevant delay; downtime is the mean over "
+                  "all episodes, downtime cont the mean over contained "
+                  "episodes; red/blue fb read fallbacks over turns.",
+                  ""]
+        lines += [f"- {sentence}" for sentence in ablation["sentences"]]
     lines += ["", "## Claims", ""]
     lines += [f"- {claim}" for claim in payload["claims"]]
     lines += ["", "## Non-claims", ""]
@@ -842,6 +865,38 @@ def _higher_wins(open_val, spark_val, noun: str) -> str:
     if open_val > spark_val:
         return f"Open {noun}"
     return f"Spark {noun}"
+
+
+def _labeled_lower_wins(a_val, b_val, label_a: str, label_b: str,
+                       noun: str) -> str:
+    """Neutral winner phrase for lower-is-better metrics, custom labels."""
+    if a_val is None and b_val is None:
+        return "neither reported"
+    if a_val is None:
+        return f"{label_b} reported, {label_a} did not"
+    if b_val is None:
+        return f"{label_a} reported, {label_b} did not"
+    if a_val == b_val:
+        return "tied"
+    if a_val < b_val:
+        return f"{label_a} {noun}"
+    return f"{label_b} {noun}"
+
+
+def _labeled_higher_wins(a_val, b_val, label_a: str, label_b: str,
+                        noun: str) -> str:
+    """Neutral winner phrase for higher-is-better metrics, custom labels."""
+    if a_val is None and b_val is None:
+        return "neither applies"
+    if a_val is None:
+        return f"{label_b} applies, {label_a} n/a"
+    if b_val is None:
+        return f"{label_a} applies, {label_b} n/a"
+    if a_val == b_val:
+        return "tied"
+    if a_val > b_val:
+        return f"{label_a} {noun}"
+    return f"{label_b} {noun}"
 
 
 def _rate_of(cell: dict, key: str):
@@ -1018,6 +1073,229 @@ PARITY_NON_CLAIM = (
 )
 
 
+def _sensors_ablation_outcome_sentences(label: str, cell: dict,
+                                       uncontained: list,
+                                       secret_eps: list) -> list:
+    """Plain containment and secret-read outcomes, naming episode ids."""
+    cont = cell["contained_after_intrusion"]
+    sec = cell["secret_read"]
+    out = []
+    if cont["n"] == 0:
+        out.append(f"{label} had no intrusions, so containment does not "
+                   f"apply.")
+    elif uncontained:
+        out.append(f"{label} blue failed to contain {len(uncontained)} of "
+                   f"{cont['n']} intrusions: {', '.join(uncontained)}.")
+    else:
+        out.append(f"{label} blue contained all {cont['hits']} intrusions.")
+    if sec["n"] == 0:
+        out.append(f"{label} had no intrusions, so secret reads do not "
+                   f"apply.")
+    elif secret_eps:
+        out.append(f"{label}: protected files were read in {len(secret_eps)} "
+                   f"of {sec['n']} intrusions: {', '.join(secret_eps)}.")
+    else:
+        out.append(f"{label}: no protected file was read in {sec['n']} "
+                   f"intrusions.")
+    return out
+
+
+def _sensors_ablation_sentences(on_cell: dict, off_cell: dict, shared: list,
+                               on_n: int, off_n: int, *,
+                               uncontained_on: list,
+                               uncontained_off: list,
+                               secret_on: list,
+                               secret_off: list) -> list:
+    """Neutral per-metric sentences; each names the better arm or ties."""
+    intr_on = on_cell["intrusion"]
+    intr_off = off_cell["intrusion"]
+    cont_on = on_cell["contained_after_intrusion"]
+    cont_off = off_cell["contained_after_intrusion"]
+    sec_on = on_cell["secret_read"]
+    sec_off = off_cell["secret_read"]
+    if on_n == off_n:
+        nets = (f"Same networks: {len(shared)} of {on_n} seeds overlap "
+                f"({_seed_span(shared)}).")
+    else:
+        nets = (f"Same networks: {len(shared)} shared "
+                f"({on_n} Sensors-on, {off_n} Sensors-off; "
+                f"{_seed_span(shared)}).")
+    intr = (f"Intrusions: Sensors-on {intr_on['hits']}/{intr_on['n']}, "
+            f"Sensors-off {intr_off['hits']}/{intr_off['n']} "
+            f"({_labeled_lower_wins(_rate_of(on_cell, 'intrusion'),
+                                   _rate_of(off_cell, 'intrusion'),
+                                   'Sensors-on', 'Sensors-off', 'fewer')}).")
+    cont = (f"Containment given intrusion: Sensors-on {cont_on['hits']}/"
+            f"{cont_on['n']}, Sensors-off {cont_off['hits']}/"
+            f"{cont_off['n']} "
+            f"({_labeled_higher_wins(_rate_of(on_cell,
+                                             'contained_after_intrusion'),
+                                    _rate_of(off_cell,
+                                             'contained_after_intrusion'),
+                                    'Sensors-on', 'Sensors-off',
+                                    'higher')}).")
+    sec = (f"Secret reads given intrusion: Sensors-on {sec_on['hits']}/"
+           f"{sec_on['n']}, Sensors-off {sec_off['hits']}/{sec_off['n']} "
+           f"({_labeled_lower_wins(_rate_of(on_cell, 'secret_read'),
+                                   _rate_of(off_cell, 'secret_read'),
+                                   'Sensors-on', 'Sensors-off', 'fewer')}).")
+    delay = (f"Median relevant detection delay: Sensors-on "
+             f"{_num(on_cell['median_relevant_delay'])}, Sensors-off "
+             f"{_num(off_cell['median_relevant_delay'])} events "
+             f"({_labeled_lower_wins(on_cell['median_relevant_delay'],
+                                     off_cell['median_relevant_delay'],
+                                     'Sensors-on', 'Sensors-off',
+                                     'faster')}).")
+    contain = (f"Median time to contain: Sensors-on "
+               f"{_num(on_cell['median_time_to_contain'])}, Sensors-off "
+               f"{_num(off_cell['median_time_to_contain'])} events "
+               f"({_labeled_lower_wins(on_cell['median_time_to_contain'],
+                                       off_cell['median_time_to_contain'],
+                                       'Sensors-on', 'Sensors-off',
+                                       'faster')}).")
+    down = (f"Mean downtime: Sensors-on "
+            f"{_num(on_cell['mean_downtime_pct'])}%, Sensors-off "
+            f"{_num(off_cell['mean_downtime_pct'])}% "
+            f"({_labeled_lower_wins(on_cell['mean_downtime_pct'],
+                                    off_cell['mean_downtime_pct'],
+                                    'Sensors-on', 'Sensors-off', 'lower')}; "
+            f"contained means Sensors-on "
+            f"{_num(on_cell['mean_downtime_contained_pct'])}%, Sensors-off "
+            f"{_num(off_cell['mean_downtime_contained_pct'])}%).")
+    cost = (f"Cost (Meta): Sensors-on ${on_cell['total_cost_usd']:.2f}, "
+            f"Sensors-off ${off_cell['total_cost_usd']:.2f} "
+            f"({_labeled_lower_wins(on_cell['total_cost_usd'],
+                                    off_cell['total_cost_usd'],
+                                    'Sensors-on', 'Sensors-off', 'lower')}).")
+    census_on = on_cell.get("fallback_census") or {}
+    census_off = off_cell.get("fallback_census") or {}
+    fall = (f"Baseline fallbacks: red Sensors-on "
+            f"{census_on.get('red_fallbacks', 0)}"
+            f" of {census_on.get('red_turns', 0)}, Sensors-off "
+            f"{census_off.get('red_fallbacks', 0)} of "
+            f"{census_off.get('red_turns', 0)}; blue Sensors-on "
+            f"{census_on.get('blue_fallbacks', 0)} of "
+            f"{census_on.get('blue_turns', 0)}, Sensors-off "
+            f"{census_off.get('blue_fallbacks', 0)} of "
+            f"{census_off.get('blue_turns', 0)}.")
+    sentences = [nets, intr, cont, sec, delay, contain, down, cost, fall]
+    sentences += _sensors_ablation_outcome_sentences(
+        "Sensors-on", on_cell, uncontained_on, secret_on)
+    sentences += _sensors_ablation_outcome_sentences(
+        "Sensors-off", off_cell, uncontained_off, secret_off)
+    note = (f"Descriptive only at n={on_cell['n']} Sensors-on and "
+            f"n={off_cell['n']} Sensors-off; briefed red re-rolled between "
+            f"benches, so pairing is approximate. This section compares "
+            f"the two runs; it does not conclude that sensors caused the "
+            f"difference.")
+    sentences.append(note)
+    return sentences
+
+
+def build_sensors_ablation(on_dir: Path, off_dir: Path, on_cell: dict,
+                           off_cell: dict) -> dict:
+    """Compare the two briefed-red runs, sensors-on vs sensors-off.
+
+    Returns shared seeds plus neutral per-metric sentences that name
+    whichever arm does better. Makes no causal claim about sensors;
+    callers add the disclaimer that pairing is approximate because
+    briefed red re-rolled between benches.
+    """
+    on_seeds = _scenario_seeds(on_dir, BRIEFED_CELL)
+    off_seeds = _scenario_seeds(off_dir, BRIEFED_SENSORS_OFF_CELL)
+    shared = sorted(set(on_seeds) & set(off_seeds),
+                    key=lambda value: (len(value), value))
+    on_rows = [row for row in _csv_rows(on_dir)
+               if row.get("cell") == BRIEFED_CELL]
+    off_rows = [row for row in _csv_rows(off_dir)
+                if row.get("cell") == BRIEFED_SENSORS_OFF_CELL]
+    uncontained_on = sorted(row.get("episode", "") for row in on_rows
+                            if row.get("intrusion") == "True"
+                            and row.get("contained_after_intrusion")
+                            != "True")
+    uncontained_off = sorted(row.get("episode", "") for row in off_rows
+                             if row.get("intrusion") == "True"
+                             and row.get("contained_after_intrusion")
+                             != "True")
+    secret_on = sorted(row.get("episode", "") for row in on_rows
+                       if row.get("secret_read") == "True")
+    secret_off = sorted(row.get("episode", "") for row in off_rows
+                        if row.get("secret_read") == "True")
+    return {"on_bench": str(on_dir), "off_bench": str(off_dir),
+            "cell_on": BRIEFED_CELL, "cell_off": BRIEFED_SENSORS_OFF_CELL,
+            "same_networks": {"shared": shared, "shared_n": len(shared),
+                              "on_n": len(on_seeds),
+                              "off_n": len(off_seeds),
+                              "on_only": sorted(set(on_seeds)
+                                                - set(off_seeds)),
+                              "off_only": sorted(set(off_seeds)
+                                                 - set(on_seeds))},
+            "on": on_cell, "off": off_cell,
+            "uncontained_episodes": {"on": uncontained_on,
+                                     "off": uncontained_off},
+            "secret_read_episodes": {"on": secret_on,
+                                     "off": secret_off},
+            "sentences": _sensors_ablation_sentences(
+                on_cell, off_cell, shared, len(on_seeds), len(off_seeds),
+                uncontained_on=uncontained_on,
+                uncontained_off=uncontained_off,
+                secret_on=secret_on, secret_off=secret_off)}
+
+
+def build_sensors_ablation_claims(ablation: dict) -> list:
+    """Short neutral claims for the sensors ablation (no causal conclusion)."""
+    on_cell = ablation["on"]
+    off_cell = ablation["off"]
+    shared_n = ablation["same_networks"]["shared_n"]
+    intr_on = on_cell["intrusion"]
+    intr_off = off_cell["intrusion"]
+    cont_on = on_cell["contained_after_intrusion"]
+    cont_off = off_cell["contained_after_intrusion"]
+    sec_on = on_cell["secret_read"]
+    sec_off = off_cell["secret_read"]
+    claims = [
+        f"Sensors ablation with briefed red on {shared_n} shared networks "
+        f"(descriptive only): Sensors-on intrusions {intr_on['hits']}/"
+        f"{intr_on['n']}, Sensors-off {intr_off['hits']}/{intr_off['n']}; "
+        f"containment Sensors-on {cont_on['hits']}/{cont_on['n']}, "
+        f"Sensors-off {cont_off['hits']}/{cont_off['n']}; secret reads "
+        f"Sensors-on {sec_on['hits']}/{sec_on['n']}, Sensors-off "
+        f"{sec_off['hits']}/{sec_off['n']}.",
+        f"Sensors ablation delays and cost: median relevant delay "
+        f"Sensors-on {_num(on_cell['median_relevant_delay'])} vs "
+        f"Sensors-off {_num(off_cell['median_relevant_delay'])}, median "
+        f"time to contain Sensors-on "
+        f"{_num(on_cell['median_time_to_contain'])} vs Sensors-off "
+        f"{_num(off_cell['median_time_to_contain'])}, cost Sensors-on "
+        f"${on_cell['total_cost_usd']:.2f} vs Sensors-off "
+        f"${off_cell['total_cost_usd']:.2f}.",
+    ]
+    uncontained = ablation.get("uncontained_episodes") or {}
+    secret_eps = ablation.get("secret_read_episodes") or {}
+    for label, key in (("Sensors-on", "on"), ("Sensors-off", "off")):
+        missing = uncontained.get(key) or []
+        if missing:
+            cont = cont_on if key == "on" else cont_off
+            claims.append(
+                f"{label} blue failed to contain {len(missing)} of "
+                f"{cont['n']} intrusions: {', '.join(missing)}.")
+        leaked = secret_eps.get(key) or []
+        if leaked:
+            sec = sec_on if key == "on" else sec_off
+            claims.append(
+                f"{label}: protected files were read in {len(leaked)} of "
+                f"{sec['n']} intrusions: {', '.join(leaked)}.")
+    return claims
+
+
+SENSORS_ABLATION_NON_CLAIM = (
+    "The sensors-on vs sensors-off comparison with briefed red pairs "
+    "across benches by scenario; briefed red re-rolled between benches, "
+    "so pairing is approximate and descriptive only. It does not conclude "
+    "that sensors caused any difference."
+)
+
+
 def _fallback_sentence(cell: dict) -> str:
     """Baseline-fallback counts with turns, percent, and episodes."""
     census = cell.get("fallback_census") or {}
@@ -1148,6 +1426,11 @@ def parse_args(argv=None):
                         default="runs/bench-stage3-briefed-heldout-blue-spark",
                         help="Spark-blue repeat of the briefed held-out bench; "
                         "the parity section is skipped quietly when missing")
+    parser.add_argument("--briefed-sensors-off",
+                        default="runs/bench-stage3-briefed-heldout-sensors-off",
+                        help="Sensors-off repeat of the briefed held-out "
+                        "bench; the sensors ablation section is skipped "
+                        "quietly when missing")
     parser.add_argument("--frontier",
                         default="runs/bench-stage3-frontier",
                         help="Frontier-tier bench; the frontier section is "
@@ -1269,6 +1552,23 @@ def main(argv=None) -> int:
             cell["fallback_census"] = _fallback_census(
                 briefed_spark, episodes)
             reference[BRIEFED_SPARK_LABEL] = cell
+    briefed_sensors_off = Path(args.briefed_sensors_off)
+    off_cell = None
+    if (briefed_sensors_off / "summary.csv").exists():
+        candidate = summarize_cell(
+            briefed_sensors_off, BRIEFED_SENSORS_OFF_CELL)
+        if candidate["n"]:
+            off_episodes = [row.get("episode", "") for row in
+                            _csv_rows(briefed_sensors_off)
+                            if row.get("cell")
+                            == BRIEFED_SENSORS_OFF_CELL]
+            candidate["baseten_tokens"] = _briefed_baseten_tokens(
+                briefed_sensors_off, off_episodes,
+                spend_file=Path(args.spend_file),
+                archive_dir=Path(args.archive_dir))
+            candidate["fallback_census"] = _fallback_census(
+                briefed_sensors_off, off_episodes)
+            off_cell = candidate
     # The frontier bench reuses the briefed cell key (same red,
     # sensors, and memory); the bench dir and frontier seeds tell
     # it apart from the held-out run.
@@ -1312,6 +1612,12 @@ def main(argv=None) -> int:
         benches["briefed_spark"] = str(briefed_spark)
     if frontier is not None:
         benches["frontier"] = str(frontier_dir)
+    ablation = None
+    on_cell = reference.get(BRIEFED_LABEL)
+    if on_cell is not None and off_cell is not None:
+        ablation = build_sensors_ablation(
+            briefed, briefed_sensors_off, on_cell, off_cell)
+        benches["briefed_sensors_off"] = str(briefed_sensors_off)
     claims = build_claims(comparisons, cells, reference, void)
     non_claims = list(NON_CLAIMS)
     if parity is not None:
@@ -1320,6 +1626,9 @@ def main(argv=None) -> int:
     if frontier is not None:
         claims += frontier["sentences"]
         non_claims.append(FRONTIER_NON_CLAIM)
+    if ablation is not None:
+        claims += build_sensors_ablation_claims(ablation)
+        non_claims.append(SENSORS_ABLATION_NON_CLAIM)
     claims += [REPLAY_NOTE]
     payload = {
         "stage": 3,
@@ -1338,6 +1647,8 @@ def main(argv=None) -> int:
         payload["parity"] = parity
     if frontier is not None:
         payload["frontier"] = frontier
+    if ablation is not None:
+        payload["sensors_ablation"] = ablation
     md_path = Path(args.out_md)
     md_path.parent.mkdir(parents=True, exist_ok=True)
     md_path.write_text(render_markdown(payload), encoding="utf-8")
