@@ -550,3 +550,46 @@ def test_sensors_ablation_reports_whichever_better(tmp_path):
                         spark=tmp_path / "missing-spark",
                         sensors_off=off_bench)
     assert "sensors-off fewer" in md.lower()
+
+
+def test_scoped_spend_excludes_renamed_archived_file_per_episode(tmp_path):
+    """A renamed archived jsonl cuts only its own episode, not the bench.
+
+    The sensors-off rerun moved the degraded gen-9015 log to
+    runs/archive/ with a timeout suffix instead of under a subdir.
+    Spend before that file's mtime must be cut for gen-9015 only;
+    other episodes keep their early entries.
+    """
+    bench = tmp_path / "bench"
+    rows = [_off_row(9015), _off_row(9016)]
+    _write_csv(bench, rows)
+    base = 1793570000.0
+    for row in rows:
+        _write_episode(bench, row["episode"])
+    # 9015 re-ran cleanly after the degraded log was archived; 9016 ran once.
+    _touch(bench / f"{rows[0]['episode']}.jsonl", base + 20000.0)
+    _touch(bench / f"{rows[1]['episode']}.jsonl", base + 5000.0)
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    degraded = archive / "sensors-off-gen-9015-degraded-timeout-20261101.jsonl"
+    degraded.write_text("{}\n", encoding="utf-8")
+    _touch(degraded, base + 10000.0)
+    spend = tmp_path / "spend.jsonl"
+    entries = [
+        # Degraded 9015 run: before the archived file, must be cut.
+        {"ts": base + 1000.0, "exercise_id": rows[0]["episode"],
+         "model": "meta-models/muse-spark-open-1026", "host": "baseten",
+         "input_tokens": 70000, "output_tokens": 7000, "cost_usd": 0.0},
+        # Clean 9015 run: after the archived file, must be kept.
+        {"ts": base + 15000.0, "exercise_id": rows[0]["episode"],
+         "model": "meta-models/muse-spark-open-1026", "host": "baseten",
+         "input_tokens": 1000, "output_tokens": 100, "cost_usd": 0.0},
+        # 9016 ran before the archive move; its entries must be kept.
+        {"ts": base + 2000.0, "exercise_id": rows[1]["episode"],
+         "model": "meta-models/muse-spark-open-1026", "host": "baseten",
+         "input_tokens": 2000, "output_tokens": 200, "cost_usd": 0.0},
+    ]
+    _write_spend(spend, entries)
+    episodes = [row["episode"] for row in rows]
+    assert stage3_report._briefed_baseten_tokens(
+        bench, episodes, spend_file=spend, archive_dir=archive) == 3300

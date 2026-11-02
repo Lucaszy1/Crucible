@@ -40,6 +40,7 @@ import csv
 import hashlib
 import json
 import math
+import re
 import statistics
 import sys
 from datetime import datetime, timezone
@@ -109,6 +110,22 @@ def _archive_dirs(archive_dir: Path) -> list:
         return []
 
 
+def _archive_files(archive_dir: Path) -> list:
+    try:
+        return [path for path in archive_dir.iterdir()
+                if path.is_file() and path.suffix == ".jsonl"]
+    except OSError:
+        return []
+
+
+_GEN_RE = re.compile(r"gen-(\d+)")
+
+
+def _gen_seed(name: str) -> str | None:
+    match = _GEN_RE.search(name or "")
+    return match.group(1) if match else None
+
+
 def _scoped_spend(bench_dir: Path, episodes: list, *,
                  spend_file: Path = SPEND_FILE,
                  archive_dir: Path = ARCHIVE_DIR) -> list:
@@ -117,10 +134,13 @@ def _scoped_spend(bench_dir: Path, episodes: list, *,
     Reruns reuse episode ids, and the spend log still holds the
     archived 401 run under the same ids, so entries at or before
     each archived log's mtime are cut; the rest, up to this bench's
-    log plus a referee tail, is this bench's run.
+    log plus a referee tail, is this bench's run. Renamed single-file
+    archives (the degraded gen-9015 log moved with a timeout suffix)
+    cut only their own episode by scenario seed, never the whole bench.
     """
     by_episode = _read_spend(spend_file)
     archived = _archive_dirs(archive_dir)
+    loose = _archive_files(archive_dir)
     scoped = []
     for episode in episodes:
         mine = _log_mtime(bench_dir / f"{episode}.jsonl")
@@ -130,6 +150,15 @@ def _scoped_spend(bench_dir: Path, episodes: list, *,
         for old in archived:
             seen = _log_mtime(old / f"{episode}.jsonl")
             if seen is not None and seen < mine:
+                floor = max(floor, seen)
+        want = _gen_seed(episode)
+        for cand in loose:
+            seen = _log_mtime(cand)
+            if seen is None or seen >= mine:
+                continue
+            if cand.name == f"{episode}.jsonl":
+                floor = max(floor, seen)
+            elif want is not None and _gen_seed(cand.name) == want:
                 floor = max(floor, seen)
         for entry in by_episode.get(episode, []):
             try:
@@ -1100,6 +1129,14 @@ def _sensors_ablation_outcome_sentences(label: str, cell: dict,
     return out
 
 
+SENSORS_OFF_RERUN_NOTE = (
+    "Episode gen-9015 hit a model timeout, the degraded log was moved to "
+    "runs/archive/sensors-off-gen-9015-degraded-timeout-20261101.jsonl, "
+    "and the episode was re-run cleanly; token and cost scoping excludes "
+    "the archived log."
+)
+
+
 def _sensors_ablation_sentences(on_cell: dict, off_cell: dict, shared: list,
                                on_n: int, off_n: int, *,
                                uncontained_on: list,
@@ -1183,6 +1220,8 @@ def _sensors_ablation_sentences(on_cell: dict, off_cell: dict, shared: list,
         "Sensors-on", on_cell, uncontained_on, secret_on)
     sentences += _sensors_ablation_outcome_sentences(
         "Sensors-off", off_cell, uncontained_off, secret_off)
+    if "9015" in (shared or []):
+        sentences.append(SENSORS_OFF_RERUN_NOTE)
     note = (f"Descriptive only at n={on_cell['n']} Sensors-on and "
             f"n={off_cell['n']} Sensors-off; briefed red re-rolled between "
             f"benches, so pairing is approximate. This section compares "
