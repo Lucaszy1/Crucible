@@ -3594,7 +3594,20 @@ function verdictCard(ev) {
   };
 }
 
-return { isBlockedAttempt, isSecretRead, effectHost, choreograph, verdictWord, pressureFromEvents, integrityFromEvents, latestByActor, httpLeakTokens, logLineIds, verdictCard, ARENA_HOSTS };
+// Most recent auditor verdict at or before the cursor. The verdict
+// card follows this, not a playback timer, so pause and scrub keep
+// the card and it clears only before its event. Pure.
+function latestAuditorEvent(eventList, cursor) {
+  const list = eventList || [];
+  const at = Math.max(0, Math.min(list.length, cursor || 0));
+  for (let i = at - 1; i >= 0; i -= 1) {
+    const ev = list[i];
+    if (ev && ev.actor === "auditor" && verdictCard(ev)) return ev;
+  }
+  return null;
+}
+
+return { isBlockedAttempt, isSecretRead, effectHost, choreograph, verdictWord, pressureFromEvents, integrityFromEvents, latestByActor, httpLeakTokens, logLineIds, verdictCard, latestAuditorEvent, ARENA_HOSTS };
 })();
 const __mod_stage__ = (() => {
 "use strict";
@@ -3609,7 +3622,7 @@ const __mod_stage__ = (() => {
 const { arenaGeometry, classicLayout, nodeLabels, roleSub } = __mod_layout__;
 const { controlBar, controlBarTip, displayOutcome, eventHost, hostBlocks, redNotches, reduceHostStates, scoreEvents } = __mod_state__;
 const { describeEvent } = __mod_story__;
-const { verdictCard } = __mod_choreography__;
+const { latestAuditorEvent, verdictCard } = __mod_choreography__;
 
 const STAGE_WORLD = { w: 1600, h: 900 };
 // Hosts fit inside this share of their band, leaving slack on every
@@ -4134,7 +4147,6 @@ function initStage(canvas, opts) {
       audCite: el("arenaAudCite"),
       audNote: el("arenaAudNote"),
     },
-    audTimer: 0,
   };
   if (typeof ResizeObserver === "function" && canvas) {
     refs.ro = new ResizeObserver(() => fitStage(refs));
@@ -4665,7 +4677,7 @@ function renderStageStatic(refs, events, cursor, opts, instant) {
     // ring and sparks survive the rebuild.
     trackBarTie(refs, bar, at, o.label || "Exercise", list.length, instant);
     updateStageHud(refs);
-    hideStageAuditor(refs, true);
+    syncStageAuditor(refs, list, at);
     drawStage(refs);
     return { states };
   }
@@ -4963,22 +4975,25 @@ function showStageAuditor(refs, ev) {
   if (hud.audNote) hud.audNote.textContent = String(card.rationale || "").slice(0, 140);
   hud.aud.className = card.word === "justified" ? "show" : "show bad";
   relayoutStage(refs);
-  if (refs.audTimer) clearTimeout(refs.audTimer);
-  refs.audTimer = setTimeout(() => hideStageAuditor(refs), 4200);
 }
 
 function hideStageAuditor(refs, silent) {
   if (!refs) return;
-  if (refs.audTimer) {
-    clearTimeout(refs.audTimer);
-    refs.audTimer = 0;
-  }
-  if (refs.hud.aud && refs.hud.aud.className !== "") {
+  if (refs.hud && refs.hud.aud && refs.hud.aud.className !== "") {
     refs.hud.aud.className = "";
     if (!silent) {
       relayoutStage(refs);
     }
   }
+}
+
+// Verdict card from the cursor: the most recent auditor event at or
+// before the cursor stays visible across pause and scrub, and clears
+// only when the cursor moves before it.
+function syncStageAuditor(refs, events, cursor) {
+  const found = latestAuditorEvent(events, cursor);
+  if (found) showStageAuditor(refs, found);
+  else hideStageAuditor(refs, true);
 }
 
 function flashStageHost(refs, host) {
@@ -5017,10 +5032,6 @@ function cancelStage(refs) {
   refs.surge = { red: 0, blue: 0 };
   refs.knock = { red: 0, blue: 0 };
   refs.charge = null;
-  if (refs.audTimer) {
-    clearTimeout(refs.audTimer);
-    refs.audTimer = 0;
-  }
   if (refs.capTimer) {
     clearTimeout(refs.capTimer);
     refs.capTimer = 0;
@@ -10796,7 +10807,7 @@ const __mod_arena__ = (() => {
 const { DEFAULT_WEIGHTS, hostBlocks, motionReduced, pressureValue, redNotches, reduceHostStates, scoreEvents, secretRead, shortResult } = __mod_state__;
 const { describeEvent } = __mod_story__;
 const { pathBetween } = __mod_network__;
-const { choreograph, effectHost, httpLeakTokens, latestByActor, logLineIds, verdictCard } = __mod_choreography__;
+const { choreograph, effectHost, httpLeakTokens, latestAuditorEvent, latestByActor, logLineIds, verdictCard } = __mod_choreography__;
 const { arenaGeometry, classicLayout, layoutHosts, nodeLabels, roleSub } = __mod_layout__;
 
 const RED = "#ff3b2f";
@@ -10983,7 +10994,7 @@ function initArena(canvas) {
     snap: null, shown: null,
     particles: [], texts: [], transients: [], bursts: [], speedLines: [],
     pending: [], queue: [], playing: false, runId: 0,
-    speed: 1, flash: null, audTimer: 0, capKey: "",
+    speed: 1, flash: null, capKey: "",
     cam: { ...CAM_HOME }, camTarget: { ...CAM_HOME }, focusUntil: 0,
     trauma: 0, hitstopUntil: 0,
     latencyEma: 16, clock: 0, floorDrift: 0,
@@ -12751,17 +12762,20 @@ function showAuditor(refs, ev) {
   if (hud.audCite) hud.audCite.textContent = card.ids.length > 0 ? `cites ${card.ids.join(", ")}` : "no cited lines";
   if (hud.audNote) hud.audNote.textContent = String(card.rationale || "").slice(0, 140);
   hud.aud.className = card.word === "justified" ? "show" : "show bad";
-  if (refs.audTimer) clearTimeout(refs.audTimer);
-  refs.audTimer = setTimeout(() => hideAuditor(refs), 4200);
 }
 
 function hideAuditor(refs) {
   if (!refs) return;
-  if (refs.audTimer) {
-    clearTimeout(refs.audTimer);
-    refs.audTimer = 0;
-  }
-  if (refs.hud.aud) refs.hud.aud.className = "";
+  if (refs.hud && refs.hud.aud) refs.hud.aud.className = "";
+}
+
+// Verdict card from the cursor: the most recent auditor event at or
+// before the cursor stays visible across pause and scrub, and clears
+// only when the cursor moves before it.
+function syncAuditor(refs, events, cursor) {
+  const found = latestAuditorEvent(events, cursor);
+  if (found) showAuditor(refs, found);
+  else hideAuditor(refs);
 }
 
 // ---------- static snapshot ----------
@@ -12911,6 +12925,7 @@ function renderArenaStatic(refs, events, cursor, opts, instant) {
       blueLine: blueLast ? describeEvent(blueLast) : "Blue is waiting.",
     };
     applyStatic(refs, states, blocks, slice, Boolean(instant));
+    syncAuditor(refs, list, at);
   }
   return { states, blocks, pressure, level: prog.level, score };
 }
