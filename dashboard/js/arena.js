@@ -12,7 +12,7 @@ import { describeEvent } from "./story.js";
 import { pathBetween } from "./network.js";
 import {
   choreograph, effectHost, httpLeakTokens,
-  latestByActor, logLineIds, verdictCard,
+  latestAuditorEvent, latestByActor, logLineIds, verdictCard,
 } from "./choreography.js";
 import {
   arenaGeometry, classicLayout, layoutHosts, nodeLabels, roleSub,
@@ -202,7 +202,7 @@ export function initArena(canvas) {
     snap: null, shown: null,
     particles: [], texts: [], transients: [], bursts: [], speedLines: [],
     pending: [], queue: [], playing: false, runId: 0,
-    speed: 1, flash: null, audTimer: 0, capKey: "",
+    speed: 1, flash: null, capKey: "",
     cam: { ...CAM_HOME }, camTarget: { ...CAM_HOME }, focusUntil: 0,
     trauma: 0, hitstopUntil: 0,
     latencyEma: 16, clock: 0, floorDrift: 0,
@@ -1970,17 +1970,20 @@ function showAuditor(refs, ev) {
   if (hud.audCite) hud.audCite.textContent = card.ids.length > 0 ? `cites ${card.ids.join(", ")}` : "no cited lines";
   if (hud.audNote) hud.audNote.textContent = String(card.rationale || "").slice(0, 140);
   hud.aud.className = card.word === "justified" ? "show" : "show bad";
-  if (refs.audTimer) clearTimeout(refs.audTimer);
-  refs.audTimer = setTimeout(() => hideAuditor(refs), 4200);
 }
 
 function hideAuditor(refs) {
   if (!refs) return;
-  if (refs.audTimer) {
-    clearTimeout(refs.audTimer);
-    refs.audTimer = 0;
-  }
-  if (refs.hud.aud) refs.hud.aud.className = "";
+  if (refs.hud && refs.hud.aud) refs.hud.aud.className = "";
+}
+
+// Verdict card from the cursor: the most recent auditor event at or
+// before the cursor stays visible across pause and scrub, and clears
+// only when the cursor moves before it.
+function syncAuditor(refs, events, cursor) {
+  const found = latestAuditorEvent(events, cursor);
+  if (found) showAuditor(refs, found);
+  else hideAuditor(refs);
 }
 
 // ---------- static snapshot ----------
@@ -2130,6 +2133,7 @@ export function renderArenaStatic(refs, events, cursor, opts, instant) {
       blueLine: blueLast ? describeEvent(blueLast) : "Blue is waiting.",
     };
     applyStatic(refs, states, blocks, slice, Boolean(instant));
+    syncAuditor(refs, list, at);
   }
   return { states, blocks, pressure, level: prog.level, score };
 }

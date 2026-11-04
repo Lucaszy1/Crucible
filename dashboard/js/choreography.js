@@ -295,3 +295,16 @@ export function verdictCard(ev) {
     rationale: String(result.rationale || ""),
   };
 }
+
+// Most recent auditor verdict at or before the cursor. The verdict
+// card follows this, not a playback timer, so pause and scrub keep
+// the card and it clears only before its event. Pure.
+export function latestAuditorEvent(eventList, cursor) {
+  const list = eventList || [];
+  const at = Math.max(0, Math.min(list.length, cursor || 0));
+  for (let i = at - 1; i >= 0; i -= 1) {
+    const ev = list[i];
+    if (ev && ev.actor === "auditor" && verdictCard(ev)) return ev;
+  }
+  return null;
+}

@@ -12,7 +12,7 @@ import {
   reduceHostStates, scoreEvents,
 } from "./state.js";
 import { describeEvent } from "./story.js";
-import { verdictCard } from "./choreography.js";
+import { latestAuditorEvent, verdictCard } from "./choreography.js";
 
 export const STAGE_WORLD = { w: 1600, h: 900 };
 // Hosts fit inside this share of their band, leaving slack on every
@@ -537,7 +537,6 @@ export function initStage(canvas, opts) {
       audCite: el("arenaAudCite"),
       audNote: el("arenaAudNote"),
     },
-    audTimer: 0,
   };
   if (typeof ResizeObserver === "function" && canvas) {
     refs.ro = new ResizeObserver(() => fitStage(refs));
@@ -1068,7 +1067,7 @@ export function renderStageStatic(refs, events, cursor, opts, instant) {
     // ring and sparks survive the rebuild.
     trackBarTie(refs, bar, at, o.label || "Exercise", list.length, instant);
     updateStageHud(refs);
-    hideStageAuditor(refs, true);
+    syncStageAuditor(refs, list, at);
     drawStage(refs);
     return { states };
   }
@@ -1366,22 +1365,25 @@ export function showStageAuditor(refs, ev) {
   if (hud.audNote) hud.audNote.textContent = String(card.rationale || "").slice(0, 140);
   hud.aud.className = card.word === "justified" ? "show" : "show bad";
   relayoutStage(refs);
-  if (refs.audTimer) clearTimeout(refs.audTimer);
-  refs.audTimer = setTimeout(() => hideStageAuditor(refs), 4200);
 }
 
 export function hideStageAuditor(refs, silent) {
   if (!refs) return;
-  if (refs.audTimer) {
-    clearTimeout(refs.audTimer);
-    refs.audTimer = 0;
-  }
-  if (refs.hud.aud && refs.hud.aud.className !== "") {
+  if (refs.hud && refs.hud.aud && refs.hud.aud.className !== "") {
     refs.hud.aud.className = "";
     if (!silent) {
       relayoutStage(refs);
     }
   }
+}
+
+// Verdict card from the cursor: the most recent auditor event at or
+// before the cursor stays visible across pause and scrub, and clears
+// only when the cursor moves before it.
+function syncStageAuditor(refs, events, cursor) {
+  const found = latestAuditorEvent(events, cursor);
+  if (found) showStageAuditor(refs, found);
+  else hideStageAuditor(refs, true);
 }
 
 export function flashStageHost(refs, host) {
@@ -1420,10 +1422,6 @@ export function cancelStage(refs) {
   refs.surge = { red: 0, blue: 0 };
   refs.knock = { red: 0, blue: 0 };
   refs.charge = null;
-  if (refs.audTimer) {
-    clearTimeout(refs.audTimer);
-    refs.audTimer = 0;
-  }
   if (refs.capTimer) {
     clearTimeout(refs.capTimer);
     refs.capTimer = 0;
