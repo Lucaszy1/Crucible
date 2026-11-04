@@ -7,13 +7,13 @@ Crucible runs containment exercises on simulated company networks. One side prob
 Theme: Push the Frontier (software and security)
 Track: Indie (solo)
 
-Demo video: [DEMO VIDEO LINK]
-X post: [X POST LINK]
-Live replay site: [LIVE REPLAY SITE LINK]
+Demo video: [demo video](https://youtu.be/PziTP3ynvsg)
+X post: [X post](https://x.com/Edgar_Garfunkel/status/2117783671164088626)
+Live replay site: [live replay site](https://lucaszy1.github.io/Crucible/site/)
 
 ## Try it
 
-Static replay site: [LIVE REPLAY SITE LINK] (no install, no keys, works from static hosting).
+Static replay site: [live replay site](https://lucaszy1.github.io/Crucible/site/) (no install, no keys, works from static hosting).
 
 Run locally:
 
@@ -249,14 +249,14 @@ Limit: one run against a stochastic intruder concludes nothing general; check th
 
 ## Demo
 
-- Demo video: [DEMO VIDEO LINK]
-- X post: [X POST LINK]
-- Live replay site: [LIVE REPLAY SITE LINK]
+- Demo video: [demo video](https://youtu.be/PziTP3ynvsg)
+- X post: [X post](https://x.com/Edgar_Garfunkel/status/2117783671164088626)
+- Live replay site: [live replay site](https://lucaszy1.github.io/Crucible/site/)
 - Screenshots: [opening](dashboard/screenshots/opening.png), [lobby](dashboard/screenshots/lobby.png), [mid-exercise](dashboard/screenshots/mid-exercise.png), [end-held](dashboard/screenshots/end-held.png).
 
 ## What was built during the hackathon
 
-From git history: 338 commits, Oct 26 11:34 PT (initial commit) through Nov 2 (latest at time of writing), all inside the event window so far. Per-day counts use author dates in PT: 123 on Oct 26, 128 on Oct 27, 67 on Oct 28, 18 on Oct 29, 1 on Nov 1, 1 on Nov 2. Every item below maps to commits in this repo between those timestamps; verify with `git log --format=%ad --date=short | sort | uniq -c` and `git log --reverse --format="%ad %s" --date=iso`.
+From git history: 341 commits, Oct 26 11:34 PT (initial commit) through Nov 3 (latest at time of writing), all inside the event window so far. Per-day counts use author dates in PT: 123 on Oct 26, 128 on Oct 27, 67 on Oct 28, 18 on Oct 29, 1 on Nov 1, 1 on Nov 2, 3 on Nov 3. Every item below maps to commits in this repo between those timestamps; verify with `git log --format=%ad --date=short | sort | uniq -c` and `git log --reverse --format="%ad %s" --date=iso`.
 
 Oct 26, 123 commits. Repo skeleton, PRD and build spec, model client with cache and spend guard, Docker sandbox growing from 3 to 4 toy hosts (web, app, db, workstation), allowlisted tools, event schema, orchestrator turn loop and scoring, scripted baselines, model agents with tool calling, batch runner, API backend plus dashboard v1, auditor with live judging and an eval harness, referee with playbook memory and campaigns, then the contamination diagnosis and the per-episode log scoping fix.
 
@@ -270,7 +270,9 @@ Nov 1, 1 commit. Sensors ablation report section with the model-red sensors-on v
 
 Nov 2, 1 commit. Sensors ablation results in the docs: regenerated report with the gen-9015 rerun note and archive-aware token scoping, writeup and README updates, rebuilt static export.
 
-TODO: confirm with the organizers that work from Oct 26 11:34 PT counts as inside the event window before submitting. The history side is verified: the initial commit is the earliest timestamp in the repo, so every listed item is Oct 26 11:34 PT or later.
+Nov 3, 3 commits. Auditor card kept visible when paused or scrubbing; static replay site rebuilt; README final pass with demo, post, and replay site links.
+
+The history side is verified: the initial commit is the earliest timestamp in the repo, so every listed item is Oct 26 11:34 PT or later.
 
 ## Responsible design
 

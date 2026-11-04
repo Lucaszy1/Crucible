@@ -2,9 +2,9 @@
 
 | Item | Owner | Status |
 |---|---|---|
-| Demo video link (README + form) | me | Open: record, publish, replace [DEMO VIDEO LINK] with the link |
-| X post link (README + form) | me | Open: publish, replace [X POST LINK] with the link |
-| Live replay site link (README + form) | me | Open: publish, replace [LIVE REPLAY SITE LINK] with the link |
+| Demo video link (README + form) | me | Done: https://youtu.be/PziTP3ynvsg |
+| X post link (README + form) | me | Done: https://x.com/Edgar_Garfunkel/status/2117783671164088626 |
+| Live replay site link (README + form) | me | Done: https://lucaszy1.github.io/Crucible/site/ |
 | Screenshots (README Demo) | Muse | Done: linked to `dashboard/screenshots/` files |
 | Team member (name/handle) | me | Open: add the member, fill the form Team field |
 
@@ -23,9 +23,9 @@ night of Nov 3 so Nov 4 is buffer for form or video fixes.
   `dashboard/screenshots/` (opening, lobby, mid-exercise, end-held).
 - [x] README "What was built" updated to real history counts (313
   commits: 123 Oct 26, 128 Oct 27, 62 Oct 28, author dates PT) with
-  a verify command. The history side of the Oct 26 start TODO is
-  resolved (initial commit is the earliest timestamp); confirming
-  the window with the organizers stays a README TODO.
+  a verify command. The history side of the Oct 26 start question is
+  resolved (initial commit is the earliest timestamp); the README
+  now keeps only the verified-history sentence.
 - [x] Link art provenance from the README models table:
   `dashboard/assets/art/PROVENANCE.md` (all dashboard art is
   muse-image-1.0 generated with prompts on file).
@@ -68,9 +68,9 @@ Fill from the README so the form and repo agree:
 - One-line pitch: Simulated range where AI defenders practice containment judgment, audited and replayable.
 - Theme: Push the Frontier (software and security)
 - Repo URL: https://github.com/Lucaszy1/Crucible
-- Demo video URL: [DEMO VIDEO LINK]
-- X post URL: [X POST LINK]
-- Live replay site URL: [LIVE REPLAY SITE LINK]
+- Demo video URL: https://youtu.be/PziTP3ynvsg
+- X post URL: https://x.com/Edgar_Garfunkel/status/2117783671164088626
+- Live replay site URL: https://lucaszy1.github.io/Crucible/site/
 - Track: Indie (solo)
 - Uses open weights: yes (Muse Spark Open blue on Baseten)
 - Team: ___ (solo + added member)
